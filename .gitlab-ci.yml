@@ -1,0 +1,45 @@
+stages:
+  - validation
+
+include:
+  template: Workflows/Branch-Pipelines.gitlab-ci.yml
+
+.validation_job:
+  stage: validation
+  artifacts:
+    name: validation-results
+    when: always
+  tags:
+    - public-runner-docker
+
+lint_bash_scripts:
+  extends: .validation_job
+  image: koalaman/shellcheck-alpine:latest
+  before_script:
+    - apk add xmlstarlet
+  script:
+    - shellcheck -f checkstyle scripts/bash/*.sh > shellcheck-checkstyle-result.xml 
+  after_script:
+    - xmlstarlet tr misc/checkstyle2junit.xslt shellcheck-checkstyle-result.xml > shellcheck-junit-result.xml
+  artifacts:
+    paths: 
+     - shellcheck-checkstyle-result.xml
+     - shellcheck-junit-result.xml
+    reports:
+      junit: shellcheck-junit-result.xml
+
+lint_ci_templates:
+  extends: .validation_job
+  image: python:latest
+  before_script:
+    - pip install yamllint-junit
+  script:
+    - yamllint --format parsable templates/ > yamllint-parsable-result.txt
+  after_script:
+    - yamllint-junit -o yamllint-junit-result.xml yamllint-parsable-result.txt
+  artifacts:
+    paths: 
+     - yamllint-parsable-result.txt
+     - yamllint-junit-result.xml
+    reports:
+      junit: yamllint-junit-result.xml

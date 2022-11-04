@@ -1,0 +1,56 @@
+.docker_image_builder_job:
+  variables:
+    DOCKER_BUILDKIT: 1
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+  image: docker:20.10.10
+  interruptible: true
+  services:
+    - docker:20.10.10-dind
+  before_script:
+    - apk update && apk add bash git ca-certificates curl
+
+.docker_image_cleanup_job:
+  image: alpine:3.16
+  interruptible: true
+  before_script:
+    - apk update && apk add bash curl jq
+  variables:
+    # Interface variables (to be overrided by derived jobs)
+    SUBMODULE_DIR: "$CI_PROJECT_DIR"
+    REGISTRY: $CI_REGISTRY_IMAGE
+    REGISTRY_USER: ""
+    REGISTRY_PASS: ""
+    IMAGE_PATH: ""
+    IMAGE_TAG: ""
+    SCRIPTS_PATH: "$SUBMODULE_DIR/scripts/bash"
+  script:
+    - echo "Attempting to cleanup an image $IMAGE_PATH using tag $IMAGE_TAG from $REGISTRY"
+    - "$SCRIPTS_PATH/delete-image.sh"
+
+  when: always
+
+.prepare_data_5m_image:
+  extends: .docker_image_builder_job
+  variables:
+    SUBMODULE_DIR: "$CI_PROJECT_DIR"
+    REGISTRY_USER: "$CI_IMG_BUILDER_USER"
+    REGISTRY_PASS: "$CI_IMG_BUILDER_PASSWORD"
+    SCRIPTS_PATH: "$SUBMODULE_DIR/scripts/bash"
+  artifacts:
+    reports:
+      dotenv: docker_image_name.env
+    paths:
+      - ./hived-mainnet-binaries/*
+    expire_in: 6 hours
+
+.prepare_hived_data_5m_image:
+  extends: .prepare_data_5m_image
+  script:
+    - $SCRIPTS_PATH/get_image4submodule.sh "$SUBMODULE_DIR" registry.gitlab.syncad.com/hive/hive/ "HIVED_IMAGE_NAME" "$REGISTRY_USER" "$REGISTRY_PASS" "hived-mainnet-binaries"
+    - ls -la ./hived-mainnet-binaries/*
+
+.prepare_haf_data_5m_image:
+  extends: .prepare_data_5m_image
+  script:
+    - $SCRIPTS_PATH/get_image4submodule.sh "$SUBMODULE_DIR" registry.gitlab.syncad.com/hive/haf/ "HAF_IMAGE_NAME" "$REGISTRY_USER" "$REGISTRY_PASS" "hived-mainnet-binaries"
