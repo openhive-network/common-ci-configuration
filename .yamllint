@@ -1,4 +1,4 @@
 extends: default
 rules:
-  line-length: disable
+  line-length: enable
   document-start: disable
