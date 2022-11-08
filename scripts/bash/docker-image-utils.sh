@@ -86,4 +86,3 @@ extract_files_from_image() {
 EOF
 
 }
-
