@@ -3,23 +3,26 @@
 
 set -euo pipefail
 
-SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+SCRIPTPATH=$(realpath "$0")
+SCRIPTDIR=$(dirname "$SCRIPTPATH")
 
 IMGNAME="data"
 
-source "$SCRIPTPATH/docker_image_utils.sh"
+source "$SCRIPTDIR/docker-image-utils.sh"
 
-submodule_path=${1:?"Missing arg 1 for submodule path variable"}
+SUBMODULE_PATH=${1:?"Missing argument #1: submodule path"}
 shift
-REGISTRY=${1:?"Missing arg 2 for REGISTRY variable"}
+REGISTRY=${1:?"Missing argument #2: image registry"}
 shift
-DOTENV_VAR_NAME=${1:?"Missing name of dot-env variable"}
+DOTENV_VAR_NAME=${1:?"Missing argument #3: dot-env name"}
 shift
-REGISTRY_USER=${1:?"Missing arg 4 for REGISTRY_USER variable"}
+REGISTRY_USER=${1:?"Missing argument #4: registry user"}
 shift
-REGISTRY_PASSWORD=${1:?"Missing arg 5 for REGISTRY_PASSWORD variable"}
+REGISTRY_PASSWORD=${1:?"Missing argument #5: registry password"}
 shift
-BINARY_CACHE_PATH=${1:?"Missing arg 6 specific to binary cache path"}
+BINARY_CACHE_PATH=${1:?"Missing argument #6: binary cache path"}
+shift
+REPOSITORY=${1:?"Missing argument #7: repository URL"}
 shift
 
 retrieve_submodule_commit () {
@@ -32,9 +35,9 @@ retrieve_submodule_commit () {
   echo "$commit"
 }
 
-echo "Attempting to get commit for: $submodule_path"
+echo "Attempting to get commit for: $SUBMODULE_PATH"
 
-commit=$( retrieve_submodule_commit "${submodule_path}" )
+commit=$( retrieve_submodule_commit "${SUBMODULE_PATH}" )
 
 img=$( build_image_name $IMGNAME "$commit" "$REGISTRY" )
 img_path=$( build_image_registry_path $IMGNAME "$commit" "$REGISTRY" )
@@ -49,11 +52,11 @@ docker_image_exists "$IMGNAME" "$commit" "$REGISTRY" image_exists
 if [ "$image_exists" -eq 1 ];
 then
   echo "Image already exists..."
-  "$SCRIPTPATH/export-binaries.sh" "${img}" "${BINARY_CACHE_PATH}"
+  "$SCRIPTDIR/export-binaries.sh" "${img}" "${BINARY_CACHE_PATH}"
 else
   # Here continue an image build.
   echo "${img} image is missing. Building it..."
-  "$SCRIPTPATH/build_data4commit.sh" "$commit" "$REGISTRY" --export-binaries="${BINARY_CACHE_PATH}"
+  "$SCRIPTDIR/build-data4commit.sh" "$commit" "$REGISTRY" "$REPOSITORY" --export-binaries="${BINARY_CACHE_PATH}"
   time docker push "$img"
 fi
 

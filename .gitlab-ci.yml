@@ -1,8 +1,10 @@
 stages:
   - validation
+  - build
 
 include:
-  template: Workflows/Branch-Pipelines.gitlab-ci.yml
+  - template: Workflows/Branch-Pipelines.gitlab-ci.yml
+  - local: templates/data_image_jobs.gitlab-ci.yml
 
 .validation_job:
   stage: validation
@@ -43,3 +45,54 @@ lint_ci_templates:
      - yamllint-junit-result.xml
     reports:
       junit: yamllint-junit-result.xml
+
+lint_python_scripts:
+  extends: .validation_job
+  image: python:latest
+  before_script:
+    - pip install pylint_junit
+  script:
+    - pylint --output-format=text,pylint_junit.JUnitReporter:pylint-junit-result.xml scripts/python/*.py
+  artifacts:
+    paths: 
+     - pylint-junit-result.xml
+    reports:
+      junit: pylint-junit-result.xml
+
+.build_docker_image:
+  extends: .docker_image_builder_job
+  stage: build
+  variables:
+    BUILD_TARGET: ""
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - |
+      if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]]; then
+        echo "Running on default branch '$CI_DEFAULT_BRANCH': tag = 'latest'"
+        docker build --target $BUILD_TARGET --pull -t "$CI_REGISTRY_IMAGE/$BUILD_TARGET:latest" .
+        docker push "$CI_REGISTRY_IMAGE/$BUILD_TARGET:latest"
+      fi
+      if [[ "$CI_COMMIT_BRANCH" == "main" ]]; then
+        echo "Running on main branch: tag = 'main-latest'"
+        docker build --target $BUILD_TARGET --pull -t "$CI_REGISTRY_IMAGE/$BUILD_TARGET:main-latest" .
+        docker push "$CI_REGISTRY_IMAGE/$BUILD_TARGET:main-latest"
+      fi
+      tag=":$CI_COMMIT_REF_SLUG"
+      echo "Running on branch '$CI_COMMIT_BRANCH': tag = $tag"
+      docker build --target $BUILD_TARGET --pull -t "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}" .
+      docker push "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}"
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile
+
+build_docker_builder_image:
+  extends: .build_docker_image
+  variables:
+    BUILD_TARGET: "docker-builder"
+
+build_image_remover_image:
+  extends: .build_docker_image
+  variables:
+    BUILD_TARGET: "image-remover"

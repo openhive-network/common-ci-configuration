@@ -7,36 +7,41 @@
   interruptible: true
   services:
     - docker:20.10.10-dind
-  before_script:
-    - apk update && apk add bash git ca-certificates curl
 
 .docker_image_cleanup_job:
-  image: alpine:3.16
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/image-remover:latest
   interruptible: true
-  before_script:
-    - apk update && apk add bash curl jq
   variables:
-    # Interface variables (to be overrided by derived jobs)
-    SUBMODULE_DIR: "$CI_PROJECT_DIR"
     REGISTRY: $CI_REGISTRY_IMAGE
-    REGISTRY_USER: ""
     REGISTRY_PASS: ""
     IMAGE_PATH: ""
     IMAGE_TAG: ""
-    SCRIPTS_PATH: "$SUBMODULE_DIR/scripts/bash"
   script:
     - echo "Attempting to cleanup an image $IMAGE_PATH using tag $IMAGE_TAG from $REGISTRY"
-    - "$SCRIPTS_PATH/delete-image.sh"
+    - python delete-image.py "$REGISTRY_PASS" "$CI_PROJECT_ID" "$IMAGE_PATH" "$IMAGE_TAG"
 
   when: always
 
 .prepare_data_5m_image:
   extends: .docker_image_builder_job
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:latest
   variables:
-    SUBMODULE_DIR: "$CI_PROJECT_DIR"
+    DOTENV_NAME: ""
     REGISTRY_USER: "$CI_IMG_BUILDER_USER"
     REGISTRY_PASS: "$CI_IMG_BUILDER_PASSWORD"
-    SCRIPTS_PATH: "$SUBMODULE_DIR/scripts/bash"
+    REGISTRY_URL: ""
+    REPOSITORY_URL: ""
+    SUBDIRECTORY: ""
+  script:
+    - |
+      get-image4submodule.sh "$SUBDIRECTORY" \
+        "$REGISTRY_URL" \
+        "$DOTENV_NAME" \
+        "$REGISTRY_USER" \
+        "$REGISTRY_PASS" \
+        "hived-mainnet-binaries" \
+        "$REPOSITORY_URL"
+    - ls -la ./hived-mainnet-binaries/*
   artifacts:
     reports:
       dotenv: docker_image_name.env
@@ -46,11 +51,17 @@
 
 .prepare_hived_data_5m_image:
   extends: .prepare_data_5m_image
-  script:
-    - $SCRIPTS_PATH/get_image4submodule.sh "$SUBMODULE_DIR" registry.gitlab.syncad.com/hive/hive/ "HIVED_IMAGE_NAME" "$REGISTRY_USER" "$REGISTRY_PASS" "hived-mainnet-binaries"
-    - ls -la ./hived-mainnet-binaries/*
+  variables:
+    DOTENV_NAME: "HIVED_IMAGE_NAME"
+    REGISTRY_URL: "registry.gitlab.syncad.com/hive/hive/"
+    REPOSITORY_URL: "https://gitlab.syncad.com/hive/hive.git"
+    SUBDIRECTORY: "hive"
+  
 
 .prepare_haf_data_5m_image:
   extends: .prepare_data_5m_image
-  script:
-    - $SCRIPTS_PATH/get_image4submodule.sh "$SUBMODULE_DIR" registry.gitlab.syncad.com/hive/haf/ "HAF_IMAGE_NAME" "$REGISTRY_USER" "$REGISTRY_PASS" "hived-mainnet-binaries"
+  variables:
+    DOTENV_NAME: "$HAF_IMAGE_NAME"
+    REGISTRY_URL: "registry.gitlab.syncad.com/hive/haf/"
+    REPOSITORY_URL: "https://gitlab.syncad.com/hive/haf.git"
+    SUBDIRECTORY: "haf"
