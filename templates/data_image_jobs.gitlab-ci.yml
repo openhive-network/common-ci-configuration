@@ -55,8 +55,7 @@
     DOTENV_NAME: "HIVED_IMAGE_NAME"
     REGISTRY_URL: "registry.gitlab.syncad.com/hive/hive/"
     REPOSITORY_URL: "https://gitlab.syncad.com/hive/hive.git"
-    SUBDIRECTORY: "hive"
-  
+    SUBDIRECTORY: "hive"  
 
 .prepare_haf_data_5m_image:
   extends: .prepare_data_5m_image
