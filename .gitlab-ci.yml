@@ -87,6 +87,8 @@ lint_python_scripts:
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile
+  tags:
+    - public-runner-docker
 
 build_docker_builder_image:
   extends: .build_docker_image
