@@ -52,7 +52,7 @@ lint_python_scripts:
   before_script:
     - pip install pylint_junit
   script:
-    - pip install -r scripts\python\requirements.txt
+    - pip install -r scripts/python/requirements.txt
     - pylint --output-format=text,pylint_junit.JUnitReporter:pylint-junit-result.xml scripts/python/*.py
   artifacts:
     paths: 
