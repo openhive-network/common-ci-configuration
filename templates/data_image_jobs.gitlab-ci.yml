@@ -60,7 +60,7 @@
 .prepare_haf_data_5m_image:
   extends: .prepare_data_5m_image
   variables:
-    DOTENV_NAME: "$HAF_IMAGE_NAME"
+    DOTENV_NAME: "HAF_IMAGE_NAME"
     REGISTRY_URL: "registry.gitlab.syncad.com/hive/haf/"
     REPOSITORY_URL: "https://gitlab.syncad.com/hive/haf.git"
     SUBDIRECTORY: "haf"
