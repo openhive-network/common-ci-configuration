@@ -10,17 +10,13 @@ source "$SCRIPTDIR/common.sh"
 BUILD_IMAGE_TAG=""
 REGISTRY=""
 SRCROOTDIR=""
-
 IMAGE_TAG_PREFIX=""
-
-BLOCK_LOG_SUFFIX=""
-
 BUILD_HIVE_TESTNET=OFF
 HIVE_CONVERTER_BUILD=OFF
 
 
 print_help () {
-    echo "Usage: $0 <image_tag> <src_dir> <registry_url> [<block_log_img_suffix>] [OPTION[=VALUE]]..."
+    echo "Usage: $0 <image_tag> <src_dir> <registry_url> [OPTION[=VALUE]]..."
     echo
     echo "Allows to build docker image containing Hived installation"
     echo "OPTIONS:"
@@ -76,9 +72,6 @@ while [ $# -gt 0 ]; do
         elif [ -z "$REGISTRY" ];
         then
           REGISTRY=${1}
-        elif [ -z "$BLOCK_LOG_SUFFIX" ];
-        then
-          BLOCK_LOG_SUFFIX="${1}"
         else
           echo "ERROR: '$1' is not a valid option/positional argument"
           echo
@@ -99,34 +92,30 @@ done
 
 echo "Moving into source root directory: ${SRCROOTDIR}"
 pushd "$SRCROOTDIR" || exit 1
-pwd
 
 export DOCKER_BUILDKIT=1
 
 docker build --target=base_instance \
-  --build-arg BLOCK_LOG_SUFFIX="${BLOCK_LOG_SUFFIX}" \
   --build-arg CI_REGISTRY_IMAGE="$REGISTRY" \
   --build-arg BUILD_HIVE_TESTNET=$BUILD_HIVE_TESTNET \
   --build-arg HIVE_CONVERTER_BUILD=$HIVE_CONVERTER_BUILD \
   --build-arg BUILD_IMAGE_TAG="$BUILD_IMAGE_TAG" \
-  -t "${REGISTRY}base_instance${BLOCK_LOG_SUFFIX}:base_instance-${BUILD_IMAGE_TAG}" \
+  -t "${REGISTRY}base_instance:base_instance-${BUILD_IMAGE_TAG}" \
   -f Dockerfile .
 
 # Build the image containing only binaries and be ready to start running hived instance, operating on mounted volumes pointing instance datadir and shm_dir
 docker build --target=instance \
-  --build-arg BLOCK_LOG_SUFFIX="${BLOCK_LOG_SUFFIX}" \
   --build-arg CI_REGISTRY_IMAGE="$REGISTRY" \
   --build-arg BUILD_HIVE_TESTNET=$BUILD_HIVE_TESTNET \
   --build-arg HIVE_CONVERTER_BUILD=$HIVE_CONVERTER_BUILD \
   --build-arg BUILD_IMAGE_TAG="$BUILD_IMAGE_TAG" \
-  -t "${REGISTRY}${IMAGE_TAG_PREFIX}instance${BLOCK_LOG_SUFFIX}:instance-${BUILD_IMAGE_TAG}" \
+  -t "${REGISTRY}${IMAGE_TAG_PREFIX}instance:instance-${BUILD_IMAGE_TAG}" \
   -f Dockerfile .
-
 
 popd || exit 1
 
 if [ -n "${EXPORT_PATH}" ] ;
 then
-  "$SCRIPTDIR/export-binaries.sh" "${REGISTRY}${IMAGE_TAG_PREFIX}instance${BLOCK_LOG_SUFFIX}:instance-${BUILD_IMAGE_TAG}" "${EXPORT_PATH}"
+  "$SCRIPTDIR/export-binaries.sh" "${REGISTRY}${IMAGE_TAG_PREFIX}instance:instance-${BUILD_IMAGE_TAG}" "${EXPORT_PATH}"
 fi
 
