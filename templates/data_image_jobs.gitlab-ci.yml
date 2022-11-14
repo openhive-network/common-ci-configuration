@@ -18,7 +18,7 @@
     IMAGE_TAG: ""
   script:
     - echo "Attempting to cleanup an image $IMAGE_PATH using tag $IMAGE_TAG from $REGISTRY"
-    - python delete-image.py "$REGISTRY_PASS" "$CI_PROJECT_ID" "$IMAGE_PATH" "$IMAGE_TAG"
+    - python /delete-image.py "$REGISTRY_PASS" "$CI_PROJECT_ID" "$IMAGE_PATH" "$IMAGE_TAG"
 
   when: always
 

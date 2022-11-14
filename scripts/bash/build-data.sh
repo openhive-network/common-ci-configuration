@@ -17,14 +17,20 @@ shift
 # Supplement a registry path by trailing slash (if needed)
 [[ "${REGISTRY}" != */ ]] && REGISTRY="${REGISTRY}/"
 
-BLOCK_LOG_SUFFIX="-5m"
+BUILD_HIVE_TESTNET=OFF
+HIVE_CONVERTER_BUILD=OFF
 
-"$SCRIPTDIR/build-instance.sh" "${BUILD_IMAGE_TAG}" "${SRCROOTDIR}" "${REGISTRY}" "${BLOCK_LOG_SUFFIX}" "$@"
+"$SCRIPTDIR/build-instance.sh" "${BUILD_IMAGE_TAG}" "${SRCROOTDIR}" "${REGISTRY}" "$@"
+
+echo "Instance image built. Attempting to build a data image basing on it..."
 
 pushd "$SRCROOTDIR" ||exit 1 
 
 docker build --target=data \
-  --build-arg CI_REGISTRY_IMAGE="$REGISTRY" --build-arg BLOCK_LOG_SUFFIX="-5m" \
-  --build-arg BUILD_IMAGE_TAG="$BUILD_IMAGE_TAG" -t "${REGISTRY}data:data-${BUILD_IMAGE_TAG}" -f Dockerfile .
+  --build-arg CI_REGISTRY_IMAGE="$REGISTRY" \
+  --build-arg BUILD_HIVE_TESTNET=$BUILD_HIVE_TESTNET \
+  --build-arg HIVE_CONVERTER_BUILD=$HIVE_CONVERTER_BUILD \
+  --build-arg BUILD_IMAGE_TAG="$BUILD_IMAGE_TAG" \
+  -t "${REGISTRY}data:data-${BUILD_IMAGE_TAG}" -f Dockerfile .
 
 popd || exit 1
