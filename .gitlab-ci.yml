@@ -1,6 +1,8 @@
 stages:
   - validation
   - build
+  - example-build
+  - example-cleanup
 
 include:
   - template: Workflows/Branch-Pipelines.gitlab-ci.yml
@@ -74,7 +76,7 @@ lint_python_scripts:
         echo "Running on default branch '$CI_DEFAULT_BRANCH': tag = 'latest'"
         tag=":latest"
       else
-        echo "Running on branch '$CI_COMMIT_BRANCH': tag = $tag"
+        echo "Running on branch '$CI_COMMIT_BRANCH': tag = $CI_COMMIT_REF_SLUG"
         tag=":$CI_COMMIT_REF_SLUG" 
       fi
     - |
@@ -99,3 +101,63 @@ build_image_remover_image:
   extends: .build_docker_image
   variables:
     BUILD_TARGET: "image-remover"
+
+prepare_example_hived_data_5m_image:
+  extends: .prepare_hived_data_5m_image
+  stage: example-build
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:$CI_COMMIT_SHA
+  variables:
+    REGISTRY_USER: "$CI_REGISTRY_USER"
+    REGISTRY_PASS: "$CI_REGISTRY_PASSWORD"
+    REGISTRY_URL: "registry.gitlab.syncad.com/hive/common-ci-configuration/hive/"
+  before_script:
+    - git clone $REPOSITORY_URL
+  after_script:
+    - cat docker_image_name.env
+  when: manual
+  tags:
+    - public-runner-docker
+
+prepare_example_haf_data_5m_image:
+  extends: .prepare_haf_data_5m_image
+  stage: example-build
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:$CI_COMMIT_SHA
+  variables:
+    REGISTRY_USER: "$CI_REGISTRY_USER"
+    REGISTRY_PASS: "$CI_REGISTRY_PASSWORD"
+    REGISTRY_URL: "registry.gitlab.syncad.com/hive/common-ci-configuration/haf/"
+  before_script:
+    - git clone $REPOSITORY_URL
+  after_script:
+    - cat docker_image_name.env
+  when: manual
+  tags:
+    - public-runner-docker
+
+example_hived_data_image_cleanup:
+  extends: .docker_image_cleanup_job
+  stage: example-cleanup
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/image-remover:$CI_COMMIT_SHA
+  variables:
+    REGISTRY_PASS: "$REGISTRY_PASS"
+    IMAGE_PATH: $HIVED_IMAGE_NAME_REGISTRY_PATH
+    IMAGE_TAG: $HIVED_IMAGE_NAME_REGISTRY_TAG
+  needs:
+    - prepare_example_hived_data_5m_image
+  when: manual
+  tags:
+    - public-runner-docker
+
+example_haf_data_image_cleanup:
+  extends: .docker_image_cleanup_job
+  stage: example-cleanup
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/image-remover:$CI_COMMIT_SHA
+  variables:
+    REGISTRY_PASS: "$REGISTRY_PASS"
+    IMAGE_PATH: $HAF_IMAGE_NAME_REGISTRY_PATH
+    IMAGE_TAG: $HAF_IMAGE_NAME_REGISTRY_TAG
+  needs:
+    - prepare_example_haf_data_5m_image
+  when: manual
+  tags:
+    - public-runner-docker
