@@ -111,7 +111,7 @@ prepare_example_hived_data_5m_image:
     REGISTRY_PASS: "$CI_REGISTRY_PASSWORD"
     REGISTRY_URL: "registry.gitlab.syncad.com/hive/common-ci-configuration/hive/"
   before_script:
-    - git clone $REPOSITORY_URL
+    - git clone --branch develop $REPOSITORY_URL
   after_script:
     - cat docker_image_name.env
   when: manual
@@ -127,7 +127,7 @@ prepare_example_haf_data_5m_image:
     REGISTRY_PASS: "$CI_REGISTRY_PASSWORD"
     REGISTRY_URL: "registry.gitlab.syncad.com/hive/common-ci-configuration/haf/"
   before_script:
-    - git clone $REPOSITORY_URL
+    - git clone --branch develop $REPOSITORY_URL
   after_script:
     - cat docker_image_name.env
   when: manual
