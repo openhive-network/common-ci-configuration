@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+echo -e "\e[0Ksection_start:$(date +%s):binaries_export[collapsed=true]\r\e[0KExporting binaries..."
 IMAGE_TAGGED_NAME=${1:-"Missing image name"}
 EXPORT_PATH=${2:-"Missing export target directory"}
 
@@ -13,3 +14,4 @@ docker build -o "${EXPORT_PATH}" - << EOF
     FROM scratch
     COPY --from=${IMAGE_TAGGED_NAME} /home/hived/bin/ /
 EOF
+echo -e "\e[0Ksection_end:$(date +%s):binaries_export\r\e[0K"

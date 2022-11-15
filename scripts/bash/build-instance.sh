@@ -28,6 +28,7 @@ print_help () {
 
 EXPORT_PATH=""
 
+echo -e "\e[0Ksection_start:$(date +%s):input_processing[collapsed=true]\r\e[0KChecking build-instance.sh script input..."
 while [ $# -gt 0 ]; do
   case "$1" in
     --network-type=*)
@@ -86,7 +87,9 @@ done
 [[ -z "$BUILD_IMAGE_TAG" ]] && echo "Missing argument #1: build image tag." && exit 1
 [[ -z "$SRCROOTDIR" ]] && echo "Missing argument #2: source directory. Exiting." && exit 1
 [[ -z "$REGISTRY" ]] && echo "Missing argument #3: target image registry. Exiting." && exit 1
+echo -e "\e[0Ksection_end:$(date +%s):input_processing\r\e[0K"
 
+echo -e "\e[0Ksection_start:$(date +%s):base_instance_image_docker_build[collapsed=true]\r\e[0KBuilding base instance image..."
 # Supplement a registry path by trailing slash (if needed)
 [[ "${REGISTRY}" != */ ]] && REGISTRY="${REGISTRY}/"
 
@@ -102,7 +105,9 @@ docker build --target=base_instance \
   --build-arg BUILD_IMAGE_TAG="$BUILD_IMAGE_TAG" \
   -t "${REGISTRY}base_instance:base_instance-${BUILD_IMAGE_TAG}" \
   -f Dockerfile .
+echo -e "\e[0Ksection_end:$(date +%s):base_instance_image_docker_build\r\e[0K"
 
+echo -e "\e[0Ksection_start:$(date +%s):instance_image_docker_build[collapsed=true]\r\e[0KBuilding instance image..."
 # Build the image containing only binaries and be ready to start running hived instance, operating on mounted volumes pointing instance datadir and shm_dir
 docker build --target=instance \
   --build-arg CI_REGISTRY_IMAGE="$REGISTRY" \
@@ -113,6 +118,8 @@ docker build --target=instance \
   -f Dockerfile .
 
 popd || exit 1
+
+echo -e "\e[0Ksection_end:$(date +%s):instance_image_docker_build\r\e[0K"
 
 if [ -n "${EXPORT_PATH}" ] ;
 then
