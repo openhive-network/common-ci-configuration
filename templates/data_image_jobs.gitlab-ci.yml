@@ -1,15 +1,21 @@
+variables:
+  DOCKER_BUILDER_TAG: "latest"
+  DOCKER_DIND_TAG: "latest"
+  IMAGE_REMOVER_TAG: "latest"
+
 .docker_image_builder_job:
   variables:
     DOCKER_BUILDKIT: 1
     DOCKER_DRIVER: overlay2
     DOCKER_TLS_CERTDIR: "/certs"
-  image: docker:20.10.10
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:${DOCKER_BUILDER_TAG}
   interruptible: true
   services:
-    - docker:20.10.10-dind
+    - name: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-dind:${DOCKER_DIND_TAG}
+      alias: docker
 
 .docker_image_cleanup_job:
-  image: registry.gitlab.syncad.com/hive/common-ci-configuration/image-remover:latest
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/image-remover:${IMAGE_REMOVER_TAG}
   interruptible: true
   variables:
     REGISTRY: $CI_REGISTRY_IMAGE
@@ -24,7 +30,6 @@
 
 .prepare_data_5m_image:
   extends: .docker_image_builder_job
-  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:latest
   variables:
     DOTENV_NAME: ""
     REGISTRY_USER: "$CI_IMG_BUILDER_USER"
