@@ -1,5 +1,11 @@
+variables:
+  DOCKER_BUILDER_TAG: "$CI_COMMIT_SHA"
+  DOCKER_DIND_TAG: "$CI_COMMIT_SHA"
+  IMAGE_REMOVER_TAG: "$CI_COMMIT_SHA"
+
 stages:
   - validation
+  - pre-build
   - build
   - example-build
   - example-cleanup
@@ -64,14 +70,16 @@ lint_python_scripts:
 
 .build_docker_image:
   extends: .docker_image_builder_job
-  stage: build
   variables:
     BUILD_TARGET: ""
   before_script:
-    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
-  script:
-    - tag=""
     - |
+      echo -e "\e[0Ksection_start:$(date +%s):login[collapsed=true]\r\e[0KLogging to Docker registry..."
+      docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+      echo -e "\e[0Ksection_end:$(date +%s):login\r\e[0K"
+  script: 
+    - |
+      tag=""
       echo -e "\e[0Ksection_start:$(date +%s):tag[collapsed=true]\r\e[0KDetermining tag for the new image..."
       if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]]; then
         echo "Running on default branch '$CI_DEFAULT_BRANCH': tag = 'latest'"
@@ -81,41 +89,54 @@ lint_python_scripts:
         tag=":$CI_COMMIT_REF_SLUG" 
       fi
       echo -e "\e[0Ksection_end:$(date +%s):tag\r\e[0K"
-    - |
       echo -e "\e[0Ksection_start:$(date +%s):build[collapsed=true]\r\e[0KBuilding image "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}"..."
-      docker build --target $BUILD_TARGET --pull \
+      docker build --file "Dockerfile.$BUILD_TARGET" --pull \
         -t "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}" \
         -t "$CI_REGISTRY_IMAGE/$BUILD_TARGET:$CI_COMMIT_SHA" .
       echo -e "\e[0Ksection_end:$(date +%s):build\r\e[0K"
-    - |
       echo -e "\e[0Ksection_start:$(date +%s):push1[collapsed=true]\r\e[0KPushing image "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}"..."
       docker push "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}"
       echo -e "\e[0Ksection_end:$(date +%s):push1\r\e[0K"
-    - |
       echo -e "\e[0Ksection_start:$(date +%s):push2[collapsed=true]\r\e[0KPushing image "$CI_REGISTRY_IMAGE/$BUILD_TARGET:$CI_COMMIT_SHA"..."
       docker push "$CI_REGISTRY_IMAGE/$BUILD_TARGET:$CI_COMMIT_SHA"
       echo -e "\e[0Ksection_end:$(date +%s):push2\r\e[0K" 
   rules:
     - if: $CI_COMMIT_BRANCH
       exists:
-        - Dockerfile
+        - "Dockerfile.$BUILD_TARGET"
   tags:
     - public-runner-docker
 
+build_docker_dind_image:
+  stage: pre-build
+  image: docker:20.10.10
+  variables:
+    DOCKER_BUILDKIT: 1
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+    BUILD_TARGET: "docker-dind"
+  script:
+    - !reference [.build_docker_image, script]
+  rules:
+    - !reference [.build_docker_image, rules]
+  services:
+    - docker:20.10.10-dind
+
 build_docker_builder_image:
   extends: .build_docker_image
+  stage: build
   variables:
     BUILD_TARGET: "docker-builder"
 
 build_image_remover_image:
   extends: .build_docker_image
+  stage: build
   variables:
     BUILD_TARGET: "image-remover"
 
 prepare_example_hived_data_5m_image:
   extends: .prepare_hived_data_5m_image
   stage: example-build
-  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:$CI_COMMIT_SHA
   variables:
     REGISTRY_USER: "$CI_REGISTRY_USER"
     REGISTRY_PASS: "$CI_REGISTRY_PASSWORD"
@@ -131,7 +152,6 @@ prepare_example_hived_data_5m_image:
 prepare_example_haf_data_5m_image:
   extends: .prepare_haf_data_5m_image
   stage: example-build
-  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:$CI_COMMIT_SHA
   variables:
     REGISTRY_USER: "$CI_REGISTRY_USER"
     REGISTRY_PASS: "$CI_REGISTRY_PASSWORD"
@@ -147,7 +167,6 @@ prepare_example_haf_data_5m_image:
 example_hived_data_image_cleanup:
   extends: .docker_image_cleanup_job
   stage: example-cleanup
-  image: registry.gitlab.syncad.com/hive/common-ci-configuration/image-remover:$CI_COMMIT_SHA
   variables:
     REGISTRY_PASS: "$REGISTRY_PASS"
     IMAGE_PATH: $HIVED_IMAGE_NAME_REGISTRY_PATH
@@ -161,7 +180,6 @@ example_hived_data_image_cleanup:
 example_haf_data_image_cleanup:
   extends: .docker_image_cleanup_job
   stage: example-cleanup
-  image: registry.gitlab.syncad.com/hive/common-ci-configuration/image-remover:$CI_COMMIT_SHA
   variables:
     REGISTRY_PASS: "$REGISTRY_PASS"
     IMAGE_PATH: $HAF_IMAGE_NAME_REGISTRY_PATH
