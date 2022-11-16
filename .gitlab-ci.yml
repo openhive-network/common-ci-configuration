@@ -100,10 +100,6 @@ lint_python_scripts:
       echo -e "\e[0Ksection_start:$(date +%s):push2[collapsed=true]\r\e[0KPushing image "$CI_REGISTRY_IMAGE/$BUILD_TARGET:$CI_COMMIT_SHA"..."
       docker push "$CI_REGISTRY_IMAGE/$BUILD_TARGET:$CI_COMMIT_SHA"
       echo -e "\e[0Ksection_end:$(date +%s):push2\r\e[0K" 
-  rules:
-    - if: $CI_COMMIT_BRANCH
-      exists:
-        - "Dockerfile.$BUILD_TARGET"
   tags:
     - public-runner-docker
 
@@ -118,21 +114,33 @@ build_docker_dind_image:
   script:
     - !reference [.build_docker_image, script]
   rules:
-    - !reference [.build_docker_image, rules]
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.docker-dind
   services:
     - docker:20.10.10-dind
+  tags:
+    - public-runner-docker
 
 build_docker_builder_image:
   extends: .build_docker_image
   stage: build
   variables:
     BUILD_TARGET: "docker-builder"
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.docker-builder
 
 build_image_remover_image:
   extends: .build_docker_image
   stage: build
   variables:
     BUILD_TARGET: "image-remover"
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.image-remover
 
 prepare_example_hived_data_5m_image:
   extends: .prepare_hived_data_5m_image
