@@ -111,6 +111,8 @@ build_docker_dind_image:
     DOCKER_DRIVER: overlay2
     DOCKER_TLS_CERTDIR: "/certs"
     BUILD_TARGET: "docker-dind"
+  before_script:
+    - !reference [.build_docker_image, before_script]
   script:
     - !reference [.build_docker_image, script]
   rules:
