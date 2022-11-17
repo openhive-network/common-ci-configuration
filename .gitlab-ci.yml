@@ -101,6 +101,8 @@ lint_python_scripts:
       echo -e "\e[0Ksection_start:$(date +%s):push2[collapsed=true]\r\e[0KPushing image "$CI_REGISTRY_IMAGE/$BUILD_TARGET:$CI_COMMIT_SHA"..."
       docker push "$CI_REGISTRY_IMAGE/$BUILD_TARGET:$CI_COMMIT_SHA"
       echo -e "\e[0Ksection_end:$(date +%s):push2\r\e[0K" 
+  needs:
+    - build_docker_dind_image
   tags:
     - public-runner-docker
 
@@ -153,7 +155,8 @@ prepare_example_hived_data_5m_image:
     REGISTRY_PASS: "$CI_REGISTRY_PASSWORD"
     REGISTRY_URL: "registry.gitlab.syncad.com/hive/common-ci-configuration/hive/"
   before_script:
-    - git clone --branch develop $REPOSITORY_URL
+    - LOG_FILE=tmp.log source /usr/local/bin/common.sh
+    - do_clone_commit 9f39eae9ef35642445ae63e8c0a681f1376334ed $SUBDIRECTORY $REPOSITORY_URL 
   after_script:
     - cat docker_image_name.env
   when: manual
@@ -168,7 +171,8 @@ prepare_example_haf_data_5m_image:
     REGISTRY_PASS: "$CI_REGISTRY_PASSWORD"
     REGISTRY_URL: "registry.gitlab.syncad.com/hive/common-ci-configuration/haf/"
   before_script:
-    - git clone --branch develop $REPOSITORY_URL
+    - LOG_FILE=tmp.log source /usr/local/bin/common.sh
+    - do_clone_commit c21bdf1937c1cbd2781aa86816f159285a1909bf $SUBDIRECTORY $REPOSITORY_URL
   after_script:
     - cat docker_image_name.env
   when: manual
