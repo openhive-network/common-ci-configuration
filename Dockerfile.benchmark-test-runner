@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1.4
+FROM alpine:3.17.0 as build
+
+COPY <<-EOF /opt/patch.sed
+  s/jtl2junit/m2u/g
+  s/results file/results file (required)/g
+  23 i final Options helpOpt = new Options();
+  23 i helpOpt.addOption("?", "help", false, "");
+  23 i helpOpt.addOption(new Option("i", CMD_OPTION_INPUT, true, ""));
+  23 i helpOpt.addOption(new Option("o", CMD_OPTION_OUTPUT, true, ""));
+  23 i helpOpt.addOption(new Option("t", CMD_OPTION_TESTSUITE_NAME, true, ""));
+  23 i helpOpt.addOption(new Option("f", M2UConstants.JUNIT_FILTER_SWITCH_NAME, true, ""));
+  23 i final CommandLine helpCmd = parser.parse( helpOpt, argv );
+  23 i if (helpCmd.hasOption("help")) {
+  23 i new HelpFormatter().printHelp( APPLICATION_NAME, options );
+  23 i System.exit(0);
+  23 i }
+  72 i options.addOption("?", "help", false, "Show this usage instructions");
+EOF
+
+RUN <<EOF
+  # Install system dependencies
+  apk add --no-cache ca-certificates wget unzip openjdk11-jdk maven git
+
+  # Prepare tools directory
+  mkdir -p /opt/tools
+  cd /opt/tools
+
+  # Install Apache JMeter
+  wget --quiet https://dlcdn.apache.org//jmeter/binaries/apache-jmeter-5.4.3.zip -O jmeter.zip
+  unzip -qq jmeter.zip
+  rm jmeter.zip
+  mv apache-jmeter-5.4.3 jmeter
+  wget --quiet https://jdbc.postgresql.org/download/postgresql-42.3.1.jar -O /opt/tools/jmeter/lib/postgresql-42.3.1.jar
+
+  # Build m2u from source
+  mkdir -p m2u
+  git clone --single-branch --branch master https://github.com/tguzik/m2u.git m2u-source
+  cd m2u-source
+  find -name CommandLineParser.java -exec sed -i -f /opt/patch.sed {} \;
+  mvn
+
+  # Install m2u
+  mv target/m2u.jar ../m2u/m2u.jar
+  cd ../m2u
+  rm -R ../m2u-source
+  echo 'java -jar /opt/tools/m2u/m2u.jar $@' > m2u
+  chmod +x m2u
+EOF
+
+FROM alpine:3.17.0
+
+COPY --from=build /opt/tools /opt/tools
+
+RUN <<EOF
+  # Install system dependencies
+  apk add --no-cache bash ca-certificates openjdk11-jre python3 py3-pip
+
+  # Install Python dependencies
+  pip3 install prettytable
+
+  # Creater symlinks in bin directory
+  ln -s /opt/tools/jmeter/bin/jmeter /usr/bin/jmeter
+  ln -s /opt/tools/m2u/m2u /usr/bin/m2u
+EOF
+
+CMD ["/bin/bash"]
