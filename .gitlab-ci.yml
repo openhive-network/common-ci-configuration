@@ -147,6 +147,16 @@ build_image_remover_image:
       exists:
         - Dockerfile.image-remover
 
+build_benchmark_test_runner_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "benchmark-test-runner"
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.benchmark-test-runner
+
 prepare_example_hived_data_5m_image:
   extends: .prepare_hived_data_5m_image
   stage: example-build

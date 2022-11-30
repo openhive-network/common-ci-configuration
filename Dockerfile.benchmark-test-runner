@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/alpine-3.17.0 as build
+FROM alpine:3.17.0 as build
 
 COPY <<-EOF /opt/patch.sed
   s/jtl2junit/m2u/g
@@ -19,8 +19,6 @@ COPY <<-EOF /opt/patch.sed
 EOF
 
 RUN <<EOF
-  set -e
-
   # Install system dependencies
   apk add --no-cache ca-certificates wget unzip openjdk11-jdk maven git
 
@@ -29,10 +27,10 @@ RUN <<EOF
   cd /opt/tools
 
   # Install Apache JMeter
-  wget --quiet https://dlcdn.apache.org/jmeter/binaries/apache-jmeter-5.6.3.zip -O jmeter.zip
+  wget --quiet https://dlcdn.apache.org//jmeter/binaries/apache-jmeter-5.4.3.zip -O jmeter.zip
   unzip -qq jmeter.zip
   rm jmeter.zip
-  mv apache-jmeter-5.6.3 jmeter
+  mv apache-jmeter-5.4.3 jmeter
   wget --quiet https://jdbc.postgresql.org/download/postgresql-42.3.1.jar -O /opt/tools/jmeter/lib/postgresql-42.3.1.jar
 
   # Build m2u from source
@@ -50,17 +48,16 @@ RUN <<EOF
   chmod +x m2u
 EOF
 
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/alpine-3.17.0
+FROM alpine:3.17.0
 
 COPY --from=build /opt/tools /opt/tools
 
 RUN <<EOF
-  set -e
   # Install system dependencies
   apk add --no-cache bash ca-certificates openjdk11-jre python3 py3-pip
 
   # Install Python dependencies
-  pip3 install prettytable requests
+  pip3 install prettytable
 
   # Creater symlinks in bin directory
   ln -s /opt/tools/jmeter/bin/jmeter /usr/bin/jmeter
