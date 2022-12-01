@@ -26,7 +26,7 @@ The former is an XSL transformation file, which can be used to transform checkst
 The latter is a Compose file for setting up a simple Docker-in-Docker container. To connect to that container with a Docker CLI one use command like:
 
 ```bash
-docker run -it --rm --network docker -e DOCKER_TLS_CERTDIR=/certs -v docker-certs-client:/certs/client:ro --name docker-cli docker:20.10.10
+docker run -it --rm --network docker -e DOCKER_TLS_CERTDIR=/certs -v docker-certs-client:/certs/client:ro --name docker-cli docker:20.10.21
 ```
 
 The iportant bit is connecting to the right network (`--network docker`) and mounting the TLS certificates (`-e DOCKER_TLS_CERTDIR=/certs -v docker-certs-client:/certs/client:ro`). Other parameters can be changed to suit your purposes.
