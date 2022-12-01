@@ -70,7 +70,7 @@ lint_python_scripts:
 
 .build_docker_image:
   extends: .docker_image_builder_job
-  image: docker:20.10.10
+  image: docker:20.10.21
   variables:
     BUILD_TARGET: ""
   before_script:
@@ -100,7 +100,7 @@ lint_python_scripts:
 
 build_docker_dind_image:
   stage: pre-build
-  image: docker:20.10.10
+  image: docker:20.10.21
   variables:
     DOCKER_BUILDKIT: 1
     DOCKER_DRIVER: overlay2
@@ -115,7 +115,7 @@ build_docker_dind_image:
       exists:
         - Dockerfile.docker-dind
   services:
-    - docker:20.10.10-dind
+    - docker:20.10.21-dind
   tags:
     - public-runner-docker
 
