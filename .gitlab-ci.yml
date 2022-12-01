@@ -84,23 +84,15 @@ lint_python_scripts:
       echo -e "\e[0Ksection_start:$(date +%s):tag[collapsed=true]\r\e[0KDetermining tag for the new image..."
       if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]]; then
         echo "Running on default branch '$CI_DEFAULT_BRANCH': tag = 'latest'"
-        tag=":latest"
+        tag="latest"
       else
         echo "Running on branch '$CI_COMMIT_BRANCH': tag = $CI_COMMIT_REF_SLUG"
-        tag=":$CI_COMMIT_REF_SLUG" 
+        tag="$CI_COMMIT_REF_SLUG" 
       fi
       echo -e "\e[0Ksection_end:$(date +%s):tag\r\e[0K"
-      echo -e "\e[0Ksection_start:$(date +%s):build[collapsed=true]\r\e[0KBuilding image "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}"..."
-      docker build --file "Dockerfile.$BUILD_TARGET" --pull \
-        -t "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}" \
-        -t "$CI_REGISTRY_IMAGE/$BUILD_TARGET:$CI_COMMIT_SHA" .
+      echo -e "\e[0Ksection_start:$(date +%s):build[collapsed=true]\r\e[0KBaking image "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}"..."
+      docker buildx bake --progress=plain --push "$BUILD_TARGET"
       echo -e "\e[0Ksection_end:$(date +%s):build\r\e[0K"
-      echo -e "\e[0Ksection_start:$(date +%s):push1[collapsed=true]\r\e[0KPushing image "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}"..."
-      docker push "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}"
-      echo -e "\e[0Ksection_end:$(date +%s):push1\r\e[0K"
-      echo -e "\e[0Ksection_start:$(date +%s):push2[collapsed=true]\r\e[0KPushing image "$CI_REGISTRY_IMAGE/$BUILD_TARGET:$CI_COMMIT_SHA"..."
-      docker push "$CI_REGISTRY_IMAGE/$BUILD_TARGET:$CI_COMMIT_SHA"
-      echo -e "\e[0Ksection_end:$(date +%s):push2\r\e[0K" 
   needs:
     - build_docker_dind_image
   tags:
