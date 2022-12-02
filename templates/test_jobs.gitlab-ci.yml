@@ -13,4 +13,4 @@ variables:
         # Allow access from any network to eliminate CI IP addressing problems
         PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
     - name: $APP_IMAGE
-      alias: $APP_HOSTNAME
+      alias: app
