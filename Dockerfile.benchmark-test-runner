@@ -57,7 +57,7 @@ RUN <<EOF
   apk add --no-cache bash ca-certificates openjdk11-jre python3 py3-pip
 
   # Install Python dependencies
-  pip3 install prettytable
+  pip3 install prettytable requests
 
   # Creater symlinks in bin directory
   ln -s /opt/tools/jmeter/bin/jmeter /usr/bin/jmeter
