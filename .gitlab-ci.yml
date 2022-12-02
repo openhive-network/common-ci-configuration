@@ -1,4 +1,5 @@
 variables:
+  BENCHMARK_IMAGE_TAG: "$CI_COMMIT_SHA"
   DOCKER_BUILDER_TAG: "$CI_COMMIT_SHA"
   DOCKER_DIND_TAG: "$CI_COMMIT_SHA"
   IMAGE_REMOVER_TAG: "$CI_COMMIT_SHA"
@@ -8,11 +9,13 @@ stages:
   - pre-build
   - build
   - example-build
+  - example-test
   - example-cleanup
 
 include:
   - template: Workflows/Branch-Pipelines.gitlab-ci.yml
   - local: templates/data_image_jobs.gitlab-ci.yml
+  - local: templates/test_jobs.gitlab-ci.yml
 
 .validation_job:
   stage: validation
@@ -176,6 +179,26 @@ prepare_example_haf_data_5m_image:
     - do_clone_commit c21bdf1937c1cbd2781aa86816f159285a1909bf $SUBDIRECTORY $REPOSITORY_URL
   after_script:
     - cat docker_image_name.env
+  when: manual
+  tags:
+    - public-runner-docker
+
+example_jmeter_benchmark_job:
+  extends: .jmeter_benchmark_job
+  stage: example-test
+  script:
+    - |
+      jmeter -n -t misc/example-jmeter-test.jmx -l jmeter_report.jtl -e -o web_jmeter_report
+      m2u --input jmeter_report.xml --output jmeter_junit_report.xml
+  artifacts:
+    expire_in: "30 days"
+    paths:
+      - web_jmeter_report/**/*
+      - jmeter.log
+      - jmeter_report.jtl
+      - jmeter_report.xml
+    reports:
+      junit: jmeter_junit_report.xml
   when: manual
   tags:
     - public-runner-docker
