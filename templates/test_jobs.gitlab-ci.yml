@@ -1,11 +1,35 @@
 variables:
   BENCHMARK_IMAGE_TAG: "latest"
+  TOX_IMAGE_TAG: "latest"
+
+.artifact_config:
+  artifacts:
+    when: always
+    expire_in: 6 hours
 
 .jmeter_benchmark_job:
   image: registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:${BENCHMARK_IMAGE_TAG}
+  artifacts: !reference [.artifact_config, artifacts]
 
 .jmeter_benchmark_with_haf_job:
   extends: .jmeter_benchmark_job
+  services:
+    - name: $HAF_IMAGE_NAME
+      alias: haf-instance
+      variables:
+        # Allow access from any network to eliminate CI IP addressing problems
+        PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
+    - name: $APP_IMAGE
+      alias: app
+
+.tox_test_job:
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/tox-test-runner:${TOX_IMAGE_TAG}
+  artifacts: !reference [.artifact_config, artifacts]
+
+.pattern_tests:
+  extends: .tox_test_job
+  variables:
+    ENDPOINT: app:$APP_PORT
   services:
     - name: $HAF_IMAGE_NAME
       alias: haf-instance
