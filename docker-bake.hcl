@@ -36,3 +36,8 @@ target "image-remover" {
   dockerfile = "Dockerfile.image-remover"
   tags = generate-tags("image-remover")
 }
+
+target "tox-test-runner" {
+  dockerfile = "Dockerfile.tox-test-runner"
+  tags = generate-tags("tox-test-runner")
+}

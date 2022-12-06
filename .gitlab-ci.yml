@@ -3,6 +3,7 @@ variables:
   DOCKER_BUILDER_TAG: "$CI_COMMIT_SHA"
   DOCKER_DIND_TAG: "$CI_COMMIT_SHA"
   IMAGE_REMOVER_TAG: "$CI_COMMIT_SHA"
+  TOX_IMAGE_TAG: "$CI_COMMIT_SHA"
 
 stages:
   - validation
@@ -151,6 +152,16 @@ build_benchmark_test_runner_image:
       exists:
         - Dockerfile.benchmark-test-runner
 
+build_tox_test_runner_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "tox-test-runner"
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.tox-test-runner
+
 prepare_example_hived_data_5m_image:
   extends: .prepare_hived_data_5m_image
   stage: example-build
@@ -191,7 +202,6 @@ example_jmeter_benchmark_job:
       jmeter -n -t misc/example-jmeter-test.jmx -l jmeter_report.jtl -e -o web_jmeter_report
       m2u --input jmeter_report.xml --output jmeter_junit_report.xml
   artifacts:
-    expire_in: "30 days"
     paths:
       - web_jmeter_report/**/*
       - jmeter.log
@@ -199,6 +209,22 @@ example_jmeter_benchmark_job:
       - jmeter_report.xml
     reports:
       junit: jmeter_junit_report.xml
+  when: manual
+  tags:
+    - public-runner-docker
+
+example_tox_test_job:
+  extends: .tox_test_job
+  stage: example-test
+  script:
+    - |
+      git clone https://github.com/pypa/sampleproject.git
+      cd sampleproject
+      sed -i s/py\{37,38,39,310\}/py311/ tox.ini
+      tox --result-json tox-result.json
+  artifacts:
+    paths:
+      - sampleproject/tox-result.json
   when: manual
   tags:
     - public-runner-docker
