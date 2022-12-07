@@ -23,6 +23,7 @@ include:
   artifacts:
     name: validation-results
     when: always
+    expire_in: 6 hours
   tags:
     - public-runner-docker
 
