@@ -94,8 +94,10 @@ lint_python_scripts:
         export tag="$CI_COMMIT_REF_SLUG" 
       fi
       echo -e "\e[0Ksection_end:$(date +%s):tag\r\e[0K"
-      echo -e "\e[0Ksection_start:$(date +%s):build[collapsed=true]\r\e[0KBaking image "$CI_REGISTRY_IMAGE/$BUILD_TARGET${tag}"..."
-      docker buildx bake --progress=plain --push "$BUILD_TARGET"
+      echo -e "\e[0Ksection_start:$(date +%s):build[collapsed=true]\r\e[0KBaking image "$CI_REGISTRY_IMAGE/$BUILD_TARGET:${tag}"..."
+      docker context create builder-context
+      docker buildx create --driver docker-container --name docker-container-builder builder-context
+      docker buildx bake --progress=plain --builder docker-container-builder --push "$BUILD_TARGET"
       echo -e "\e[0Ksection_end:$(date +%s):build\r\e[0K"
   needs:
     - build_docker_dind_image
