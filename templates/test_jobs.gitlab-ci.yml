@@ -1,6 +1,7 @@
 variables:
   BENCHMARK_IMAGE_TAG: "latest"
   TOX_IMAGE_TAG: "latest"
+  APP_PORT: 0
 
 .jmeter_benchmark_job:
   image: registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:${BENCHMARK_IMAGE_TAG}
@@ -25,7 +26,7 @@ variables:
     when: always
     expire_in: 6 hours
 
-.pattern_tests:
+.pattern_tests_template:
   extends: .tox_test_job
   variables:
     ENDPOINT: app:$APP_PORT
@@ -37,3 +38,12 @@ variables:
         PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
     - name: $APP_IMAGE
       alias: app
+
+.comparison_tests_template:
+  extends: .pattern_tests_template
+  variables:
+    HIVED_ENDPOINT: hived-instance:8090
+    services:
+    - !reference [.pattern_tests_template, services]
+    - name: $HIVED_IMAGE_NAME
+      alias: hived-instance
