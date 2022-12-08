@@ -44,6 +44,6 @@ variables:
   variables:
     HIVED_ENDPOINT: hived-instance:8090
     services:
-    - !reference [.pattern_tests_template, services]
-    - name: $HIVED_IMAGE_NAME
-      alias: hived-instance
+      - !reference [.pattern_tests_template, services]
+      - name: $HIVED_IMAGE_NAME
+        alias: hived-instance
