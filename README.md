@@ -11,18 +11,16 @@ This project contains the common CI templates and scripts for Hive and Hive-rela
 
 ## Job templates
 
- - [data_image_jobs.gitlab-ci.yml](templates/data_image_jobs.gitlab-ci.yml) - templates for performing docker builds
+ - [docker_image_jobs.gitlab-ci.yml](templates/docker_image_jobs.gitlab-ci.yml) - templates for managing Docker images
  - [test_jobs.gitlab-ci.yml](templates/test_jobs.gitlab-ci.yml) - templates for running tests
 ## Example jobs
 
 The GitLab CI configuration for this repository contains example jobs based on the templates defined in it. On top of that the Docker images are built by jobs also based on said templates.
 
-Note that jobs **prepare_example_hived_data_5m_image** and **prepare_example_haf_data_5m_image** are configured to use Docker image registry belonging to this project, rather than one belonging to hive/hive> and hive/haf> projects respectively. This does not work out of the box, beacuse the jobs require certain prebuilt images. Those images need to be either built manually or pulled from hive/hive> and hive/haf> and then pushed to whatever custom registry you'd like to use. The credentials required by those jobs are the same you'd use with `docker login` command. Not that the **before_script** sections in those jobs are only necessary since this repository defines neither hive/hive> nor hive/haf> as submodules.
-
-The password required by the **example_hived_data_image_cleanup** and **example_haf_data_image_cleanup** is either personal, group or project access token with permission to use GitLab API.
+The password required by the **example_image_cleanup_job** is either personal, group or project access token with permission to use GitLab API.
 
 Example JMeter benchmark job shows how to expose the JMeter result dashboard via GitLab pages.
-For the example job they are available at https://hive.pages.syncad.com/-/common-ci-configuration/-/jobs/<job-id>/artifacts/web_jmeter_report/index.html
+For the example job they are available at `https://hive.pages.syncad.com/-/common-ci-configuration/-/jobs/<job-id>/artifacts/web_jmeter_report/index.html`.
 
 ## Miscellaneous files
 
