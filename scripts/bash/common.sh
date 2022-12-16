@@ -1,8 +1,6 @@
 #! /bin/bash
 
-set -euo pipefail 
-
-exec > >(tee "${LOG_FILE}") 2>&1
+set -euo pipefail
 
 log_exec_params() {
   echo

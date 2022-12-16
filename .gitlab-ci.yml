@@ -15,7 +15,7 @@ stages:
 
 include:
   - template: Workflows/Branch-Pipelines.gitlab-ci.yml
-  - local: templates/data_image_jobs.gitlab-ci.yml
+  - local: templates/docker_jobs.gitlab-ci.yml
   - local: templates/test_jobs.gitlab-ci.yml
 
 .validation_job:
@@ -74,11 +74,12 @@ lint_python_scripts:
       junit: pylint-junit-result.xml
 
 .build_docker_image:
-  extends: .docker_image_builder_job
+  extends: .docker_image_builder_job_template
   image: docker:20.10.21
   variables:
     BUILD_TARGET: ""
   before_script:
+    - !reference [.docker_image_builder_job_template, before_script]
     - |
       echo -e "\e[0Ksection_start:$(date +%s):login[collapsed=true]\r\e[0KLogging to Docker registry..."
       docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
@@ -95,41 +96,30 @@ lint_python_scripts:
       fi
       echo -e "\e[0Ksection_end:$(date +%s):tag\r\e[0K"
       echo -e "\e[0Ksection_start:$(date +%s):build[collapsed=true]\r\e[0KBaking image "$CI_REGISTRY_IMAGE/$BUILD_TARGET:${tag}"..."
-      docker context create builder-context
-      docker buildx create --driver docker-container --name docker-container-builder builder-context
-      docker buildx bake --progress=plain --builder docker-container-builder --push "$BUILD_TARGET"
+      docker buildx bake --progress=plain --push "$BUILD_TARGET"
       echo -e "\e[0Ksection_end:$(date +%s):build\r\e[0K"
-  needs:
-    - build_docker_dind_image
   tags:
     - public-runner-docker
 
 build_docker_dind_image:
+  extends: .build_docker_image
   stage: pre-build
-  image: docker:20.10.21
   variables:
-    DOCKER_BUILDKIT: 1
-    DOCKER_DRIVER: overlay2
-    DOCKER_TLS_CERTDIR: "/certs"
     BUILD_TARGET: "docker-dind"
-  before_script:
-    - !reference [.build_docker_image, before_script]
-  script:
-    - !reference [.build_docker_image, script]
   rules:
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.docker-dind
   services:
     - docker:20.10.21-dind
-  tags:
-    - public-runner-docker
 
 build_docker_builder_image:
   extends: .build_docker_image
   stage: build
   variables:
     BUILD_TARGET: "docker-builder"
+  needs:
+    - build_docker_dind_image
   rules:
     - if: $CI_COMMIT_BRANCH
       exists:
@@ -140,6 +130,8 @@ build_image_remover_image:
   stage: build
   variables:
     BUILD_TARGET: "image-remover"
+  needs:
+    - build_docker_dind_image
   rules:
     - if: $CI_COMMIT_BRANCH
       exists:
@@ -150,6 +142,8 @@ build_benchmark_test_runner_image:
   stage: build
   variables:
     BUILD_TARGET: "benchmark-test-runner"
+  needs:
+    - build_docker_dind_image
   rules:
     - if: $CI_COMMIT_BRANCH
       exists:
@@ -160,39 +154,27 @@ build_tox_test_runner_image:
   stage: build
   variables:
     BUILD_TARGET: "tox-test-runner"
+  needs:
+    - build_docker_dind_image
   rules:
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.tox-test-runner
 
-prepare_example_hived_data_5m_image:
-  extends: .prepare_hived_data_5m_image
+example_docker_image_builder_job:
+  extends: .docker_image_builder_job_template
   stage: example-build
-  variables:
-    REGISTRY_USER: "$CI_REGISTRY_USER"
-    REGISTRY_PASS: "$CI_REGISTRY_PASSWORD"
-    REGISTRY_URL: "registry.gitlab.syncad.com/hive/common-ci-configuration/hive/"
   before_script:
-    - LOG_FILE=tmp.log source /usr/local/bin/common.sh
-    - do_clone_commit 9f39eae9ef35642445ae63e8c0a681f1376334ed $SUBDIRECTORY $REPOSITORY_URL 
-  after_script:
-    - cat docker_image_name.env
-  when: manual
-  tags:
-    - public-runner-docker
-
-prepare_example_haf_data_5m_image:
-  extends: .prepare_haf_data_5m_image
-  stage: example-build
-  variables:
-    REGISTRY_USER: "$CI_REGISTRY_USER"
-    REGISTRY_PASS: "$CI_REGISTRY_PASSWORD"
-    REGISTRY_URL: "registry.gitlab.syncad.com/hive/common-ci-configuration/haf/"
-  before_script:
-    - LOG_FILE=tmp.log source /usr/local/bin/common.sh
-    - do_clone_commit c21bdf1937c1cbd2781aa86816f159285a1909bf $SUBDIRECTORY $REPOSITORY_URL
-  after_script:
-    - cat docker_image_name.env
+    - !reference [.build_docker_image, before_script]
+  script:
+    - |
+      docker buildx build --progress=plain --push \
+        --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/alpine-example:latest-cache \
+        --cache-to type=registry,mode=max,ref=$CI_REGISTRY_IMAGE/alpine-example:latest-cache \
+        --tag $CI_REGISTRY_IMAGE/alpine-example:latest \
+        https://github.com/alpinelinux/docker-alpine.git
+  needs:
+    - build_docker_dind_image
   when: manual
   tags:
     - public-runner-docker
@@ -232,28 +214,15 @@ example_tox_test_job:
   tags:
     - public-runner-docker
 
-example_hived_data_image_cleanup:
-  extends: .docker_image_cleanup_job
+example_image_cleanup_job:
+  extends: .docker_image_cleanup_job_template
   stage: example-cleanup
   variables:
     REGISTRY_PASS: "$REGISTRY_PASS"
-    IMAGE_PATH: $HIVED_IMAGE_NAME_REGISTRY_PATH
-    IMAGE_TAG: $HIVED_IMAGE_NAME_REGISTRY_TAG
+    IMAGE_PATH: $CI_REGISTRY_IMAGE/alpine-example
+    IMAGE_TAG: latest
   needs:
-    - prepare_example_hived_data_5m_image
-  when: manual
-  tags:
-    - public-runner-docker
-
-example_haf_data_image_cleanup:
-  extends: .docker_image_cleanup_job
-  stage: example-cleanup
-  variables:
-    REGISTRY_PASS: "$REGISTRY_PASS"
-    IMAGE_PATH: $HAF_IMAGE_NAME_REGISTRY_PATH
-    IMAGE_TAG: $HAF_IMAGE_NAME_REGISTRY_TAG
-  needs:
-    - prepare_example_haf_data_5m_image
+    - example_docker_image_builder_job
   when: manual
   tags:
     - public-runner-docker
