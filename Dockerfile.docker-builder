@@ -1,6 +1,6 @@
 FROM docker:20.10.21 AS docker-builder
 
-RUN apk add --no-cache bash git ca-certificates curl
-RUN adduser -D hived
+RUN apk add --no-cache bash git ca-certificates curl sudo
+RUN adduser -D hived && echo "hived ALL=(ALL) NOPASSWD:SETENV: /bin/cp,/bin/rm" >> /etc/sudoers
 USER hived
 WORKDIR /home/hived
