@@ -1,4 +1,4 @@
-FROM docker:20.10.21 AS docker-builder
+FROM docker:24.0.1-cli AS docker-builder
 
 RUN apk add --no-cache bash git ca-certificates curl
 RUN adduser -D hived
