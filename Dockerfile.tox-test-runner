@@ -3,7 +3,7 @@ FROM python:3.11.0-alpine3.17
 
 RUN <<-EOF 
   # Install system dependencies
-  apk add --no-cache bash git curl gcc
+  apk add --no-cache bash git curl gcc musl-dev
 
   # Install Python dependencies
   pip3 install tox
