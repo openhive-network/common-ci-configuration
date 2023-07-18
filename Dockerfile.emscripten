@@ -1,0 +1,81 @@
+ARG EMSCRIPTEN_VERSION=3.1.43
+
+FROM emscripten/emsdk:${EMSCRIPTEN_VERSION} AS pure_emscripten_sdk
+
+FROM pure_emscripten_sdk AS supplemented_tools_sdk
+
+USER root
+
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noniteractive apt-get install -y \
+    git \
+    autoconf \
+    libtool
+
+FROM supplemented_tools_sdk AS lib_source
+
+ARG BOOST_VERSION_TAG=boost-1.82.0
+ENV BOOST_VERSION_TAG=${BOOST_VERSION_TAG}
+
+ARG OPENSSL_VERSION_TAG=openssl-3.1.1
+ENV OPENSSL_VERSION_TAG=${OPENSSL_VERSION_TAG}
+
+USER emscripten
+WORKDIR /home/emscripten
+
+RUN mkdir -vp tmp_src && cd tmp_src && \
+    git clone https://github.com/boostorg/boost.git && \
+    cd boost && \
+    git checkout tags/${BOOST_VERSION_TAG} && \
+    git submodule update --init --recursive && \
+    cd .. && \
+    git clone https://github.com/openssl/openssl.git && \
+    cd openssl && \
+    git checkout tags/${OPENSSL_VERSION_TAG} && \
+    git submodule update --init --recursive && \
+    cd .. && \
+    git clone https://github.com/ElementsProject/secp256k1-zkp.git
+
+FROM lib_source as emscripten_lib_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+ENV TMP_SRC=/home/emscripten/tmp_src
+
+ADD --chown=emscripten ./scripts/bash/emscripten /home/emscripten/scripts
+RUN mkdir -vp "${TMP_SRC}"
+
+FROM emscripten_lib_builder AS emscripten_boost_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+RUN /home/emscripten/scripts/prepare_boost.sh "${TMP_SRC}" "/emsdk/upstream/emscripten/cache/sysroot/"
+
+FROM emscripten_lib_builder AS emscripten_openssl_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+RUN /home/emscripten/scripts/prepare_openssl.sh "${TMP_SRC}" "/emsdk/upstream/emscripten/cache/sysroot/"
+
+FROM emscripten_lib_builder AS emscripten_secp256k1_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+RUN /home/emscripten/scripts/prepare_secp256k1-zkp.sh "${TMP_SRC}" "/emsdk/upstream/emscripten/cache/sysroot/"
+
+FROM supplemented_tools_sdk AS emscripten_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+COPY --chown=emscripten --from=emscripten_secp256k1_builder /emsdk/upstream/emscripten/cache/sysroot/ /emsdk/upstream/emscripten/cache/sysroot/
+COPY --chown=emscripten --from=emscripten_boost_builder /emsdk/upstream/emscripten/cache/sysroot/ /emsdk/upstream/emscripten/cache/sysroot/
+COPY --chown=emscripten --from=emscripten_openssl_builder /emsdk/upstream/emscripten/cache/sysroot/ /emsdk/upstream/emscripten/cache/sysroot/
+
+COPY --chown=emscripten --from=emscripten_openssl_builder /emsdk/upstream/emscripten/cache/sysroot/libx32/ /emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/
+COPY --chown=emscripten --from=emscripten_openssl_builder /emsdk/upstream/emscripten/cache/sysroot/libx32/pkgconfig/* /emsdk/upstream/emscripten/cache/sysroot/lib/pkgconfig/
+
