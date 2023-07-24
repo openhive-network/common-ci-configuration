@@ -172,6 +172,10 @@ build_emsdk_image:
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.emscripten
+      changes:
+        - Dockerfile.emscripten
+        - scripts/bash/emscripten/*
+        - scripts/bash/emscripten/**/*
 
 example_docker_image_builder_job:
   extends: .docker_image_builder_job_template
