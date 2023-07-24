@@ -33,7 +33,7 @@ lint_bash_scripts:
   before_script:
     - apk add xmlstarlet
   script:
-    - shellcheck -f checkstyle scripts/bash/*.sh > shellcheck-checkstyle-result.xml 
+    - shellcheck -f checkstyle scripts/**/*.sh > shellcheck-checkstyle-result.xml 
   after_script:
     - xmlstarlet tr misc/checkstyle2junit.xslt shellcheck-checkstyle-result.xml > shellcheck-junit-result.xml
   artifacts:
@@ -75,7 +75,7 @@ lint_python_scripts:
 
 .build_docker_image:
   extends: .docker_image_builder_job_template
-  image: docker:20.10.21
+  image: docker:24.0.1-cli
   variables:
     BUILD_TARGET: ""
   before_script:
@@ -96,7 +96,7 @@ lint_python_scripts:
       fi
       echo -e "\e[0Ksection_end:$(date +%s):tag\r\e[0K"
       echo -e "\e[0Ksection_start:$(date +%s):build[collapsed=true]\r\e[0KBaking image "$CI_REGISTRY_IMAGE/$BUILD_TARGET:${tag}"..."
-      docker buildx bake --progress=plain --push "$BUILD_TARGET"
+      docker buildx bake --progress=plain --provenance=false --push "$BUILD_TARGET"
       echo -e "\e[0Ksection_end:$(date +%s):build\r\e[0K"
   tags:
     - public-runner-docker
@@ -111,7 +111,7 @@ build_docker_dind_image:
       exists:
         - Dockerfile.docker-dind
   services:
-    - docker:20.10.21-dind
+    - docker:24.0.1-dind
 
 build_docker_builder_image:
   extends: .build_docker_image
@@ -160,6 +160,18 @@ build_tox_test_runner_image:
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.tox-test-runner
+
+build_emsdk_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "emsdk"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.emscripten
 
 example_docker_image_builder_job:
   extends: .docker_image_builder_job_template

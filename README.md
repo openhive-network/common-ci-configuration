@@ -6,13 +6,15 @@ This project contains the common CI templates and scripts for Hive and Hive-rela
 
 - misc - miscellaneous files
 - scripts/bash - Bash scripts
+- scripts/emscripten - source for emsdk image
 - scripts/python - Python scripts
 - templates - GitLab CI templates
 
 ## Job templates
 
- - [docker_image_jobs.gitlab-ci.yml](templates/docker_image_jobs.gitlab-ci.yml) - templates for managing Docker images
- - [test_jobs.gitlab-ci.yml](templates/test_jobs.gitlab-ci.yml) - templates for running tests
+- [docker_image_jobs.gitlab-ci.yml](templates/docker_image_jobs.gitlab-ci.yml) - templates for managing Docker images
+- [test_jobs.gitlab-ci.yml](templates/test_jobs.gitlab-ci.yml) - templates for running tests
+
 ## Example jobs
 
 The GitLab CI configuration for this repository contains example jobs based on the templates defined in it. On top of that the Docker images are built by jobs also based on said templates.

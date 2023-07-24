@@ -23,6 +23,7 @@ emconfigure ./Configure \
   linux-x32 \
   -static
 
+# shellcheck disable=SC2016
 sed -i 's/$(CROSS_COMPILE)//' Makefile
 emmake make -j 8 
 emmake make install

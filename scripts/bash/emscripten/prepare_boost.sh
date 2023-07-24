@@ -29,7 +29,7 @@ printf "using clang : emscripten : emcc -s USE_ZLIB=1 -s USE_ICU=0 : <archiver>e
 ./b2 \
   --build-dir="${TMP_SRC}/boost_build/" \
   --prefix="${INSTALL_PREFIX}" \
-  -j $(nproc) \
+  -j "$(nproc)" \
   -q \
   runtime-link=static \
   link=static \

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.5
 ARG EMSCRIPTEN_VERSION=3.1.43
 
 FROM emscripten/emsdk:${EMSCRIPTEN_VERSION} AS pure_emscripten_sdk
@@ -23,18 +24,30 @@ ENV OPENSSL_VERSION_TAG=${OPENSSL_VERSION_TAG}
 USER emscripten
 WORKDIR /home/emscripten
 
-RUN mkdir -vp tmp_src && cd tmp_src && \
-    git clone https://github.com/boostorg/boost.git && \
-    cd boost && \
-    git checkout tags/${BOOST_VERSION_TAG} && \
-    git submodule update --init --recursive && \
-    cd .. && \
-    git clone https://github.com/openssl/openssl.git && \
-    cd openssl && \
-    git checkout tags/${OPENSSL_VERSION_TAG} && \
-    git submodule update --init --recursive && \
-    cd .. && \
-    git clone https://github.com/ElementsProject/secp256k1-zkp.git
+RUN <<-EOF
+  set -e
+
+  git config --global advice.detachedHead false
+  
+  mkdir -vp tmp_src
+  cd tmp_src
+
+  git clone https://github.com/boostorg/boost.git
+
+  cd boost
+  git checkout tags/${BOOST_VERSION_TAG}
+  git submodule update --init --recursive
+
+  cd ..
+  git clone https://github.com/openssl/openssl.git
+
+  cd openssl
+  git checkout tags/${OPENSSL_VERSION_TAG}
+  git submodule update --init --recursive
+  
+  cd ..
+  git clone https://github.com/ElementsProject/secp256k1-zkp.git
+EOF
 
 FROM lib_source as emscripten_lib_builder
 
