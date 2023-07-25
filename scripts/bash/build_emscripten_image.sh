@@ -11,5 +11,5 @@ export DOCKER_BUILDKIT=1
 
 docker build --target=emscripten_builder \
   --build-arg "EMSCRIPTEN_VERSION=${EMSDK_VERSION}" \
-  -t "${REGISTRY}emsdk:3.1.43" \
-  -f "${SRCDIR}/Dockerfile.emscripten" "${SRCDIR}"
+  --tag "${REGISTRY}emsdk:3.1.43" \
+  --file "${SRCDIR}/Dockerfile.emscripten" "${SRCDIR}"

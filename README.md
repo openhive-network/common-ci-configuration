@@ -6,7 +6,7 @@ This project contains the common CI templates and scripts for Hive and Hive-rela
 
 - misc - miscellaneous files
 - scripts/bash - Bash scripts
-- scripts/emscripten - source for emsdk image
+- scripts/bash/emscripten - source for emsdk image
 - scripts/python - Python scripts
 - templates - GitLab CI templates
 

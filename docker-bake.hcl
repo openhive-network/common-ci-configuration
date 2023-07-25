@@ -77,7 +77,7 @@ target "tox-test-runner" {
 
 target "emsdk" {
   dockerfile = "Dockerfile.emscripten"
-  tags = [ notempty(CI_REGISTRY_IMAGE) ? "${CI_REGISTRY_IMAGE}/emsdk:${EMSCRIPTEN_VERSION}" : "emsdk:${EMSCRIPTEN_VERSION}" ]
+  tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}")
   cache-from = generate-cache-from("emsdk", "${EMSCRIPTEN_VERSION}")
   cache-to = generate-cache-to("emsdk", "${EMSCRIPTEN_VERSION}")
   args = {

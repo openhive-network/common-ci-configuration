@@ -1,5 +1,7 @@
 #! /bin/bash
 
+echo "Building secp256k1-zkp..."
+
 set -xeuo pipefail
 
 TMP_SRC=${1:?"Missing arg #1 to specify source temp directory"}
@@ -26,3 +28,5 @@ emconfigure ./configure --prefix="${INSTALL_PREFIX}" \
   --enable-experimental
 emmake make
 emmake make install
+
+echo "Secp256k1-zkp build finished."
