@@ -1,5 +1,7 @@
 #! /bin/bash
 
+echo "Building Boost..."
+
 set -xeuo pipefail
 
 TMP_SRC=${1:?"Missing arg #1 to specify source temp directory"}
@@ -44,3 +46,5 @@ printf "using clang : emscripten : emcc -s USE_ZLIB=1 -s USE_ICU=0 : <archiver>e
   --with-regex \
   --with-system \
   install
+
+echo "Boost build finished."

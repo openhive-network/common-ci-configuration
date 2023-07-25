@@ -1,5 +1,7 @@
 #! /bin/bash
 
+echo "Building OpenSSL..."
+
 set -xeuo pipefail
 
 TMP_SRC=${1:?"Missing arg #1 to specify source temp directory"}
@@ -28,3 +30,4 @@ sed -i 's/$(CROSS_COMPILE)//' Makefile
 emmake make -j 8 
 emmake make install
 
+echo "OpenSSL build finished."
