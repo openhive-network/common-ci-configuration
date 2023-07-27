@@ -3,12 +3,11 @@ variables:
   DOCKER_DIND_TAG: "latest"
   IMAGE_REMOVER_TAG: "latest"
 
-.artifact_policy:
-  artifacts:
-    when: always
-    expire_in: 6 hours
+include:
+  - local: templates/base.gitlab-ci.yml
 
 .docker_image_builder_job_template:
+  extends: .job-defaults
   variables:
     DOCKER_DRIVER: overlay2
     DOCKER_TLS_CERTDIR: "/certs"
@@ -25,6 +24,7 @@ variables:
       alias: docker
 
 .docker_image_cleanup_job_template:
+  extends: .job-defaults
   image: registry.gitlab.syncad.com/hive/common-ci-configuration/image-remover:${IMAGE_REMOVER_TAG}
   interruptible: true
   variables:
@@ -48,3 +48,4 @@ variables:
   rules:
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED == "true"'
       when: manual
+      allow_failure: true
