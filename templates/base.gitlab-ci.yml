@@ -1,0 +1,10 @@
+default:
+  timeout: 1 hour
+  artifacts:
+    when: always
+    expire_in: 6 hours
+
+# Necessary due to a bug.
+# See https://gitlab.com/gitlab-org/gitlab/-/issues/418003 for details.
+.job-defaults:
+  timeout: 1 hour

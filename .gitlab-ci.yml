@@ -19,6 +19,7 @@ include:
   - local: templates/test_jobs.gitlab-ci.yml
 
 .validation_job:
+  extends: .job-defaults
   stage: validation
   artifacts:
     name: validation-results

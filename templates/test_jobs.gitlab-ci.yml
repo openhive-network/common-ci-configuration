@@ -3,11 +3,12 @@ variables:
   TOX_IMAGE_TAG: "latest"
   APP_PORT: 0
 
+include:
+  - local: templates/base.gitlab-ci.yml
+
 .jmeter_benchmark_job:
+  extends: .job-defaults
   image: registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:${BENCHMARK_IMAGE_TAG}
-  artifacts:
-    when: always
-    expire_in: 6 hours
 
 .jmeter_benchmark_with_haf_job:
   extends: .jmeter_benchmark_job
@@ -25,6 +26,7 @@ variables:
       alias: app
 
 .pytest_based_template:
+  extends: .job-defaults
   variables:
     FF_NETWORK_PER_BUILD: 1
     JUNIT_REPORT: "report.xml"  # should be ovverided by derived jobs
@@ -104,10 +106,8 @@ variables:
 
 
 .tox_test_job:
+  extends: .job-defaults
   image: registry.gitlab.syncad.com/hive/common-ci-configuration/tox-test-runner:${TOX_IMAGE_TAG}
-  artifacts:
-    when: always
-    expire_in: 6 hours
 
 .pattern_tests_template:
   extends: .tox_test_job
