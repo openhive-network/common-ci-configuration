@@ -50,7 +50,7 @@ variables:
 .comparison_tests_template:
   extends: .pattern_tests_template
   variables:
-    HIVED_ENDPOINT: hived-instance:8090
+    HIVED_ENDPOINT: hived-instance:8091
   services:
     - !reference [.pattern_tests_template, services]
     - name: $HIVED_IMAGE_NAME
