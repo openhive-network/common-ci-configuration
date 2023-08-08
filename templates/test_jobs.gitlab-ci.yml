@@ -24,6 +24,29 @@ variables:
     - name: $APP_IMAGE
       alias: app
 
+.pytest_based_template:
+  variables:
+    JUNIT_REPORT: "report.xml"  # should be ovverided by derived jobs
+    PYTEST_BASED_IMAGE_NAME: ""  # "$CI_REGISTRY_IMAGE/ci-base-image$TEST_IMAGE_TAG"
+    POETRY_INSTALL_ROOT_DIR: ""  # $CI_PROJECT_DIR/tests/hive-local-tools
+  interruptible: true
+  image: "${PYTEST_BASED_IMAGE_NAME}"
+
+  before_script:
+    - python3 -m venv venv/
+    - . venv/bin/activate
+    - (cd "${POETRY_INSTALL_ROOT_DIR}" && poetry install)
+  artifacts:
+    reports:
+      junit: $JUNIT_REPORT
+
+    name: "$CI_JOB_NAME-$CI_COMMIT_REF_NAME"
+    paths:
+      - "**/generated_during_*"
+      - "**/generated_by_package_fixtures"
+    when: always
+    expire_in: 1 week
+
 .tox_test_job:
   image: registry.gitlab.syncad.com/hive/common-ci-configuration/tox-test-runner:${TOX_IMAGE_TAG}
   artifacts:
