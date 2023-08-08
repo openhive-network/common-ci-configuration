@@ -26,6 +26,7 @@ variables:
 
 .pytest_based_template:
   variables:
+    FF_NETWORK_PER_BUILD: 1
     JUNIT_REPORT: "report.xml"  # should be ovverided by derived jobs
     PYTEST_BASED_IMAGE_NAME: ""  # "$CI_REGISTRY_IMAGE/ci-base-image$TEST_IMAGE_TAG"
     POETRY_INSTALL_ROOT_DIR: ""  # $CI_PROJECT_DIR/tests/hive-local-tools
@@ -35,7 +36,10 @@ variables:
   before_script:
     - python3 -m venv venv/
     - . venv/bin/activate
-    - (cd "${POETRY_INSTALL_ROOT_DIR}" && poetry install)
+    - echo "Entering ${POETRY_INSTALL_ROOT_DIR}"
+    - cd "${POETRY_INSTALL_ROOT_DIR}"
+    - poetry install
+
   artifacts:
     reports:
       junit: $JUNIT_REPORT
@@ -46,6 +50,58 @@ variables:
       - "**/generated_by_package_fixtures"
     when: always
     expire_in: 1 week
+
+.pattern_test_executor:
+  extends: .pytest_based_template
+  variables:
+    TESTED_ENDPOINT: ""    # To be overrided in derived job
+    TEST_SUITE: ""         # To be overrided in derived job
+    PATTERN_TESTS_DIR: ""  # To be overrided in derived job
+    DIRECT_CALLS: 0        # To be overrided in derived job
+
+  script:
+    # run pattern tests
+    - cd "${PATTERN_TESTS_DIR}"
+    - ./run_tests.sh ${TESTED_ENDPOINT} `git rev-parse --show-toplevel` "${TEST_SUITE}" ${DIRECT_CALLS}
+
+
+# Special version of pattern tests to be executed against Hived API node instance
+# Defined here, to be shared between .comparison_tests_template and finally reused at Hived CI to verify AH node
+.hived_pattern_tests_template:
+  extends: .pattern_test_executor
+  variables:
+    HIVED_IMAGE_NAME: ""  # Must be overrided at derived job
+    TESTED_ENDPOINT: hived-instance:8091
+  services:
+    - name: $HIVED_IMAGE_NAME
+      alias: hived-instance
+      variables:
+        DATADIR: $DATA_CACHE_HIVE/datadir
+        SHM_DIR: $DATA_CACHE_HIVE/shm_dir
+        LOG_FILE: $CI_JOB_NAME.log
+      command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
+
+
+.haf_app_pattern_tests_template:
+  extends: .pattern_test_executor
+  variables:
+    HAF_IMAGE_NAME: ""  # Must be overrided at derived job
+    HAF_APP_IMAGE: ""  # Image path name to be used at app testing. App will be instantiated as a service.
+    HAF_APP_PORT: ""  # To be specified by derived job
+    TESTED_ENDPOINT: app:${HAF_APP_PORT}
+  services:
+    - name: ${HAF_IMAGE_NAME}
+      alias: haf-instance
+      variables:
+        # Allow access from any network to eliminate CI IP addressing problems
+        PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
+        DATADIR: $DATA_CACHE_HAF/datadir
+        SHM_DIR: $DATA_CACHE_HAF/shm_dir
+        LOG_FILE: $CI_JOB_NAME.log
+      command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
+    - name: ${HAF_APP_IMAGE}
+      alias: app
+
 
 .tox_test_job:
   image: registry.gitlab.syncad.com/hive/common-ci-configuration/tox-test-runner:${TOX_IMAGE_TAG}
@@ -71,15 +127,23 @@ variables:
       alias: app
 
 .comparison_tests_template:
-  extends: .pattern_tests_template
+  extends: .haf_app_pattern_tests_template
   variables:
+    COMPARISON_TESTS_DIR: ""  # Must be specified by derived job
+
     HIVED_ENDPOINT: hived-instance:8091
+    JUNIT_REPORT: "comparsion_tests.xml"
+
   services:
-    - !reference [.pattern_tests_template, services]
-    - name: $HIVED_IMAGE_NAME
-      alias: hived-instance
-      variables:
-        DATADIR: $DATA_CACHE_HIVE/datadir
-        SHM_DIR: $DATA_CACHE_HIVE/shm_dir
-        LOG_FILE: $CI_JOB_NAME.log
-      command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
+    - !reference [.hived_pattern_tests_template, services]
+    - !reference [.haf_app_pattern_tests_template, services]
+  script:
+    - cd "${COMPARISON_TESTS_DIR}"
+    - pytest -n 8 --junitxml="${JUNIT_REPORT}" --ref http://$HIVED_ENDPOINT --test http://$TESTED_ENDPOINT --start 4900000 --stop 4915000
+
+  artifacts:
+    paths:
+      - "$CI_JOB_NAME"
+      - "**/from_node.log"
+      - "**/ah.log"
+      - "**/*.out.json"
