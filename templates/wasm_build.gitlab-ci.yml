@@ -1,0 +1,35 @@
+include:
+  - local: templates/base.gitlab-ci.yml
+
+variables:
+  # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:4366b64c39a1cba49b632c6ec426895e9aa92e94
+  EMSCRIPTEN_IMAGE_TAG: "@sha256:e6f967440d44d7e6f1f896caa366f4af8ef17f46af87e6984bca8ea500d0e519"
+  EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:3.1.43$EMSCRIPTEN_IMAGE_TAG"
+
+.wasm_build_job_template:
+  extends: .job-defaults
+  interruptible: true
+  variables:
+    # The directory containing sources to be built - it should be overrided by derived job
+    SOURCE_DIR: ""
+    # Output directory where should be stored binaries - it should be overrided by derived job
+    BINARIES_DIR: ""
+
+  image: ${EMSCRIPTEN_IMAGE}
+
+  before_script:
+    - git config --global --add safe.directory '*'
+
+  script:
+    - mkdir -vp "${BINARIES_DIR}"
+    - cd "${BINARIES_DIR}"
+    - cmake -DBoost_NO_WARN_NEW_VERSIONS=1 -DBoost_USE_STATIC_RUNTIME=ON -DCMAKE_TOOLCHAIN_FILE=/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" -S "${SOURCE_DIR}" -B "${BINARIES_DIR}"
+    - make -j 8
+
+  artifacts:
+    paths:
+      - "${BINARIES_DIR}/*.d.ts"
+      - "${BINARIES_DIR}/*.mjs"
+      - "${BINARIES_DIR}/*.wasm"
+    when: always
+    expire_in: 1 week
