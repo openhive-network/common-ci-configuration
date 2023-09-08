@@ -12,7 +12,8 @@ RUN apt-get update && \
     git \
     jq \
     autoconf \
-    libtool
+    libtool \
+    protobuf-compiler
 
 FROM supplemented_tools_sdk AS lib_source
 
