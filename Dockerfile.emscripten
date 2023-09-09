@@ -13,7 +13,8 @@ RUN apt-get update && \
     jq \
     autoconf \
     libtool \
-    protobuf-compiler
+    protobuf-compiler && \
+  npm install -g yarn
 
 FROM supplemented_tools_sdk AS lib_source
 
