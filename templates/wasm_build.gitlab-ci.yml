@@ -2,8 +2,8 @@ include:
   - local: templates/base.gitlab-ci.yml
 
 variables:
-  # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:4366b64c39a1cba49b632c6ec426895e9aa92e94
-  EMSCRIPTEN_IMAGE_TAG: "@sha256:e6f967440d44d7e6f1f896caa366f4af8ef17f46af87e6984bca8ea500d0e519"
+  # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:9cdc105390dd4dafcf692a034cbfca358c4898b6
+  EMSCRIPTEN_IMAGE_TAG: "@sha256:9b7fa5a6f4d19fed24f9e1b1f5d3b818fa875d0f76a5d17f7116178573a6e534"
   EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:3.1.43$EMSCRIPTEN_IMAGE_TAG"
 
 .wasm_build_job_template:
@@ -30,6 +30,7 @@ variables:
     paths:
       - "${BINARIES_DIR}/*.d.ts"
       - "${BINARIES_DIR}/*.mjs"
+      - "${BINARIES_DIR}/*.js"
       - "${BINARIES_DIR}/*.wasm"
     when: always
     expire_in: 1 week
