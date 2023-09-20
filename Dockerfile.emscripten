@@ -14,7 +14,7 @@ RUN apt-get update && \
     autoconf \
     libtool \
     protobuf-compiler && \
-  npm install -g yarn
+    npm install -g yarn
 
 FROM supplemented_tools_sdk AS lib_source
 
@@ -31,7 +31,8 @@ RUN <<-EOF
   set -e
 
   git config --global advice.detachedHead false
-  
+  git config --global --add safe.directory '*'
+
   mkdir -vp tmp_src
   cd tmp_src
 
