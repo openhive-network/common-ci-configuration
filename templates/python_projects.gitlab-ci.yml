@@ -1,0 +1,106 @@
+include:
+  - local: templates/base.gitlab-ci.yml
+
+
+variables:
+  # required to set:
+  PACKAGES_TO_CHECK: ""
+  # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu22.04-7
+  PYTHON_IMAGE_TAG: "@sha256:8f68baf07c6e581e1e8034a1447c4ff1268239fc886bfe4b02aa3f4182bf78bb"
+  PYTHON_IMAGE: "registry.gitlab.syncad.com/hive/hive/ci-base-image${PYTHON_IMAGE_TAG}"
+  # colors:
+  TXT_GREEN: "\e[1;32m"
+  TXT_BLUE: "\e[1;34m"
+  TXT_CLEAR: "\e[0m"
+
+
+.configuration_template:
+  image: "${PYTHON_IMAGE}"
+  interruptible: true
+  before_script:
+    - python3 -V
+    - poetry -V
+    - pip list
+
+
+.project_develop_configuration_template:
+  extends: .configuration_template
+  before_script:
+    - !reference [.configuration_template, before_script]
+    - poetry install
+    - source $(poetry env info --path)/bin/activate
+    - pip list
+
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| STATIC CODE ANALYSIS |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+.pre_commit_checks_template:
+  extends: .project_develop_configuration_template
+  script:
+    - pushd . && cd /tmp && poetry self update && popd  # Bump poetry version so `poetry lock --no-update` will use the latest one; doing it in different directory to avoid `poetry.lock` and `pyproject.toml` changes
+    - poetry -V
+    - echo -e "${TXT_BLUE}Checking all files with pre-commit hooks...${TXT_CLEAR}" &&
+      pre-commit run --all-files
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - poetry.lock
+
+.lint_code_with_ruff_template:
+  extends: .project_develop_configuration_template
+  script:
+    - echo -e "${TXT_BLUE}Linting all sources with Ruff (check)...${TXT_CLEAR}" &&
+      ruff ${PACKAGES_TO_CHECK}
+    - echo -e "${TXT_BLUE}Linting all sources with Ruff (diff)...${TXT_CLEAR}" &&
+      ruff ${PACKAGES_TO_CHECK} --diff
+
+.formatting_with_black_check_template:
+  extends: .project_develop_configuration_template
+  script:
+    - echo -e "${TXT_BLUE}Checking code formatting with Black...${TXT_CLEAR}" &&
+      black ${PACKAGES_TO_CHECK} --check --diff --color
+
+.type_check_with_mypy_template:
+  extends: .project_develop_configuration_template
+  script:
+    - echo -e "${TXT_BLUE}Checking types with mypy...${TXT_CLEAR}" &&
+      mypy ${PACKAGES_TO_CHECK}
+
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| STATIC CODE ANALYSIS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| BUILD |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+.build_wheel_template:
+  extends: .configuration_template
+  variables:
+    GIT_DEPTH: 0  # We need full history to get correct version (dynamic versioning)
+  script:
+    - echo -e "${TXT_BLUE}Building python wheel...${TXT_CLEAR}"
+    - poetry build --format wheel
+    - ls -al dist/
+  artifacts:
+    when: always
+    paths:
+      - "dist/"
+
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| BUILD |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| DEPLOY |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+.deploy_wheel_template:
+  extends: .configuration_template
+  when: manual
+  variables:
+    GIT_DEPTH: 0  # Required for poetry publish to get correct version
+  script:
+    - echo -e "${TXT_BLUE}Deploying python wheel...${TXT_CLEAR}"
+    - ls -al
+    - poetry version
+    - poetry config repositories.gitlab "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi"
+    - poetry config http-basic.gitlab gitlab-ci-token "${CI_JOB_TOKEN}"
+    - poetry publish --repository gitlab
+
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| DEPLOY |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
