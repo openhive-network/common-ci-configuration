@@ -79,12 +79,21 @@ variables:
     GIT_DEPTH: 0  # We need full history to get correct version (dynamic versioning)
   script:
     - echo -e "${TXT_BLUE}Building python wheel...${TXT_CLEAR}"
+    - ls -al
+    - poetry version
     - poetry build --format wheel
     - ls -al dist/
+  after_script:
+    - WHEEL_BUILD_VERSION=$(poetry version -s)
+    - echo "WHEEL_BUILD_VERSION is ${WHEEL_BUILD_VERSION}"
+    - echo "WHEEL_BUILD_VERSION=${WHEEL_BUILD_VERSION}" > build_wheel.env
   artifacts:
-    when: always
+    expire_in: 1 week
     paths:
-      - "dist/"
+      - dist/
+      - build_wheel.env
+    reports:
+      dotenv: build_wheel.env
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| BUILD |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
@@ -96,6 +105,9 @@ variables:
   when: manual
   variables:
     GIT_DEPTH: 0  # Required for poetry publish to get correct version
+  before_script:
+    - !reference [.configuration_template, before_script]
+    - rm build_wheel.env  # to keep the git status clean
   script:
     - echo -e "${TXT_BLUE}Deploying python wheel...${TXT_CLEAR}"
     - ls -al
@@ -103,5 +115,16 @@ variables:
     - poetry config repositories.gitlab "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi"
     - poetry config http-basic.gitlab gitlab-ci-token "${CI_JOB_TOKEN}"
     - poetry publish --repository gitlab
+  after_script:
+    # Job extending this template will depend on the build_wheel job, so we can use the same variable and pass it further
+    # so jobs depending on deploy_wheel won't have to include build_wheel also just to get the version
+    - echo "WHEEL_BUILD_VERSION is ${WHEEL_BUILD_VERSION}"
+    - echo "WHEEL_BUILD_VERSION=${WHEEL_BUILD_VERSION}" > deploy_wheel.env
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - deploy_wheel.env
+    reports:
+      dotenv: deploy_wheel.env
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| DEPLOY |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
