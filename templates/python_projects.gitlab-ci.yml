@@ -76,6 +76,7 @@ variables:
 .build_wheel_template:
   extends: .configuration_template
   variables:
+    GIT_STRATEGY: clone
     GIT_DEPTH: 0  # We need full history to get correct version (dynamic versioning)
   script:
     - echo -e "${TXT_BLUE}Building python wheel...${TXT_CLEAR}"
@@ -104,6 +105,7 @@ variables:
   extends: .configuration_template
   when: manual
   variables:
+    GIT_STRATEGY: clone
     GIT_DEPTH: 0  # Required for poetry publish to get correct version
   before_script:
     - !reference [.configuration_template, before_script]
