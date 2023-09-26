@@ -12,14 +12,15 @@ include:
 
 .jmeter_benchmark_with_haf_job:
   extends: .jmeter_benchmark_job
+  variables:
+    HAF_COMMIT: $HAF_COMMIT # dotenv artifacts can be passed to service as long as they appear in section variables
   services:
     - name: $HAF_IMAGE_NAME
       alias: haf-instance
       variables:
         # Allow access from any network to eliminate CI IP addressing problems
         PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
-        DATADIR: $DATA_CACHE_HAF/datadir
-        SHM_DIR: $DATA_CACHE_HAF/shm_dir
+        DATA_SOURCE: "${DATA_CACHE_HAF_PREFIX}_${HAF_COMMIT}"
         LOG_FILE: $CI_JOB_NAME.log
       command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
     - name: $APP_IMAGE
@@ -74,12 +75,12 @@ include:
   variables:
     HIVED_IMAGE_NAME: ""  # Must be overrided at derived job
     TESTED_ENDPOINT: hived-instance:8091
+    HIVED_COMMIT: $HIVED_COMMIT
   services:
     - name: $HIVED_IMAGE_NAME
       alias: hived-instance
       variables:
-        DATADIR: $DATA_CACHE_HIVE/datadir
-        SHM_DIR: $DATA_CACHE_HIVE/shm_dir
+        DATA_SOURCE: "${DATA_CACHE_HIVE_PREFIX}_${HIVED_COMMIT}"
         LOG_FILE: $CI_JOB_NAME.log
       command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
 
@@ -91,14 +92,14 @@ include:
     HAF_APP_IMAGE: ""  # Image path name to be used at app testing. App will be instantiated as a service.
     HAF_APP_PORT: ""  # To be specified by derived job
     TESTED_ENDPOINT: app:${HAF_APP_PORT}
+    HAF_COMMIT: $HAF_COMMIT
   services:
     - name: ${HAF_IMAGE_NAME}
       alias: haf-instance
       variables:
         # Allow access from any network to eliminate CI IP addressing problems
         PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
-        DATADIR: $DATA_CACHE_HAF/datadir
-        SHM_DIR: $DATA_CACHE_HAF/shm_dir
+        DATA_SOURCE: "${DATA_CACHE_HAF_PREFIX}_${HAF_COMMIT}"
         LOG_FILE: $CI_JOB_NAME.log
       command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
     - name: ${HAF_APP_IMAGE}
@@ -113,14 +114,14 @@ include:
   extends: .tox_test_job
   variables:
     ENDPOINT: app:$APP_PORT
+    HIVED_COMMIT: $HIVED_COMMIT
   services:
     - name: $HAF_IMAGE_NAME
       alias: haf-instance
       variables:
         # Allow access from any network to eliminate CI IP addressing problems
         PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
-        DATADIR: $DATA_CACHE_HAF/datadir
-        SHM_DIR: $DATA_CACHE_HAF/shm_dir
+        DATA_SOURCE: "${DATA_CACHE_HIVE_PREFIX}_${HIVED_COMMIT}"
         LOG_FILE: $CI_JOB_NAME.log
       command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
     - name: $APP_IMAGE
@@ -133,6 +134,7 @@ include:
 
     HIVED_ENDPOINT: hived-instance:8091
     JUNIT_REPORT: "comparsion_tests.xml"
+    HIVED_COMMIT: $HIVED_COMMIT # define HIVED_COMMIT here so its available in services
 
   services:
     - !reference [.hived_pattern_tests_template, services]
