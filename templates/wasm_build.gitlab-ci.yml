@@ -2,8 +2,8 @@ include:
   - local: templates/base.gitlab-ci.yml
 
 variables:
-  # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:9cdc105390dd4dafcf692a034cbfca358c4898b6
-  EMSCRIPTEN_IMAGE_TAG: "@sha256:9b7fa5a6f4d19fed24f9e1b1f5d3b818fa875d0f76a5d17f7116178573a6e534"
+  # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:3f16e4d0f714b94be0fc83a29a7b20129deca2f8
+  EMSCRIPTEN_IMAGE_TAG: "@sha256:09be4e5a5e4eb33835d6edffe9c26e2772e98fedcfbdef07f8ad4b1382fa4405"
   EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:3.1.43$EMSCRIPTEN_IMAGE_TAG"
 
 .wasm_build_job_template:
