@@ -14,7 +14,7 @@ RUN apt-get update && \
     autoconf \
     libtool \
     protobuf-compiler && \
-    npm install -g yarn
+    npm install -g pnpm
 
 FROM supplemented_tools_sdk AS lib_source
 
