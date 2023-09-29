@@ -170,13 +170,24 @@ build_emsdk_image:
   needs:
     - build_docker_dind_image
   rules:
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
       exists:
         - Dockerfile.emscripten
       changes:
+        paths:
+          - Dockerfile.emscripten
+          - scripts/bash/emscripten/*
+          - scripts/bash/emscripten/**/*
+    - if: $CI_COMMIT_BRANCH !~ /^main$/ # for other branches compare to develop and run if there are diffrences
+      exists:
         - Dockerfile.emscripten
-        - scripts/bash/emscripten/*
-        - scripts/bash/emscripten/**/*
+      changes:
+        paths:
+          - Dockerfile.emscripten
+          - scripts/bash/emscripten/*
+          - scripts/bash/emscripten/**/*
+        compare_to: 'refs/heads/develop'
+
 
 example_docker_image_builder_job:
   extends: .docker_image_builder_job_template
