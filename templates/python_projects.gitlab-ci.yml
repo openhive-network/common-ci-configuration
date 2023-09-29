@@ -101,7 +101,7 @@ variables:
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| DEPLOY |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-.deploy_wheel_template:
+.deploy_wheel_base:
   extends: .configuration_template
   when: manual
   variables:
@@ -110,13 +110,6 @@ variables:
   before_script:
     - !reference [.configuration_template, before_script]
     - rm build_wheel.env  # to keep the git status clean
-  script:
-    - echo -e "${TXT_BLUE}Deploying python wheel...${TXT_CLEAR}"
-    - ls -al
-    - poetry version
-    - poetry config repositories.gitlab "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi"
-    - poetry config http-basic.gitlab gitlab-ci-token "${CI_JOB_TOKEN}"
-    - poetry publish --repository gitlab
   after_script:
     # Job extending this template will depend on the build_wheel job, so we can use the same variable and pass it further
     # so jobs depending on deploy_wheel won't have to include build_wheel also just to get the version
@@ -128,5 +121,15 @@ variables:
       - deploy_wheel.env
     reports:
       dotenv: deploy_wheel.env
+
+.deploy_wheel_to_gitlab_template:
+  extends: .deploy_wheel_base
+  script:
+    - echo -e "${TXT_BLUE}Deploying python wheel to the GitLab PyPI registry...${TXT_CLEAR}"
+    - ls -al
+    - poetry version
+    - poetry config repositories.gitlab "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi"
+    - poetry config http-basic.gitlab gitlab-ci-token "${CI_JOB_TOKEN}"
+    - poetry publish --repository gitlab
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| DEPLOY |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
