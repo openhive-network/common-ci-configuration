@@ -132,4 +132,15 @@ variables:
     - poetry config http-basic.gitlab gitlab-ci-token "${CI_JOB_TOKEN}"
     - poetry publish --repository gitlab
 
+.deploy_wheel_to_pypi_template:
+  extends: .deploy_wheel_base
+  variables:
+    PYPI_AUTHORIZATION_TOKEN: $PYPI_AUTHORIZATION_TOKEN
+  script:
+    - echo -e "${TXT_BLUE}Deploying python wheel to the official PyPI registry...${TXT_CLEAR}"
+    - ls -al
+    - poetry version
+    - poetry config pypi-token.pypi "${PYPI_AUTHORIZATION_TOKEN}"
+    - poetry publish
+
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| DEPLOY |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
