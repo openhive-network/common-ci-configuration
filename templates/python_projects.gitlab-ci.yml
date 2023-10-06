@@ -5,6 +5,8 @@ include:
 variables:
   # required to set:
   PACKAGES_TO_CHECK: ""
+  # may be set:
+  PYPROJECT_CONFIG_PATH: ""
   # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu22.04-7
   PYTHON_IMAGE_TAG: "@sha256:8f68baf07c6e581e1e8034a1447c4ff1268239fc886bfe4b02aa3f4182bf78bb"
   PYTHON_IMAGE: "registry.gitlab.syncad.com/hive/hive/ci-base-image${PYTHON_IMAGE_TAG}"
@@ -51,22 +53,25 @@ variables:
 .lint_code_with_ruff_template:
   extends: .project_develop_configuration_template
   script:
+    - if [ -z "${PYPROJECT_CONFIG_PATH}" ]; then MAYBE_EXPLICIT_CONFIG=""; else MAYBE_EXPLICIT_CONFIG="--config ${PYPROJECT_CONFIG_PATH}"; fi
     - echo -e "${TXT_BLUE}Linting all sources with Ruff (check)...${TXT_CLEAR}" &&
-      ruff ${PACKAGES_TO_CHECK}
+      ruff ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
     - echo -e "${TXT_BLUE}Linting all sources with Ruff (diff)...${TXT_CLEAR}" &&
-      ruff ${PACKAGES_TO_CHECK} --diff
+      ruff --diff ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
 
 .formatting_with_black_check_template:
   extends: .project_develop_configuration_template
   script:
+    - if [ -z "${PYPROJECT_CONFIG_PATH}" ]; then MAYBE_EXPLICIT_CONFIG=""; else MAYBE_EXPLICIT_CONFIG="--config ${PYPROJECT_CONFIG_PATH}"; fi
     - echo -e "${TXT_BLUE}Checking code formatting with Black...${TXT_CLEAR}" &&
-      black ${PACKAGES_TO_CHECK} --check --diff --color
+      black --check --diff --color ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
 
 .type_check_with_mypy_template:
   extends: .project_develop_configuration_template
   script:
+    - if [ -z "${PYPROJECT_CONFIG_PATH}" ]; then MAYBE_EXPLICIT_CONFIG=""; else MAYBE_EXPLICIT_CONFIG="--config-file ${PYPROJECT_CONFIG_PATH}"; fi
     - echo -e "${TXT_BLUE}Checking types with mypy...${TXT_CLEAR}" &&
-      mypy ${PACKAGES_TO_CHECK}
+      mypy ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| STATIC CODE ANALYSIS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
