@@ -64,7 +64,7 @@ lint_python_scripts:
   extends: .validation_job
   image: python:latest
   before_script:
-    - pip install pylint_junit
+    - pip install pylint==2.17.7 pylint_junit
   script:
     - pip install -r scripts/python/requirements.txt
     - pylint --output-format=text,pylint_junit.JUnitReporter:pylint-junit-result.xml scripts/python/*.py
