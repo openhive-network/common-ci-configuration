@@ -1,4 +1,5 @@
 default:
+  interruptible: true
   timeout: 1 hour
   artifacts:
     when: always

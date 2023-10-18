@@ -18,7 +18,6 @@ variables:
 
 .configuration_template:
   image: "${PYTHON_IMAGE}"
-  interruptible: true
   before_script:
     - poetry env use python3  # create virtualenv if not exists
     - source $(poetry env info --path)/bin/activate  # activate that virtualenv

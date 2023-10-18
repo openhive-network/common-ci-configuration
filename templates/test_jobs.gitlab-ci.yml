@@ -33,7 +33,6 @@ include:
     JUNIT_REPORT: "report.xml"  # should be ovverided by derived jobs
     PYTEST_BASED_IMAGE_NAME: ""  # "$CI_REGISTRY_IMAGE/ci-base-image$TEST_IMAGE_TAG"
     POETRY_INSTALL_ROOT_DIR: ""  # $CI_PROJECT_DIR/tests/hive-local-tools
-  interruptible: true
   image: "${PYTEST_BASED_IMAGE_NAME}"
 
   before_script:

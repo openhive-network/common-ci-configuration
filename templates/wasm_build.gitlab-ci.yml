@@ -8,7 +8,6 @@ variables:
 
 .wasm_build_job_template:
   extends: .job-defaults
-  interruptible: true
   variables:
     # The directory containing sources to be built - it should be overrided by derived job
     SOURCE_DIR: ""
