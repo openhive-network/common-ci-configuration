@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.5
-ARG EMSCRIPTEN_VERSION=3.1.43
+ARG EMSCRIPTEN_VERSION=3.1.47
 
 FROM emscripten/emsdk:${EMSCRIPTEN_VERSION} AS pure_emscripten_sdk
 
@@ -11,6 +11,7 @@ RUN apt-get update && \
   DEBIAN_FRONTEND=noniteractive apt-get install -y \
     git \
     jq \
+    ninja-build \
     autoconf \
     libtool \
     protobuf-compiler && \
