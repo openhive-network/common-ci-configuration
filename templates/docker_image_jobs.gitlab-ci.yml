@@ -12,7 +12,6 @@ include:
     DOCKER_DRIVER: overlay2
     DOCKER_TLS_CERTDIR: "/certs"
   image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:${DOCKER_BUILDER_TAG}
-  interruptible: true
   before_script:
     - |
       echo -e "\e[0Ksection_start:$(date +%s):buildkit_config[collapsed=true]\r\e[0KConfiguring Docker BuildKit..."
@@ -26,7 +25,6 @@ include:
 .docker_image_cleanup_job_template:
   extends: .job-defaults
   image: registry.gitlab.syncad.com/hive/common-ci-configuration/image-remover:${IMAGE_REMOVER_TAG}
-  interruptible: true
   variables:
     REGISTRY: $CI_REGISTRY_IMAGE
     REGISTRY_PASS: ""
