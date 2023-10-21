@@ -35,7 +35,12 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
       ts-proto@~1.156.7 \
       typescript@~4.4.4 \
       protobufjs@~7.2.5 && \
-    pnpm dlx playwright install
+    pnpm dlx playwright install && \
+    git config --global advice.detachedHead false && \
+    git config --global --add safe.directory '*' && \
+    chmod -c o+x "${HOME}" && \
+    chmod -Rc o+r "${HOME}" && \
+    chmod -c o+r "${HOME}/.bashrc"
 
 USER root
 WORKDIR /home/emscripten 
@@ -57,9 +62,6 @@ WORKDIR /home/emscripten
 
 RUN <<-EOF
   set -e
-
-  git config --global advice.detachedHead false
-  git config --global --add safe.directory '*'
 
   mkdir -vp tmp_src
   cd tmp_src
