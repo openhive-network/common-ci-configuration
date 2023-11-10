@@ -134,7 +134,7 @@ variables:
     - poetry version
     - poetry config repositories.gitlab "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi"
     - poetry config http-basic.gitlab gitlab-ci-token "${CI_JOB_TOKEN}"
-    - poetry publish --repository gitlab
+    - poetry publish --skip-existing --repository gitlab
 
 .deploy_wheel_to_pypi_template:
   extends: .deploy_wheel_base
@@ -149,6 +149,6 @@ variables:
     - ls -al
     - poetry version
     - poetry config pypi-token.pypi "${PYPI_AUTHORIZATION_TOKEN}"
-    - poetry publish
+    - poetry publish --skip-existing
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| DEPLOY |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
