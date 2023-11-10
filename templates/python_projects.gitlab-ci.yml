@@ -17,6 +17,7 @@ variables:
 
 
 .configuration_template:
+  extends: .job-defaults
   image: "${PYTHON_IMAGE}"
   before_script:
     - poetry env use python3  # create virtualenv if not exists
