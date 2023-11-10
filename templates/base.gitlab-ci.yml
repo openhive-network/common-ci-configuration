@@ -9,3 +9,4 @@ default:
 # See https://gitlab.com/gitlab-org/gitlab/-/issues/418003 for details.
 .job-defaults:
   timeout: 1 hour
+  interruptible: true
