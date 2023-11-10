@@ -7,8 +7,8 @@ variables:
   PACKAGES_TO_CHECK: ""
   # may be set:
   PYPROJECT_CONFIG_PATH: ""
-  # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu22.04-7
-  PYTHON_IMAGE_TAG: "@sha256:8f68baf07c6e581e1e8034a1447c4ff1268239fc886bfe4b02aa3f4182bf78bb"
+  # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu22.04-8
+  PYTHON_IMAGE_TAG: "@sha256:e9f16040010ad24fffeabec66abca109b24baa79d912eba3118da58e8130fb26"
   PYTHON_IMAGE: "registry.gitlab.syncad.com/hive/hive/ci-base-image${PYTHON_IMAGE_TAG}"
   # colors:
   TXT_GREEN: "\e[1;32m"
@@ -72,6 +72,18 @@ variables:
     - if [ -z "${PYPROJECT_CONFIG_PATH}" ]; then MAYBE_EXPLICIT_CONFIG=""; else MAYBE_EXPLICIT_CONFIG="--config-file ${PYPROJECT_CONFIG_PATH}"; fi
     - echo -e "${TXT_BLUE}Checking types with mypy...${TXT_CLEAR}" &&
       mypy ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
+
+# job template useful to match project local poetry.lock file to pyproject.toml specification
+# and avoid differences, which can potentially cause bugs really not reproducible on clean evironment.
+.verify_poetry_lock_sanity_template:
+  extends: .job-defaults
+  variables:
+    PYPROJECT_DIR: "" #should be overrided by inheritted job
+
+  image: "${PYTHON_IMAGE}"
+  script:
+    - cd "${PYPROJECT_DIR}"
+    - poetry lock --check # we have to stick to old syntax, because poetry-grpc-plugin used at wax repo disallows to upgrade poetry tool to version higher than 1.5.1
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| STATIC CODE ANALYSIS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
