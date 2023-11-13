@@ -28,12 +28,21 @@ ENV HOME=/home/emscripten
 # Preinstall large deps (rare changed) to eliminate pulling them from web each time
 ENV PNPM_HOME="/home/emscripten/.local/share/pnpm"
 ENV PATH="${PNPM_HOME}:${PATH}"
+ENV PLAYWRIGHT_BROWSERS_PATH="${HOME}/pw-browsers"
 
 RUN source "${EMSDK}/emsdk_env.sh" && \
     pnpm add -g \
-      playwright@~1.38.1 \
-      ts-proto@~1.156.7 \
-      typescript@~4.4.4 \
+      playwright@~1.39.0 \
+      ts-proto@~1.158.0 \
+      tslib@~2.6.2 \
+      typescript@~5.2.2 \
+      rollup@~4.3.0 \
+      rollup/plugin-node-resolve@~15.2.3 \
+      rollup/plugin-commonjs@~25.0.7 \
+      rollup-plugin-typescript2@~0.36.0 \
+      types/node@~20.7.1 \
+      typedoc@~0.25.3 \
+      typedoc-plugin-markdown@~3.17.1 \
       protobufjs@~7.2.5 && \
     pnpm dlx playwright install && \
     git config --global advice.detachedHead false && \
