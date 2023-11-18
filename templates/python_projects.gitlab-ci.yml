@@ -19,11 +19,14 @@ variables:
 .configuration_template:
   extends: .job-defaults
   image: "${PYTHON_IMAGE}"
+  variables:
+    PYPROJECT_DIR: "$(pwd)"
+
   before_script:
-    - poetry env use python3  # create virtualenv if not exists
-    - source $(poetry env info --path)/bin/activate  # activate that virtualenv
+    - poetry -C "${PYPROJECT_DIR}" env use python3  # create virtualenv if not exists
+    - source $(poetry -C "${PYPROJECT_DIR}" env info --path)/bin/activate  # activate that virtualenv
     - python3 -V
-    - poetry -V
+    - poetry -C "${PYPROJECT_DIR}" -V
     - pip list
 
 
@@ -98,11 +101,11 @@ variables:
   script:
     - echo -e "${TXT_BLUE}Building python wheel...${TXT_CLEAR}"
     - ls -al
-    - poetry version
-    - poetry build --format wheel
+    - poetry -C "${PYPROJECT_DIR}" version
+    - poetry -C "${PYPROJECT_DIR}" build --format wheel
     - ls -al dist/
   after_script:
-    - WHEEL_BUILD_VERSION=$(poetry version -s)
+    - WHEEL_BUILD_VERSION=$(poetry -C "${PYPROJECT_DIR}" version -s)
     - echo "WHEEL_BUILD_VERSION is ${WHEEL_BUILD_VERSION}"
     - echo "WHEEL_BUILD_VERSION=${WHEEL_BUILD_VERSION}" > build_wheel.env
   artifacts:
