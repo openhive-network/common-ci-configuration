@@ -147,10 +147,10 @@ variables:
   script:
     - echo -e "${TXT_BLUE}Deploying python wheel to the GitLab PyPI registry...${TXT_CLEAR}"
     - ls -al
-    - poetry version
-    - poetry config repositories.gitlab "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi"
-    - poetry config http-basic.gitlab gitlab-ci-token "${CI_JOB_TOKEN}"
-    - poetry publish --skip-existing --repository gitlab
+    - poetry -C "${PYPROJECT_DIR}" version
+    - poetry -C "${PYPROJECT_DIR}" config repositories.gitlab "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi"
+    - poetry -C "${PYPROJECT_DIR}" config http-basic.gitlab gitlab-ci-token "${CI_JOB_TOKEN}"
+    - poetry -C "${PYPROJECT_DIR}" publish --skip-existing --repository gitlab
 
 .deploy_wheel_to_pypi_template:
   extends: .deploy_wheel_base
@@ -163,8 +163,8 @@ variables:
   script:
     - echo -e "${TXT_BLUE}Deploying python wheel to the official PyPI registry...${TXT_CLEAR}"
     - ls -al
-    - poetry version
-    - poetry config pypi-token.pypi "${PYPI_AUTHORIZATION_TOKEN}"
-    - poetry publish --skip-existing
+    - poetry -C "${PYPROJECT_DIR}" version
+    - poetry -C "${PYPROJECT_DIR}" config pypi-token.pypi "${PYPI_AUTHORIZATION_TOKEN}"
+    - poetry -C "${PYPROJECT_DIR}" publish --skip-existing
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| DEPLOY |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
