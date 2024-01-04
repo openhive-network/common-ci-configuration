@@ -3,7 +3,7 @@ ARG EMSCRIPTEN_VERSION=3.1.51
 
 FROM emscripten/emsdk:${EMSCRIPTEN_VERSION} AS pure_emscripten_sdk
 
-FROM pure_emscripten_sdk AS supplemented_tools_sdk
+FROM pure_emscripten_sdk AS supplemented_emscripten_sdk
 
 USER root
 
@@ -15,7 +15,13 @@ RUN apt-get update && \
     autoconf \
     libtool \
     protobuf-compiler && \
-    npm install -g pnpm
+    npm install -g pnpm && \
+    apt-get clean && rm -r /var/lib/apt/lists/*
+
+FROM supplemented_emscripten_sdk AS supplemented_node_sdk
+
+ARG NODEJS_VERSION=v18.19.0
+ENV NODEJS_VERSION=${NODEJS_VERSION}
 
 USER emscripten
 WORKDIR /home/emscripten
@@ -27,10 +33,16 @@ ENV HOME=/home/emscripten
 
 # Preinstall large deps (rare changed) to eliminate pulling them from web each time
 ENV PNPM_HOME="/home/emscripten/.local/share/pnpm"
-ENV PATH="${PNPM_HOME}:${PATH}"
+ENV NVM_DIR="${HOME}/.nvm"
+ENV PATH="${PNPM_HOME}:${NVM_DIR}:${PATH}"
 ENV PLAYWRIGHT_BROWSERS_PATH="${HOME}/pw-browsers"
 
 RUN source "${EMSDK}/emsdk_env.sh" && \
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && \
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
+    nvm install "${NODEJS_VERSION}" && \
+    nvm use "${NODEJS_VERSION}" && \
+    pnpm config set store-dir ${PNPM_HOME}/preinstalled-store --global && \
     pnpm add -g \
       playwright@~1.39.0 \
       ts-proto@~1.158.0 \
@@ -56,9 +68,12 @@ WORKDIR /home/emscripten
 ENV PNPM_HOME="/home/emscripten/.local/share/pnpm"
 ENV PATH="${PNPM_HOME}:${PATH}"
 
-RUN pnpm dlx playwright install-deps
+RUN pnpm playwright install-deps && apt-get clean && rm -r /var/lib/apt/lists/*
 
-FROM supplemented_tools_sdk AS lib_source
+USER emscripten
+WORKDIR /home/emscripten
+
+FROM supplemented_emscripten_sdk AS lib_source
 
 ARG BOOST_VERSION_TAG=boost-1.82.0
 ENV BOOST_VERSION_TAG=${BOOST_VERSION_TAG}
@@ -123,7 +138,7 @@ WORKDIR /home/emscripten
 
 RUN /home/emscripten/scripts/prepare_secp256k1-zkp.sh "${TMP_SRC}" "/emsdk/upstream/emscripten/cache/sysroot/"
 
-FROM supplemented_tools_sdk AS emscripten_builder
+FROM supplemented_node_sdk AS emscripten_builder
 
 USER emscripten
 WORKDIR /home/emscripten
