@@ -1,7 +1,7 @@
 variable "CI_REGISTRY_IMAGE" {}
 variable "CI_COMMIT_SHA" {}
 variable "EMSCRIPTEN_VERSION" {
-  default = "3.1.47"
+  default = "3.1.51"
 }
 variable "BOOST_VERSION_TAG" {
   default = null
