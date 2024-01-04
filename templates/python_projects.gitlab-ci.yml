@@ -7,8 +7,8 @@ variables:
   PACKAGES_TO_CHECK: ""
   # may be set:
   PYPROJECT_CONFIG_PATH: ""
-  # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu22.04-8
-  PYTHON_IMAGE_TAG: "@sha256:e9f16040010ad24fffeabec66abca109b24baa79d912eba3118da58e8130fb26"
+  # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu22.04-10
+  PYTHON_IMAGE_TAG: "@sha256:080b16fd53013aeb9b89b00a8dfc90fecf886173f46448b05f45cee376c43330"
   PYTHON_IMAGE: "registry.gitlab.syncad.com/hive/hive/ci-base-image${PYTHON_IMAGE_TAG}"
   # colors:
   TXT_GREEN: "\e[1;32m"
