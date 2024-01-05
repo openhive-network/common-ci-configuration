@@ -43,8 +43,9 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
     nvm install "${NODEJS_VERSION}" && \
     nvm use "${NODEJS_VERSION}" && \
     pnpm config set store-dir ${PNPM_HOME}/preinstalled-store --global && \
-    pnpm add -g \
+    pnpm add  \
       playwright@~1.39.0 \
+      @playwright/test@~1.39.0 \
       ts-proto@~1.158.0 \
       tslib@~2.6.2 \
       typescript@~5.2.2 \
@@ -52,11 +53,11 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
       rollup/plugin-node-resolve@~15.2.3 \
       rollup/plugin-commonjs@~25.0.7 \
       rollup-plugin-typescript2@~0.36.0 \
-      types/node@~20.7.1 \
+      types/node@~20.10.6 \
       typedoc@~0.25.3 \
       typedoc-plugin-markdown@~3.17.1 \
       protobufjs@~7.2.5 && \
-    pnpm dlx playwright install && \
+    pnpm playwright install && \
     git config --global advice.detachedHead false && \
     git config --global --add safe.directory '*' && \
     chmod -c o+x "${HOME}" && \
@@ -66,9 +67,13 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
 USER root
 WORKDIR /home/emscripten 
 ENV PNPM_HOME="/home/emscripten/.local/share/pnpm"
+ENV PLAYWRIGHT_BROWSERS_PATH="${HOME}/pw-browsers"
 ENV PATH="${PNPM_HOME}:${PATH}"
 
 RUN pnpm playwright install-deps && apt-get clean && rm -r /var/lib/apt/lists/*
+
+USER emscripten
+WORKDIR /home/emscripten
 
 USER emscripten
 WORKDIR /home/emscripten
