@@ -57,7 +57,7 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
       typedoc@~0.25.3 \
       typedoc-plugin-markdown@~3.17.1 \
       protobufjs@~7.2.5 && \
-    pnpm playwright install && \
+    pnpm playwright install chromium && \
     git config --global advice.detachedHead false && \
     git config --global --add safe.directory '*' && \
     chmod -c o+x "${HOME}" && \
@@ -65,7 +65,7 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
     chmod -c o+r "${HOME}/.bashrc"
 
 USER root
-WORKDIR /home/emscripten 
+WORKDIR /home/emscripten
 ENV PNPM_HOME="/home/emscripten/.local/share/pnpm"
 ENV PLAYWRIGHT_BROWSERS_PATH="${HOME}/pw-browsers"
 ENV PATH="${PNPM_HOME}:${PATH}"
