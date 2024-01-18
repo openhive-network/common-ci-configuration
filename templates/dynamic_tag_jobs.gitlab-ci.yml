@@ -1,0 +1,70 @@
+variables:
+  TOX_IMAGE_TAG: "latest"
+
+include:
+  - local: templates/base.gitlab-ci.yml
+
+.determine-runner-tag-template:
+  extends: .job-defaults
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/tox-test-runner:${TOX_IMAGE_TAG}
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - |
+      cat <<-EOF > "${CI_PROJECT_DIR}/parse-runner-tags.py"
+      #!/usr/bin/python3
+      '''
+      This script parses $CI_RUNNER_TAGS variable to create a .env file containing the
+      tags of the runner used to run the job it's invoked in.
+      '''
+      import argparse
+      import json
+      import os
+
+      parser = argparse.ArgumentParser(description='Script to parse $CI_RUNNER_TAGS variable and create a dotenv file based on it.')
+      parser.add_argument("-o", "--output-file", help = "File to write output to", required=True)
+
+      args = parser.parse_args()
+
+      ci_runner_tags = os.getenv("CI_RUNNER_TAGS")
+      if ci_runner_tags is None:
+        print("Variable CI_RUNNER_TAGS is no set, please set it and rerun this script.")
+        exit(1)
+      print("CI_RUNNER_TAGS={ci_runner_tags}".format(ci_runner_tags=ci_runner_tags))
+
+      ci_runner_tags_json = json.loads(ci_runner_tags)
+      print("Parsed data:\n")
+      print(*ci_runner_tags_json, sep = "\n")
+
+      output_file = getattr(args, "output_file")
+
+      with (
+        open(output_file, 'w') as output
+      ):
+        for index, tag in enumerate(ci_runner_tags_json):
+          output.write("RUNNER_TAG_{index}={tag}\n".format(index=index, tag=tag))
+      EOF
+      chmod +x "${CI_PROJECT_DIR}/parse-runner-tags.py"
+      python3 "${CI_PROJECT_DIR}/parse-runner-tags.py" --output-file "$CI_PROJECT_DIR/runner-tag.env"
+      cat $CI_PROJECT_DIR/runner-tag.env
+  artifacts:
+    when: on_success
+    expire_in: "1 weeks"
+    reports:
+      dotenv: runner-tag.env
+  tags:
+    - $DATA_REPLAY_TAG
+
+.dynamic-runner-job-template:
+  extends: .job-defaults
+  tags:
+    - $DYNAMIC_RUNNER_TAG_0
+    - $DYNAMIC_RUNNER_TAG_1
+    - $DYNAMIC_RUNNER_TAG_2
+    - $DYNAMIC_RUNNER_TAG_3
+    - $DYNAMIC_RUNNER_TAG_4
+    - $DYNAMIC_RUNNER_TAG_5
+    - $DYNAMIC_RUNNER_TAG_6
+    - $DYNAMIC_RUNNER_TAG_7
+    - $DYNAMIC_RUNNER_TAG_8
+    - $DYNAMIC_RUNNER_TAG_9

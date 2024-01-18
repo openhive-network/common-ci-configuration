@@ -84,7 +84,7 @@ variables:
 .verify_poetry_lock_sanity_template:
   extends: .job-defaults
   variables:
-    PYPROJECT_DIR: "" #should be overrided by inheritted job
+    PYPROJECT_DIR: "" # should be overrided by inheritted job
 
   image: "${PYTHON_IMAGE}"
   script:
