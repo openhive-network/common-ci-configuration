@@ -6,26 +6,6 @@ variables:
 include:
   - local: templates/base.gitlab-ci.yml
 
-.jmeter_benchmark_job:
-  extends: .job-defaults
-  image: registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:${BENCHMARK_IMAGE_TAG}
-
-.jmeter_benchmark_with_haf_job:
-  extends: .jmeter_benchmark_job
-  variables:
-    HAF_COMMIT: $HAF_COMMIT # dotenv artifacts can be passed to service as long as they appear in section variables
-  services:
-    - name: $HAF_IMAGE_NAME
-      alias: haf-instance
-      variables:
-        # Allow access from any network to eliminate CI IP addressing problems
-        PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
-        DATA_SOURCE: "${DATA_CACHE_HAF_PREFIX}_${HAF_COMMIT}"
-        LOG_FILE: $CI_JOB_NAME.log
-      command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
-    - name: $APP_IMAGE
-      alias: app
-
 .pytest_based_template:
   extends: .job-defaults
   variables:
@@ -87,23 +67,56 @@ include:
 .haf_app_pattern_tests_template:
   extends: .pattern_test_executor
   variables:
-    HAF_IMAGE_NAME: ""  # Must be overrided at derived job
+    HAF_IMAGE_NAME: "" # Must be overrided at derived job
     HAF_APP_IMAGE: ""  # Image path name to be used at app testing. App will be instantiated as a service.
-    HAF_APP_PORT: ""  # To be specified by derived job
+    HAF_APP_PORT: ""   # To be specified by derived job
+    HAF_APP_USER: ""   # a HAF db role to be used for regular app processing connection. To be specified by derived job
     TESTED_ENDPOINT: app:${HAF_APP_PORT}
     HAF_COMMIT: $HAF_COMMIT
+
   services:
     - name: ${HAF_IMAGE_NAME}
       alias: haf-instance
       variables:
-        # Allow access from any network to eliminate CI IP addressing problems
-        PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
+        PG_ACCESS: "${HAF_DB_ACCESS}"
         DATA_SOURCE: "${DATA_CACHE_HAF_PREFIX}_${HAF_COMMIT}"
         LOG_FILE: $CI_JOB_NAME.log
       command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
+
+    - name: ${HAF_APP_IMAGE}
+      alias: app-setup
+      variables:
+        # intentionally use setup way chosed in haf_api_node compose scripts
+        POSTGRES_URL: "postgresql://haf_admin@haf-instance/haf_block_log"
+      command: ["install_app"]
+
     - name: ${HAF_APP_IMAGE}
       alias: app
+      # intentionally use arg-parser way to verify if it works correctly
+      command: ["--postgres-url=postgresql://${HAF_APP_USER}@haf-instance/haf_block_log"]
+      entrypoint:
+        - '/bin/bash'
+        - '-c'
+        - |
+          set -xeuo pipefail
+          # since Gitlab services startup order is undefined, we need to wait for app setup completion
+          [ -s "./app/scripts/wait_for_setup_completed.sh" ] && "./app/scripts/wait_for_setup_completed.sh" "$@"
+          echo "Application setup finished - continue app-service spawn..."
+          # pass control to the default image entrypoint
+          "./docker_entrypoint.sh" "$@"
+        # arg $0 should be explicitly passed when using 'bash -c' entrypoints
+        - '/bin/bash'
 
+.jmeter_benchmark_job:
+  extends: .job-defaults
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:${BENCHMARK_IMAGE_TAG}
+
+.jmeter_benchmark_with_haf_job:
+  extends: .jmeter_benchmark_job
+  variables:
+    HAF_COMMIT: $HAF_COMMIT # dotenv artifacts can be passed to service as long as they appear in section variables
+  services:
+    - !reference [.haf_app_pattern_tests_template, services]
 
 .tox_test_job:
   extends: .job-defaults
