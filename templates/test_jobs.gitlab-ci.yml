@@ -55,6 +55,7 @@ include:
     HIVED_IMAGE_NAME: ""  # Must be overrided at derived job
     TESTED_ENDPOINT: hived-instance:8091
     HIVED_COMMIT: $HIVED_COMMIT
+    FF_NETWORK_PER_BUILD: 1
   services:
     - name: $HIVED_IMAGE_NAME
       alias: hived-instance
@@ -73,6 +74,7 @@ include:
     HAF_APP_USER: ""   # a HAF db role to be used for regular app processing connection. To be specified by derived job
     TESTED_ENDPOINT: app:${HAF_APP_PORT}
     HAF_COMMIT: $HAF_COMMIT
+    FF_NETWORK_PER_BUILD: 1
 
   services:
     - name: ${HAF_IMAGE_NAME}
@@ -115,6 +117,7 @@ include:
   extends: .jmeter_benchmark_job
   variables:
     HAF_COMMIT: $HAF_COMMIT # dotenv artifacts can be passed to service as long as they appear in section variables
+    FF_NETWORK_PER_BUILD: 1
   services:
     - !reference [.haf_app_pattern_tests_template, services]
 
