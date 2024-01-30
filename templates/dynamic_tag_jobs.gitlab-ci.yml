@@ -55,6 +55,19 @@ include:
   tags:
     - $DATA_REPLAY_TAG
 
+.dynamic-tag-pipeline-trigger-template:
+  variables:
+    DYNAMIC_RUNNER_TAG_0: $RUNNER_TAG_0
+    DYNAMIC_RUNNER_TAG_1: $RUNNER_TAG_1
+    DYNAMIC_RUNNER_TAG_2: $RUNNER_TAG_2
+    DYNAMIC_RUNNER_TAG_3: $RUNNER_TAG_3
+    DYNAMIC_RUNNER_TAG_4: $RUNNER_TAG_4
+    DYNAMIC_RUNNER_TAG_5: $RUNNER_TAG_5
+    DYNAMIC_RUNNER_TAG_6: $RUNNER_TAG_6
+    DYNAMIC_RUNNER_TAG_7: $RUNNER_TAG_7
+    DYNAMIC_RUNNER_TAG_8: $RUNNER_TAG_8
+    DYNAMIC_RUNNER_TAG_9: $RUNNER_TAG_9
+
 .dynamic-runner-job-template:
   extends: .job-defaults
   tags:
