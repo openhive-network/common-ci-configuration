@@ -163,6 +163,18 @@ build_tox_test_runner_image:
       exists:
         - Dockerfile.tox-test-runner
 
+build_jq_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "jq"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.jq
+
 build_emsdk_image:
   extends: .build_docker_image
   stage: build
