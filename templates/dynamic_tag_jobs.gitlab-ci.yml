@@ -1,5 +1,6 @@
 variables:
   TOX_IMAGE_TAG: "latest"
+  JQ_IMAGE_TAG: "latest"
 
 include:
   - local: templates/base.gitlab-ci.yml
@@ -81,3 +82,66 @@ include:
     - $DYNAMIC_RUNNER_TAG_7
     - $DYNAMIC_RUNNER_TAG_8
     - $DYNAMIC_RUNNER_TAG_9
+
+.dynamic-pipeline-details-collector-template:
+  extends: .job-defaults
+  image: "registry.gitlab.syncad.com/hive/common-ci-configuration/jq:$JQ_IMAGE_TAG"
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - |
+      set -e
+
+      echo -e "\e[0Ksection_start:$(date +%s):step1[collapsed=true]\r\e[0KGetting child pipeline ID..."
+      BRIDGES_URL="$CI_API_V4_URL/projects/$CI_PROJECT_ID/pipelines/$CI_PIPELINE_ID/bridges"
+      echo "BRIDGES_URL: $BRIDGES_URL"
+      curl --output bridges.json --silent --fail-with-body \
+        --header "PRIVATE-TOKEN: $CHILD_PIPELINE_ACCESS_TOKEN" "$BRIDGES_URL"
+      CI_CHILD_PIPELINE_ID=$(cat bridges.json | jq ".[] | select(.name==\"dynamic-tag-pipeline-trigger\") | .downstream_pipeline | .id")
+      echo "Child pipeline ID: $CI_CHILD_PIPELINE_ID"
+      echo -e "\e[0Ksection_end:$(date +%s):step1\r\e[0K"
+
+      echo -e "\e[0Ksection_start:$(date +%s):step2[collapsed=true]\r\e[0KGetting child pipeline jobs' details..."
+      CHILD_JOBS_URL="$CI_API_V4_URL/projects/$CI_PROJECT_ID/pipelines/$CI_CHILD_PIPELINE_ID/jobs"
+      echo "CHILD_JOBS_URL: $CHILD_JOBS_URL"
+      curl --output child-jobs.json --silent --fail-with-body \
+          --header "PRIVATE-TOKEN: $CHILD_PIPELINE_ACCESS_TOKEN" "$CHILD_JOBS_URL"
+      echo -e "\e[0Ksection_end:$(date +%s):step2\r\e[0K"
+  artifacts:
+    when: always
+    paths:
+      - "bridges.json"
+      - "child-jobs.json"
+
+.dynamic-pipeline-test-results-collector-template:
+  extends: .job-defaults
+  image: "registry.gitlab.syncad.com/hive/common-ci-configuration/jq:$JQ_IMAGE_TAG"
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - |
+      set -e
+
+      echo -e "\e[0Ksection_start:$(date +%s):step3[collapsed=true]\r\e[0KProcessing test results from job: $CHILD_PIPELINE_JOB"
+      echo "Getting child job ID..."
+
+      CI_CHILD_JOB_ID=$(cat child-jobs.json | jq ".[] | select(.name==\"$CHILD_PIPELINE_JOB\") | .id")
+      echo "Child job ID: $CI_CHILD_JOB_ID"
+
+      echo "Downloading artifacts..."
+      ARTIFACT_URL="$CI_API_V4_URL/projects/$CI_PROJECT_ID/jobs/$CI_CHILD_JOB_ID/artifacts"
+      echo "ARTIFACT_URL=$ARTIFACT_URL"
+      curl --output artifacts.zip --fail-with-body \
+        --header "PRIVATE-TOKEN: $CHILD_PIPELINE_ACCESS_TOKEN" "$ARTIFACT_URL"
+
+      unzip artifacts.zip
+      rm artifacts.zip
+      echo "Done!"
+      echo -e "\e[0Ksection_end:$(date +%s):step3\r\e[0K"
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - "**/re*.xml"
+    paths:
+      - "**/re*.xml"
