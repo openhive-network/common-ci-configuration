@@ -3,7 +3,7 @@ variables:
   JQ_IMAGE_TAG: "latest"
 
 include:
-  - local: templates/base.gitlab-ci.yml
+  - local: templates/docker_image_jobs.gitlab-ci.yml
 
 .determine-runner-tag-template:
   extends: .job-defaults
@@ -85,7 +85,7 @@ include:
 
 .dynamic-pipeline-details-collector-template:
   extends: .job-defaults
-  image: "registry.gitlab.syncad.com/hive/common-ci-configuration/jq:$JQ_IMAGE_TAG"
+  image: "registry.gitlab.syncad.com/hive/common-ci-configuration/jq:${JQ_IMAGE_TAG}"
   variables:
     GIT_STRATEGY: none
   script:
@@ -115,7 +115,7 @@ include:
 
 .dynamic-pipeline-test-results-collector-template:
   extends: .job-defaults
-  image: "registry.gitlab.syncad.com/hive/common-ci-configuration/jq:$JQ_IMAGE_TAG"
+  image: "registry.gitlab.syncad.com/hive/common-ci-configuration/jq:${JQ_IMAGE_TAG}"
   variables:
     GIT_STRATEGY: none
   script:
@@ -145,3 +145,49 @@ include:
         - "**/re*.xml"
     paths:
       - "**/re*.xml"
+
+.rewrite-dotenv-and-extract-binaries-template:
+  extends: .docker_image_builder_job_template
+  variables:
+    GIT_STRATEGY: none
+    DOT_ENV_FILENAME: ""
+    DOTENV_VAR_PREFIX: ""
+    DOTENV_VAR_NAME: ""
+    BINARY_CACHE_PATH: ""
+  script:
+    - |
+      set -e
+
+      IMAGE_VAR_NAME=${DOTENV_VAR_NAME}_IMAGE_NAME
+      BASE_INSTANCE_VAR_NAME=${DOTENV_VAR_NAME}_BASE_INSTANCE
+      INSTANCE_VAR_NAME=${DOTENV_VAR_NAME}_INSTANCE
+      REGISTRY_PATH_VAR_NAME=${DOTENV_VAR_NAME}_REGISTRY_PATH
+      REGISTRY_TAG_VAR_NAME=${DOTENV_VAR_NAME}_REGISTRY_TAG
+      COMMIT_VAR_NAME=${DOTENV_VAR_NAME}_COMMIT
+
+      cat <<-EOF >> "$DOT_ENV_FILENAME.env"
+      ${DOTENV_VAR_PREFIX}_IMAGE_NAME=${!IMAGE_VAR_NAME}
+      ${DOTENV_VAR_PREFIX}_BASE_INSTANCE=${!BASE_INSTANCE_VAR_NAME}
+      ${DOTENV_VAR_PREFIX}_INSTANCE=${!INSTANCE_VAR_NAME}
+      ${DOTENV_VAR_PREFIX}_REGISTRY_PATH=${!REGISTRY_PATH_VAR_NAME}
+      ${DOTENV_VAR_PREFIX}_REGISTRY_TAG=${!REGISTRY_TAG_VAR_NAME}
+      ${DOTENV_VAR_PREFIX}_COMMIT=${!COMMIT_VAR_NAME}
+      EOF
+
+      cat "$DOT_ENV_FILENAME.env"
+
+      if [[ -n "${BINARY_CACHE_PATH}" ]]; then
+        mkdir -p "${BINARY_CACHE_PATH}"
+        docker build -o "${BINARY_CACHE_PATH}" - <<EOF
+          FROM scratch
+          COPY --from=${!IMAGE_VAR_NAME} /home/hived/bin/ /
+      EOF
+      else
+        echo "Skipping binary extraction"
+      fi
+  artifacts:
+    reports:
+      dotenv: $DOT_ENV_FILENAME.env
+    paths:
+      - $DOT_ENV_FILENAME.env
+      - $BINARY_CACHE_PATH
