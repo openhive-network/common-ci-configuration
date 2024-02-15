@@ -1,7 +1,6 @@
 variables:
   BENCHMARK_IMAGE_TAG: "latest"
   TOX_IMAGE_TAG: "latest"
-  APP_PORT: 0
 
 include:
   - local: templates/base.gitlab-ci.yml
