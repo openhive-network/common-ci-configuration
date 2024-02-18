@@ -159,6 +159,7 @@ variables:
     - ls -al
     - poetry -C "${PYPROJECT_DIR}" version
     - poetry -C "${PYPROJECT_DIR}" build --format wheel
+    - if [ -d "${PYPROJECT_DIR}/dist" ] && [ ! -d "dist" ]; then cp -r "${PYPROJECT_DIR}/dist" "dist"; fi
     - ls -al dist/
   after_script:
     - WHEEL_BUILD_VERSION=$(poetry -C "${PYPROJECT_DIR}" version -s)
@@ -167,6 +168,7 @@ variables:
   artifacts:
     expire_in: 1 week
     paths:
+      - "${PYPROJECT_DIR}/dist"
       - dist/
       - build_wheel.env
     reports:
