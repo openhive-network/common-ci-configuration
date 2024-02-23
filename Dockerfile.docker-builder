@@ -1,6 +1,12 @@
+# syntax=docker/dockerfile:1.4
 FROM docker:24.0.1-cli AS docker-builder
 
 RUN apk add --no-cache bash git coreutils ca-certificates curl sudo
-RUN adduser -D hived && echo "hived ALL=(ALL) NOPASSWD: SETENV: /bin/cp" >> /etc/sudoers
+RUN <<EOF
+    set -e
+    adduser -D hived
+    echo "hived ALL=(ALL) NOPASSWD: SETENV: /bin/cp" >> /etc/sudoers
+    echo "hived ALL=(ALL) NOPASSWD: SETENV: /bin/rm" >> /etc/sudoers
+EOF
 USER hived
 WORKDIR /home/hived
