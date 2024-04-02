@@ -1,2 +1,11 @@
 [MASTER]
 load-plugins=pylint_junit
+
+[BASIC]
+module-naming-style=any
+
+[DESIGN]
+max-locals = 20
+
+[FORMAT]
+max-line-length=150

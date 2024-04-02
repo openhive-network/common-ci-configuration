@@ -24,7 +24,7 @@ include:
 
 .docker_image_cleanup_job_template:
   extends: .job-defaults
-  image: registry.gitlab.syncad.com/hive/common-ci-configuration/image-remover:${IMAGE_REMOVER_TAG}
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/python-scripts:${IMAGE_REMOVER_TAG}
   variables:
     REGISTRY: $CI_REGISTRY_IMAGE
     REGISTRY_PASS: ""
@@ -34,6 +34,22 @@ include:
     - echo "Attempting to cleanup an image $IMAGE_PATH using tag $IMAGE_TAG from $REGISTRY"
     - python /delete-image.py "$REGISTRY_PASS" "$CI_PROJECT_ID" "$IMAGE_PATH" "$IMAGE_TAG"
   when: always
+
+.buildkit_cleanup_job_template:
+  extends: .job-defaults
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/python-scripts:${IMAGE_REMOVER_TAG}
+  variables:
+    CACHE_REPOSITORIES: ""
+  script:
+    - echo "Attempting to delete old BuildKit cache from the following repositories $CACHE_REPOSITORIES"
+    - python3 /remove-buildkit-cache.py
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH || $CI_COMMIT_TAG
+      when: manual
+      allow_failure: true
+  tags:
+    - public-runner-docker
 
 .publish_docker_image_template:
   extends: .docker_image_builder_job_template

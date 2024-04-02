@@ -129,13 +129,13 @@ build_image_remover_image:
   extends: .build_docker_image
   stage: build
   variables:
-    BUILD_TARGET: "image-remover"
+    BUILD_TARGET: "python-scripts"
   needs:
     - build_docker_dind_image
   rules:
     - if: $CI_COMMIT_BRANCH
       exists:
-        - Dockerfile.image-remover
+        - Dockerfile.python-scripts
 
 build_benchmark_test_runner_image:
   extends: .build_docker_image
