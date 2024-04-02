@@ -1,6 +1,6 @@
-FROM python:3.11.0 AS image-remover
+FROM python:3.12.2 AS python-scripts
 
-COPY scripts/python/delete-image.py /
+COPY scripts/python/*.py /
 COPY scripts/python/requirements.txt /
 RUN pip install -r requirements.txt
 CMD [ "bash" ]

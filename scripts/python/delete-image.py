@@ -1,3 +1,4 @@
+#!/usr/local/bin/python3
 # pylint: disable=C0103
 '''
 This script deletes a tag from GitLab's embedded docker repository.

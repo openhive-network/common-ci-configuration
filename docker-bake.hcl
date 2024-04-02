@@ -61,11 +61,11 @@ target "docker-dind" {
   cache-to = generate-cache-to("docker-dind", "${tag}")
 }
 
-target "image-remover" {
-  dockerfile = "Dockerfile.image-remover"
-  tags = generate-tags("image-remover", "${tag}")
-  cache-from = generate-cache-from("image-remover", "${tag}")
-  cache-to = generate-cache-to("image-remover", "${tag}")
+target "python-scripts" {
+  dockerfile = "Dockerfile.python-scripts"
+  tags = generate-tags("python-scripts", "${tag}")
+  cache-from = generate-cache-from("python-scripts", "${tag}")
+  cache-to = generate-cache-to("python-scripts", "${tag}")
 }
 
 target "tox-test-runner" {
