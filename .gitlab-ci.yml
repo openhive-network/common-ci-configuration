@@ -9,6 +9,7 @@ stages:
   - validation
   - pre-build
   - build
+  - test
   - example-build
   - example-test
   - example-cleanup
@@ -187,6 +188,55 @@ build_emsdk_image:
           - scripts/bash/emscripten/**/*
         compare_to: 'refs/heads/develop'
 
+build_psql_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "psql"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
+      exists:
+        - Dockerfile.psql
+      changes:
+        paths:
+          - Dockerfile.psql
+    - if: $CI_COMMIT_BRANCH !~ /^main$/ # for other branches compare to develop and run if there are diffrences
+      exists:
+        - Dockerfile.psql
+      changes:
+        paths:
+          - Dockerfile.psql
+        compare_to: 'refs/heads/develop'
+
+psql_image_test:
+  stage: test
+  image: 
+    name: registry.gitlab.syncad.com/hive/common-ci-configuration/psql:14-1
+    entrypoint: [""]
+  services:
+    - postgres:14
+  variables:
+    POSTGRES_DB: haf
+    POSTGRES_USER: haf_admin
+    POSTGRES_PASSWORD: password
+    POSTGRES_HOST_AUTH_METHOD: trust
+    PGHOST: postgres
+    PGPORT: 5432
+    PGDATABASE: $POSTGRES_DB
+    PGUSER: $POSTGRES_USER
+    PGPASSWORD: $POSTGRES_PASSWORD
+    CI_DEBUG_SERVICES: "false"
+  script:
+    - |
+      set -e
+
+      psql --command="\conninfo"
+      psql --list
+      psql --command="\set"
+  tags:
+    - public-runner-docker    
 
 example_docker_image_builder_job:
   extends: .docker_image_builder_job_template
