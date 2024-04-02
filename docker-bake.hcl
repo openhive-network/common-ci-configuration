@@ -3,6 +3,12 @@ variable "CI_COMMIT_SHA" {}
 variable "EMSCRIPTEN_VERSION" {
   default = "3.1.56"
 }
+variable "PSQL_IMAGE_VERSION" {
+  default = "14-1" # After updating tag here, remeber to also update it in job 'psql_image_test'
+}
+variable "PAAS_PSQL_VERSION" {
+  default = "11251948d5dd4867552f9b9836a9e02110304df5"
+}
 variable "BOOST_VERSION_TAG" {
   default = null
 }
@@ -85,4 +91,11 @@ target "emsdk" {
     BOOST_VERSION_TAG = "${BOOST_VERSION_TAG}",
     OPENSSL_VERSION_TAG = "${OPENSSL_VERSION_TAG}"
   }
+}
+
+target "psql" {
+  dockerfile = "Dockerfile.psql"
+  tags = generate-tags("psql", "${PSQL_IMAGE_VERSION}")
+  cache-from = generate-cache-from("psql", "${PSQL_IMAGE_VERSION}")
+  cache-to = generate-cache-to("psql", "${PSQL_IMAGE_VERSION}")
 }
