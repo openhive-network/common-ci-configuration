@@ -96,9 +96,9 @@ variables:
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| TESTS |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-.run-pytest: &run-pytest
+.run-pytest:
   # Usage:
-  # 1. Add - *run-pytest to your script section.
+  # 1. Add - !reference [.run-pytest, script] to your script section.
   # 2. Set the appropriate values for:
   #    - PYTEST_TIMEOUT_MINUTES (required, should be set on the job level)
   #    - PYTEST_NUMBER_OF_PROCESSES (default: defined via global CI variable, could be overridden on the job level)
@@ -106,42 +106,43 @@ variables:
   #    - PYTEST_ARGS (default: "" - empty, should be set on the job level)
   #    - PYTEST_JUNIT_REPORT (default: "report.xml")
   #      Best to export PYTEST_ARGS as array (e.g. `export PYTEST_ARGS=(-m testnet)`). In some cases setting PYTEST_ARGS as string will fail.
-  - |
-    PYTEST_FULL_CMD=("pytest")
+  script:
+    - |
+      PYTEST_FULL_CMD=("pytest")
 
-    if [ -z "${PYTEST_TIMEOUT_MINUTES}" ]; then
-      echo "Required variable PYTEST_TIMEOUT_MINUTES was not set!"
-      exit 22
-    fi
+      if [ -z "${PYTEST_TIMEOUT_MINUTES}" ]; then
+        echo "Required variable PYTEST_TIMEOUT_MINUTES was not set!"
+        exit 22
+      fi
 
-    # add pytest timeout to prevent gitlab CI killing job on timeout without any artifacts and no info about tests
-    PYTEST_FULL_CMD+=("--timeout=$((${PYTEST_TIMEOUT_MINUTES} * 60))")
+      # add pytest timeout to prevent gitlab CI killing job on timeout without any artifacts and no info about tests
+      PYTEST_FULL_CMD+=("--timeout=$((${PYTEST_TIMEOUT_MINUTES} * 60))")
 
-    # use pytest-xdist only under theses certain conditions, so running with PYTEST_NUMBER_OF_PROCESSES=1 doesnt use xdist
-    if [[ ${PYTEST_NUMBER_OF_PROCESSES} == "auto" || ${PYTEST_NUMBER_OF_PROCESSES} -gt 1 ]]; then
-      PYTEST_FULL_CMD+=("-n=${PYTEST_NUMBER_OF_PROCESSES}")
-    fi
+      # use pytest-xdist only under theses certain conditions, so running with PYTEST_NUMBER_OF_PROCESSES=1 doesnt use xdist
+      if [[ ${PYTEST_NUMBER_OF_PROCESSES} == "auto" || ${PYTEST_NUMBER_OF_PROCESSES} -gt 1 ]]; then
+        PYTEST_FULL_CMD+=("-n=${PYTEST_NUMBER_OF_PROCESSES}")
+      fi
 
-    # durations=0 makes pytest print all tests durations
-    if [ ${PYTEST_LOG_DURATIONS:=0} -ge 1 ]; then
-      PYTEST_FULL_CMD+=("--durations=0")
-    fi
+      # durations=0 makes pytest print all tests durations
+      if [ ${PYTEST_LOG_DURATIONS:=0} -ge 1 ]; then
+        PYTEST_FULL_CMD+=("--durations=0")
+      fi
 
-    PYTEST_FULL_CMD+=("--junitxml=${PYTEST_JUNIT_REPORT}")
+      PYTEST_FULL_CMD+=("--junitxml=${PYTEST_JUNIT_REPORT}")
 
-    PYTEST_FULL_CMD+=("${PYTEST_ARGS[@]}")
+      PYTEST_FULL_CMD+=("${PYTEST_ARGS[@]}")
 
-    echo "Launching pytest with:
-         - timeout (minutes): ${PYTEST_TIMEOUT_MINUTES}
-         - processes: ${PYTEST_NUMBER_OF_PROCESSES}
-         - log durations: ${PYTEST_LOG_DURATIONS}
-         - additional arguments: ${PYTEST_ARGS[@]}"
-    echo
-    echo "Full pytest command:"
-    echo "${PYTEST_FULL_CMD[@]}"
+      echo "Launching pytest with:
+           - timeout (minutes): ${PYTEST_TIMEOUT_MINUTES}
+           - processes: ${PYTEST_NUMBER_OF_PROCESSES}
+           - log durations: ${PYTEST_LOG_DURATIONS}
+           - additional arguments: ${PYTEST_ARGS[@]}"
+      echo
+      echo "Full pytest command:"
+      echo "${PYTEST_FULL_CMD[@]}"
 
-    # add extra bash timeout
-    timeout $(((${PYTEST_TIMEOUT_MINUTES} + 2) * 60)) "${PYTEST_FULL_CMD[@]}"
+      # add extra bash timeout
+      timeout $(((${PYTEST_TIMEOUT_MINUTES} + 2) * 60)) "${PYTEST_FULL_CMD[@]}"
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| TESTS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
