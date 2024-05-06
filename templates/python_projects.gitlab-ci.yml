@@ -5,6 +5,10 @@ include:
 variables:
   PACKAGES_TO_CHECK: ""  # required to set when using linter-specific job templates
   PYPROJECT_CONFIG_PATH: ""  # may be set when using linter-specific job templates
+  # tests:
+  PYTEST_NUMBER_OF_PROCESSES: "auto" # will use nproc to determine number of processes, override on specific project CI/job level
+  PYTEST_LOG_DURATIONS: 0  # do not log test durations by default
+  PYTEST_JUNIT_REPORT: "report.xml"  # junit report location, used by GitLab
   # registries:
   # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu22.04-10
   PYTHON_IMAGE_TAG: "@sha256:080b16fd53013aeb9b89b00a8dfc90fecf886173f46448b05f45cee376c43330"
@@ -96,21 +100,48 @@ variables:
   # Usage:
   # 1. Add - *run-pytest to your script section.
   # 2. Set the appropriate values for:
-  #    - PYTEST_TIMEOUT_MINUTES (required)
-  #    - PYTEST_NUMBER_OF_PROCESSES (default: defined via global CI variable)
-  #    - PYTEST_LOG_DURATIONS (default: 0 - disabled)
-  #    - PYTEST_ARGS (default: "" - empty)
-  #      Best to export PYTEST_ARGS as array (e.g. `export PYTEST_ARGS=(-m testnet)`. In some cases setting PYTEST_ARGS as string will fail.
-  - if [ -z "$PYTEST_TIMEOUT_MINUTES" ]; then echo "Required variable PYTEST_TIMEOUT_MINUTES was not set!"; exit 22; fi
-  - if [ $PYTEST_NUMBER_OF_PROCESSES -gt 1 ]; then PROCESSES="-n ${PYTEST_NUMBER_OF_PROCESSES}";  fi
-  - if [ ${PYTEST_LOG_DURATIONS:=0} -ge 1 ]; then DURATIONS="--durations 0";  fi
+  #    - PYTEST_TIMEOUT_MINUTES (required, should be set on the job level)
+  #    - PYTEST_NUMBER_OF_PROCESSES (default: defined via global CI variable, could be overridden on the job level)
+  #    - PYTEST_LOG_DURATIONS (default: defined via global CI variable, could be overridden on the job level)
+  #    - PYTEST_ARGS (default: "" - empty, should be set on the job level)
+  #    - PYTEST_JUNIT_REPORT (default: "report.xml")
+  #      Best to export PYTEST_ARGS as array (e.g. `export PYTEST_ARGS=(-m testnet)`). In some cases setting PYTEST_ARGS as string will fail.
   - |
-    echo "Launching pytest
-     - timeout (minutes): ${PYTEST_TIMEOUT_MINUTES}
-     - processes: ${PYTEST_NUMBER_OF_PROCESSES}
-     - log durations: ${PYTEST_LOG_DURATIONS}
-     - additional arguments: ${PYTEST_ARGS[@]}"
-  - timeout $((($PYTEST_TIMEOUT_MINUTES + 2) * 60)) pytest --timeout=$(($PYTEST_TIMEOUT_MINUTES * 60)) --junitxml="$JUNIT_REPORT" "${PROCESSES}" "${DURATIONS}" "${PYTEST_ARGS[@]}"
+    PYTEST_FULL_CMD=("pytest")
+
+    if [ -z "${PYTEST_TIMEOUT_MINUTES}" ]; then
+      echo "Required variable PYTEST_TIMEOUT_MINUTES was not set!"
+      exit 22
+    fi
+
+    # add pytest timeout to prevent gitlab CI killing job on timeout without any artifacts and no info about tests
+    PYTEST_FULL_CMD+=("--timeout=$((${PYTEST_TIMEOUT_MINUTES} * 60))")
+
+    # use pytest-xdist only under theses certain conditions, so running with PYTEST_NUMBER_OF_PROCESSES=1 doesnt use xdist
+    if [[ ${PYTEST_NUMBER_OF_PROCESSES} == "auto" || ${PYTEST_NUMBER_OF_PROCESSES} -gt 1 ]]; then
+      PYTEST_FULL_CMD+=("-n=${PYTEST_NUMBER_OF_PROCESSES}")
+    fi
+
+    # durations=0 makes pytest print all tests durations
+    if [ ${PYTEST_LOG_DURATIONS:=0} -ge 1 ]; then
+      PYTEST_FULL_CMD+=("--durations=0")
+    fi
+
+    PYTEST_FULL_CMD+=("--junitxml=${PYTEST_JUNIT_REPORT}")
+
+    PYTEST_FULL_CMD+=("${PYTEST_ARGS[@]}")
+
+    echo "Launching pytest with:
+         - timeout (minutes): ${PYTEST_TIMEOUT_MINUTES}
+         - processes: ${PYTEST_NUMBER_OF_PROCESSES}
+         - log durations: ${PYTEST_LOG_DURATIONS}
+         - additional arguments: ${PYTEST_ARGS[@]}"
+    echo
+    echo "Full pytest command:"
+    echo "${PYTEST_FULL_CMD[@]}"
+
+    # add extra bash timeout
+    timeout $(((${PYTEST_TIMEOUT_MINUTES} + 2) * 60)) "${PYTEST_FULL_CMD[@]}"
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| TESTS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
