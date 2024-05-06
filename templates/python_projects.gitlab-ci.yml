@@ -91,6 +91,31 @@ variables:
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| STATIC CODE ANALYSIS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| TESTS |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+.run-pytest: &run-pytest
+  # Usage:
+  # 1. Add - *run-pytest to your script section.
+  # 2. Set the appropriate values for:
+  #    - PYTEST_TIMEOUT_MINUTES (required)
+  #    - PYTEST_NUMBER_OF_PROCESSES (default: defined via global CI variable)
+  #    - PYTEST_LOG_DURATIONS (default: 0 - disabled)
+  #    - PYTEST_ARGS (default: "" - empty)
+  #      Best to export PYTEST_ARGS as array (e.g. `export PYTEST_ARGS=(-m testnet)`. In some cases setting PYTEST_ARGS as string will fail.
+  - if [ -z "$PYTEST_TIMEOUT_MINUTES" ]; then echo "Required variable PYTEST_TIMEOUT_MINUTES was not set!"; exit 22; fi
+  - if [ $PYTEST_NUMBER_OF_PROCESSES -gt 1 ]; then PROCESSES="-n ${PYTEST_NUMBER_OF_PROCESSES}";  fi
+  - if [ ${PYTEST_LOG_DURATIONS:=0} -ge 1 ]; then DURATIONS="--durations 0";  fi
+  - |
+    echo "Launching pytest
+     - timeout (minutes): ${PYTEST_TIMEOUT_MINUTES}
+     - processes: ${PYTEST_NUMBER_OF_PROCESSES}
+     - log durations: ${PYTEST_LOG_DURATIONS}
+     - additional arguments: ${PYTEST_ARGS[@]}"
+  - timeout $((($PYTEST_TIMEOUT_MINUTES + 2) * 60)) pytest --timeout=$(($PYTEST_TIMEOUT_MINUTES * 60)) --junitxml="$JUNIT_REPORT" "${PROCESSES}" "${DURATIONS}" "${PYTEST_ARGS[@]}"
+
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| TESTS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| BUILD |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 .build_wheel_template:
