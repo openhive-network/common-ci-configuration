@@ -1,0 +1,109 @@
+include:
+  - local: templates/base.gitlab-ci.yml
+
+variables:
+  # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:3.1.56-1
+  EMSCRIPTEN_IMAGE_TAG: "3.1.56-1@sha256:39613986bb7e2364ee927d6a1ad5a7e5c171e12af2179fd5269e8a5530ba3864"
+  EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG"
+
+.npm_based_job_base:
+  extends: .job-defaults
+
+  variables:
+    # allows to override project directory before starting actual processing
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+
+    FF_NETWORK_PER_BUILD: 1
+
+  image: ${EMSCRIPTEN_IMAGE} # this image contains all required tools and preinstalled set of common npm packages
+
+  before_script:
+    - git config --global --add safe.directory '*'
+    - . "${NVM_DIR}/nvm.sh"  # This loads nvm environment
+    - nvm use "${NODEJS_VERSION}" # Force usage of preconfigured NodeJS version
+    - cd "${SOURCE_DIR}" # move to the project directory (where package.json file is located)
+    - pnpm install --frozen-lockfile # install all required dependencies
+
+# Base definition for job performing an npm build step. Outputs packaged project in *.tgz form
+# tgz package path can be received by `BUILT_PACKAGE_PATH` .env variable
+.npm_build_template:
+  extends: .npm_based_job_base
+  variables:
+    # The directory containing sources to be built - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    # Output directory where should be stored package - it should be overrided by derived job
+    DIST_DIR: ""
+
+    # Target package scope - it should be overrided by derived job
+    NPM_PACKAGE_SCOPE: ""
+    # Target package name - it should be overrided by derived job
+    NPM_PACKAGE_NAME: ""
+    NPM_REGISTRY_URL: "gitlab.syncad.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/"
+
+  script:
+    - /home/emscripten/scripts/npm_build_package.sh "${SOURCE_DIR}" "${NPM_REGISTRY_URL}" "${NPM_PACKAGE_SCOPE}" "${NPM_PACKAGE_NAME}" "${DIST_DIR}"
+
+  artifacts:
+    reports:
+      dotenv:
+        - "${SOURCE_DIR}/built_package_info.env" # contains path to produced tgz
+        - "${SOURCE_DIR}/built_package_version_info.env" # contains information related to generated package version and git revision
+
+    paths:
+      - "${DIST_DIR}/*.tgz" # Built package
+      - "${DIST_DIR}/built_package_info.json"
+
+    when: always
+    expire_in: 1 week
+
+.npm_test_template:
+  extends: .npm_based_job_base
+  variables:
+    # Path pointing the source directory containing a package.json file - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    # Path to the built package tarball - it should be overrided by derived job
+    PACKAGE_TGZ_PATH: ""
+
+  script:
+    - echo -e "\e[0Ksection_start:$(date +%s):package_tgz_unpack[collapsed=true]\r\e[0KAttempting to unpack ${PACKAGE_TGZ_PATH}"
+    - cd "${CI_PROJECT_DIR}"
+    - tar -xf "${PACKAGE_TGZ_PATH}" -C "${SOURCE_DIR}" --strip-components=1
+    - echo -e "\e[0Ksection_end:$(date +%s):package_tgz_unpack\r\e[0K"
+    - echo -e "\e[0Ksection_start:$(date +%s):testing[collapsed=false]\r\e[0KAttempting to start tests..."
+    - cd "${SOURCE_DIR}"
+    - npm run test
+    - echo -e "\e[0Ksection_end:$(date +%s):testing\r\e[0K"
+
+  artifacts:
+    reports:
+      junit: "${SOURCE_DIR}/results.xml"
+
+    paths:
+      - "${SOURCE_DIR}/results.json"
+
+    when: always
+    expire_in: 1 week
+
+
+# Base definition for NPM package publishing job.
+# The derived job, should have in its dependencies a final job performing a npm-build (derived from `.npm_build_template`)
+.npm_deploy_package_template:
+  extends: .npm_based_job_base
+  variables:
+    # The directory containing sources to be built - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    # Path to the built package tarball - it should be overrided by derived job
+    PACKAGE_TGZ_PATH: ""
+    # Target package scope - it should be overrided by derived job
+    NPM_PACKAGE_SCOPE: ""
+    NPM_REGISTRY_URL: "gitlab.syncad.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/"
+    NPM_PUBLISH_TOKEN: "${CI_JOB_TOKEN}"
+
+  script:
+    - echo -e "\e[0Ksection_start:$(date +%s):package_tgz_unpack[collapsed=true]\r\e[0KAttempting to unpack ${PACKAGE_TGZ_PATH}"
+    - cd "${CI_PROJECT_DIR}"
+    - tar -xf "${PACKAGE_TGZ_PATH}" -C "${SOURCE_DIR}" --strip-components=1
+    - echo -e "\e[0Ksection_end:$(date +%s):package_tgz_unpack\r\e[0K"
+    - echo -e "\e[0Ksection_start:$(date +%s):publishing[collapsed=false]\r\e[0KAttempting to publish a package..."
+    - /home/emscripten/scripts/npm_publish.sh "${SOURCE_DIR}" "${NPM_REGISTRY_URL}" "${NPM_PACKAGE_SCOPE}" "${NPM_PUBLISH_TOKEN}"
+    - echo -e "\e[0Ksection_end:$(date +%s):publishing\r\e[0K"

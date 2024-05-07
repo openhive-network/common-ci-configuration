@@ -1,23 +1,13 @@
 include:
-  - local: templates/base.gitlab-ci.yml
-
-variables:
-  # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:3.1.56
-  EMSCRIPTEN_IMAGE_TAG: "3.1.56@sha256:f6da0cce7edf4921ea7ef2907110ae6c351f49d6ba3e84a8eb53f348adf73777"
-  EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG"
+  - local: templates/npm_projects.gitlab-ci.yml
 
 .wasm_build_job_template:
-  extends: .job-defaults
+  extends: .npm_based_job_base
   variables:
     # The directory containing sources to be built - it should be overrided by derived job
     SOURCE_DIR: ""
     # Output directory where should be stored binaries - it should be overrided by derived job
     BINARIES_DIR: ""
-
-  image: ${EMSCRIPTEN_IMAGE}
-
-  before_script:
-    - git config --global --add safe.directory '*'
 
   script:
     - mkdir -vp "${BINARIES_DIR}"
