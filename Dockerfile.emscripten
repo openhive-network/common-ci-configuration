@@ -160,3 +160,9 @@ COPY --chown=emscripten --from=emscripten_openssl_builder /emsdk/upstream/emscri
 COPY --chown=emscripten --from=emscripten_openssl_builder /emsdk/upstream/emscripten/cache/sysroot/libx32/ /emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/
 COPY --chown=emscripten --from=emscripten_openssl_builder /emsdk/upstream/emscripten/cache/sysroot/libx32/pkgconfig/* /emsdk/upstream/emscripten/cache/sysroot/lib/pkgconfig/
 
+FROM emscripten_builder AS supplemented_emscripten_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+ADD --chown=emscripten ./scripts/bash/npm-helpers /home/emscripten/scripts/
