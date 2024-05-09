@@ -15,14 +15,14 @@ variables:
 
     FF_NETWORK_PER_BUILD: 1
 
-  image: ${EMSCRIPTEN_IMAGE} # this image contains all required tools and preinstalled set of common npm packages
+  image: ${EMSCRIPTEN_IMAGE}  # this image contains all required tools and preinstalled set of common npm packages
 
   before_script:
     - git config --global --add safe.directory '*'
     - . "${NVM_DIR}/nvm.sh"  # This loads nvm environment
-    - nvm use "${NODEJS_VERSION}" # Force usage of preconfigured NodeJS version
-    - cd "${SOURCE_DIR}" # move to the project directory (where package.json file is located)
-    - pnpm install --frozen-lockfile # install all required dependencies
+    - nvm use "${NODEJS_VERSION}"  # Force usage of preconfigured NodeJS version
+    - cd "${SOURCE_DIR}"  # move to the project directory (where package.json file is located)
+    - pnpm install --frozen-lockfile  # install all required dependencies
 
 # Base definition for job performing an npm build step. Outputs packaged project in *.tgz form
 # tgz package path can be received by `BUILT_PACKAGE_PATH` .env variable
@@ -46,11 +46,11 @@ variables:
   artifacts:
     reports:
       dotenv:
-        - "${SOURCE_DIR}/built_package_info.env" # contains path to produced tgz
-        - "${SOURCE_DIR}/built_package_version_info.env" # contains information related to generated package version and git revision
+        - "${SOURCE_DIR}/built_package_info.env"  # contains path to produced tgz
+        - "${SOURCE_DIR}/built_package_version_info.env"  # contains information related to generated package version and git revision
 
     paths:
-      - "${DIST_DIR}/*.tgz" # Built package
+      - "${DIST_DIR}/*.tgz"  # Built package
       - "${DIST_DIR}/built_package_info.json"
 
     when: always
@@ -130,8 +130,8 @@ variables:
     NPM_PUBLISH_TOKEN: ""
 
   script:
-   # project version info must be regenerated accoring to correct target registry, package scope and name
-    - "/home/emscripten/scripts/npm_generate_version.sh" "${SOURCE_DIR}" "registry.npmjs.org/" "@hiveio" "${NPM_PACKAGE_NAME}"
+    # project version info must be regenerated accoring to correct target registry, package scope and name
+    - /home/emscripten/scripts/npm_generate_version.sh "${SOURCE_DIR}" "registry.npmjs.org/" "@hiveio" "${NPM_PACKAGE_NAME}"
     - echo -e "\e[0Ksection_start:$(date +%s):publishing[collapsed=false]\r\e[0KAttempting to publish a package to registry.npmjs.org..."
     - /home/emscripten/scripts/npm_publish.sh "${SOURCE_DIR}" "registry.npmjs.org/" "@hiveio" "${NPM_PUBLISH_TOKEN}"
     - echo -e "\e[0Ksection_end:$(date +%s):publishing\r\e[0KDone"
