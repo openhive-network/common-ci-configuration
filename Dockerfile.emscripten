@@ -5,8 +5,8 @@ FROM emscripten/emsdk:${EMSCRIPTEN_VERSION} AS pure_emscripten_sdk
 
 FROM pure_emscripten_sdk AS supplemented_emscripten_sdk
 
-ARG PNPM_VERSION=9.0.6
-ENV PNPM_VERSION=9.0.6
+ARG PNPM_VERSION=9.1.1
+ENV PNPM_VERSION=9.1.1
 
 USER root
 
@@ -18,7 +18,6 @@ RUN apt-get update && \
     autoconf \
     libtool \
     protobuf-compiler && \
-    npm install -g pnpm@${PNPM_VERSION} && \
     apt-get clean && rm -r /var/lib/apt/lists/*
 
 FROM supplemented_emscripten_sdk AS supplemented_node_sdk
@@ -45,6 +44,8 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
     nvm install "${NODEJS_VERSION}" && \
     nvm use "${NODEJS_VERSION}" && \
+    corepack enable pnpm && \
+    corepack install -g pnpm@9.1.1 && \
     pnpm config set store-dir ${PNPM_HOME}/preinstalled-store --global && \
     pnpm add  \
       playwright@~1.39.0 \
