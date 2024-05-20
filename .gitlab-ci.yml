@@ -176,14 +176,16 @@ build_emsdk_image:
       changes:
         paths:
           - Dockerfile.emscripten
+          - scripts/bash/npm-helpers/*
           - scripts/bash/emscripten/*
           - scripts/bash/emscripten/**/*
-    - if: $CI_COMMIT_BRANCH !~ /^main$/ # for other branches compare to develop and run if there are diffrences
+    - if: $CI_COMMIT_BRANCH !~ /^main$/ # for other branches compare to develop and run if there are differences
       exists:
         - Dockerfile.emscripten
       changes:
         paths:
           - Dockerfile.emscripten
+          - scripts/bash/npm-helpers/*
           - scripts/bash/emscripten/*
           - scripts/bash/emscripten/**/*
         compare_to: 'refs/heads/develop'
