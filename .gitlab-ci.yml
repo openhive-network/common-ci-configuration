@@ -77,7 +77,7 @@ lint_python_scripts:
 
 .build_docker_image:
   extends: .docker_image_builder_job_template
-  image: docker:24.0.1-cli
+  image: docker:26.1.4-cli
   variables:
     BUILD_TARGET: ""
   before_script:
@@ -113,7 +113,7 @@ build_docker_dind_image:
       exists:
         - Dockerfile.docker-dind
   services:
-    - docker:24.0.1-dind
+    - docker:26.1.4-dind
 
 build_docker_builder_image:
   extends: .build_docker_image
