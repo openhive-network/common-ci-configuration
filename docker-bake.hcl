@@ -35,14 +35,14 @@ function "generate-tags" {
 function "generate-cache-from" {
   params = [target, local_tag]
   result = [
-    notempty(CI_REGISTRY_IMAGE) ? "type=registry,ref=${CI_REGISTRY_IMAGE}/${target}:${local_tag}-cache" : "${target}:${local_tag}",
+    notempty(CI_REGISTRY_IMAGE) ? "type=registry,ref=${CI_REGISTRY_IMAGE}/${target}/cache:${local_tag}" : "${target}:${local_tag}",
   ]
 }
 
 function "generate-cache-to" {
   params = [target, local_tag]
   result = [
-    notempty(CI_REGISTRY_IMAGE) ? "type=registry,mode=max,ref=${CI_REGISTRY_IMAGE}/${target}:${local_tag}-cache" : "type=inline",
+    notempty(CI_REGISTRY_IMAGE) ? "type=registry,mode=max,ref=${CI_REGISTRY_IMAGE}/${target}/cache:${local_tag}" : "type=inline",
   ]
 }
 
