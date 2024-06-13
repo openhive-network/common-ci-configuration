@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM docker:24.0.1-cli AS docker-builder
+FROM docker:26.1.4-cli AS docker-builder
 
 RUN apk add --no-cache bash git coreutils ca-certificates curl sudo
 RUN <<EOF
