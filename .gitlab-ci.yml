@@ -10,6 +10,7 @@ stages:
   - pre-build
   - build
   - test
+  - cleanup
   - example-build
   - example-test
   - example-cleanup
@@ -239,6 +240,13 @@ psql_image_test:
       psql --command="\set"
   tags:
     - public-runner-docker    
+
+buildkit_cache_cleanup:
+  stage: cleanup
+  extends: .buildkit_cleanup_job_template
+  needs: []
+  variables:
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,python-scripts/cache,tox-test-runner/cache"
 
 example_docker_image_builder_job:
   extends: .docker_image_builder_job_template
