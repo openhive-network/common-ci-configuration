@@ -20,12 +20,20 @@ pushd "${PROJECT_DIR}"
 
 GIT_COMMIT_HASH=$(git rev-parse HEAD)
 SHORT_HASH=$(git rev-parse --short HEAD)
-CURRENT_BRANCH_IMPL=$(git branch -r --contains "${SHORT_HASH}")
+
+# warning: same commit can be referenced from multiple branches. It often happens between main/master and develop branches. Let's make a priority for main/master
+CURRENT_BRANCH_IMPL=$(git branch -r --contains "${SHORT_HASH}" --list origin/master --list origin/main)
+
+if [ "${CURRENT_BRANCH_IMPL}" = "" ]; then
+  CURRENT_BRANCH_IMPL=$(git branch -r --contains "${SHORT_HASH}" --list origin/develop)
+fi
+
 if [ "${CURRENT_BRANCH_IMPL}" = "" ]; then
   CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 else
   CURRENT_BRANCH="${CURRENT_BRANCH_IMPL#*/}"
 fi
+
 GIT_COMMIT_TIME=$(TZ=UTC0 git show --quiet --date='format-local:%Y%m%d%H%M%S' --format="%cd")
 TAG_TIME=${GIT_COMMIT_TIME:2}
 TAG=$(git tag --sort=-taggerdate | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+(-.+)?' | head -1)
