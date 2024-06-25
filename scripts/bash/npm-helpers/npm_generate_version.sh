@@ -36,7 +36,13 @@ fi
 
 GIT_COMMIT_TIME=$(TZ=UTC0 git show --quiet --date='format-local:%Y%m%d%H%M%S' --format="%cd")
 TAG_TIME=${GIT_COMMIT_TIME:2}
-TAG=$(git tag --sort=-taggerdate | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+(-.+)?' | head -1)
+_TAG=$(git tag --sort=-taggerdate | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+(-.+)?' | head -1)
+
+echo "Read project original git tag: ${_TAG} (#${SHORT_HASH})"
+# try to skip git tag project name suffix (useful for repositories where multiple targets are published, but sometimes they need to be tagged separately at git side)
+TAG="${_TAG/\-${PROJECT_NAME}\-/}"
+
+echo "Corrected tag (skipped subproject -${PROJECT_NAME}- suffix): ${TAG}"
 
 echo "Preparing npm packge for ${CURRENT_BRANCH}@${TAG} (#${SHORT_HASH})"
 
