@@ -161,12 +161,12 @@ variables:
 
     # The directory containing sources to be built - it can be overrided by derived job
     SOURCE_DIR: "${CI_PROJECT_DIR}"
-
+    PROJECT_URL: "${CI_PROJECT_URL}"
     # Output directory where should be stored `docs' subdirectory containing generated documentation files
     DIST_DIR: "$CI_PROJECT_DIR/dist"
 
   script:
-    - /home/emscripten/scripts/npm_push_doc.sh "${SOURCE_DIR}" "${CI_PROJECT_URL}" "${WIKI_PUSH_TOKEN}" "${DIST_DIR}" "${CI_COMMIT_REF_NAME}" "${CI_COMMIT_REF_PROTECTED}"
+    - /home/emscripten/scripts/npm_push_doc.sh "${SOURCE_DIR}" "${PROJECT_URL}" "${WIKI_PUSH_TOKEN}" "${DIST_DIR}" "${CI_COMMIT_REF_NAME}" "${CI_COMMIT_REF_PROTECTED}"
 
   artifacts:
     reports:
