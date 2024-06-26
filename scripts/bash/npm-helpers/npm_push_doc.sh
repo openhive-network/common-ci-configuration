@@ -93,6 +93,8 @@ fi
 echo "Documentation storage dir: ${DOC_STORAGE_DIR}"
 
 mkdir -vp "${DOC_STORAGE_DIR}"
+mkdir -vp "${WIKI_REPO_DIR}/non-stable/"
+
 touch "${WIKI_REPO_DIR}/non-stable/.gitkeep"
 git add "${WIKI_REPO_DIR}/non-stable/.gitkeep"
 
@@ -121,4 +123,4 @@ echo "Documentation is available at url: ${DOC_URL}"
 
 popd
 
-echo GEN_DOC_URL="${DOC_URL}" > "${PROJECT_DIR}/gen_doc.env"
+echo GEN_DOC_URL="${DOC_URL}" > "gen_doc.env"
