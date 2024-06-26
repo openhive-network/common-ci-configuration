@@ -12,6 +12,8 @@ SCOPE="${3:?Missing arg #3 pointing a package scope}"
 
 PROJECT_NAME="${4:?Missing arg #4 pointing a project name}"
 
+DIST_TAG=${5:-"dev"}
+
 git config --global --add safe.directory '*'
 
 git fetch --tags --quiet
@@ -20,19 +22,6 @@ pushd "${PROJECT_DIR}"
 
 GIT_COMMIT_HASH=$(git rev-parse HEAD)
 SHORT_HASH=$(git rev-parse --short HEAD)
-
-# warning: same commit can be referenced from multiple branches. It often happens between main/master and develop branches. Let's make a priority for main/master
-CURRENT_BRANCH_IMPL=$(git branch -r --contains "${SHORT_HASH}" --list origin/master --list origin/main)
-
-if [ "${CURRENT_BRANCH_IMPL}" = "" ]; then
-  CURRENT_BRANCH_IMPL=$(git branch -r --contains "${SHORT_HASH}" --list origin/develop)
-fi
-
-if [ "${CURRENT_BRANCH_IMPL}" = "" ]; then
-  CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-else
-  CURRENT_BRANCH="${CURRENT_BRANCH_IMPL#*/}"
-fi
 
 GIT_COMMIT_TIME=$(TZ=UTC0 git show --quiet --date='format-local:%Y%m%d%H%M%S' --format="%cd")
 TAG_TIME=${GIT_COMMIT_TIME:2}
@@ -44,27 +33,23 @@ TAG="${_TAG/\-${PROJECT_NAME}\-/}"
 
 echo "Corrected tag (skipped subproject -${PROJECT_NAME}- suffix): ${TAG}"
 
-echo "Preparing npm packge for ${CURRENT_BRANCH}@${TAG} (#${SHORT_HASH})"
+echo "Preparing npm package for ${PROJECT_NAME}@${TAG} (#${SHORT_HASH})"
 
 if [ "${TAG}" = "" ]; then
   echo "Could not find a valid tag name for branch"
   exit 1
 fi
 
-DIST_TAG=""
 NEW_VERSION=""
 
-if [[ "$CURRENT_BRANCH" = "master" ]] || [[ "$CURRENT_BRANCH" = "main" ]]; then
-  DIST_TAG="latest"
+if [ "${DIST_TAG}" = "latest" ]; then
   NEW_VERSION="${TAG}"
-elif [ "$CURRENT_BRANCH" = "develop" ]; then
-  DIST_TAG="stable"
+elif [ "$DIST_TAG" = "stable" ]; then
   NEW_VERSION="${TAG}-stable.${TAG_TIME}"
 else
   DIST_TAG="dev"
   NEW_VERSION="${TAG}-${TAG_TIME}"
 fi
-
 
 git checkout "${PROJECT_DIR}/package.json" # be sure we're on clean version
 
