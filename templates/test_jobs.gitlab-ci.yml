@@ -62,7 +62,7 @@ include:
       variables:
         DATA_SOURCE: "${DATA_CACHE_HIVE_PREFIX}_${HIVED_COMMIT}"
         LOG_FILE: $CI_JOB_NAME.log
-      command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
+      command: ["--replay-blockchain", "--stop-at-block=5000000"]
 
 
 .haf_app_pattern_tests_template:
@@ -83,7 +83,7 @@ include:
         PG_ACCESS: "${HAF_DB_ACCESS}"
         DATA_SOURCE: "${DATA_CACHE_HAF_PREFIX}_${HAF_COMMIT}"
         LOG_FILE: $CI_JOB_NAME.log
-      command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
+      command: ["--replay-blockchain", "--stop-at-block=5000000"]
 
     - name: ${HAF_APP_IMAGE}
       alias: app-setup
@@ -151,7 +151,7 @@ include:
         PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
         DATA_SOURCE: "${DATA_CACHE_HIVE_PREFIX}_${HIVED_COMMIT}"
         LOG_FILE: $CI_JOB_NAME.log
-      command: ["--replay-blockchain", "--stop-replay-at-block=5000000"]
+      command: ["--replay-blockchain", "--stop-at-block=5000000"]
     - name: $APP_IMAGE
       alias: app
 
