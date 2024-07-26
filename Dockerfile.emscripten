@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.5
-ARG EMSCRIPTEN_VERSION=3.1.56
+ARG EMSCRIPTEN_VERSION=3.1.62
 
 FROM emscripten/emsdk:${EMSCRIPTEN_VERSION} AS pure_emscripten_sdk
 
