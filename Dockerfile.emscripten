@@ -47,7 +47,9 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
     corepack enable pnpm && \
     corepack install -g pnpm@9.1.1 && \
     pnpm config set store-dir ${PNPM_HOME}/preinstalled-store --global && \
-    pnpm add  \
+    pnpm config set global-dir ${PNPM_HOME}/preinstalled-store-g --global && \
+    pnpm env use --global "${NODEJS_VERSION}" && \
+    pnpm add -g \
       playwright@~1.39.0 \
       @playwright/test@~1.39.0 \
       ts-proto@~1.158.0 \
@@ -61,7 +63,7 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
       typedoc@~0.25.3 \
       typedoc-plugin-markdown@~3.17.1 \
       protobufjs@~7.2.5 && \
-    pnpm playwright install chromium && \
+    pnpm dlx playwright install chromium && \
     git config --global advice.detachedHead false && \
     git config --global --add safe.directory '*' && \
     chmod -c o+x "${HOME}" && \
@@ -76,10 +78,7 @@ ENV PATH="${PNPM_HOME}:${PATH}"
 
 RUN [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
   nvm use "${NODEJS_VERSION}" && \
-  pnpm playwright install-deps && apt-get clean && rm -r /var/lib/apt/lists/*
-
-USER emscripten
-WORKDIR /home/emscripten
+  pnpm dlx playwright install-deps && apt-get clean && rm -r /var/lib/apt/lists/*
 
 USER emscripten
 WORKDIR /home/emscripten
