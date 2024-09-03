@@ -12,7 +12,19 @@ SCOPE="${3:?Missing arg #3 pointing a package scope}"
 
 PROJECT_NAME="${4:?Missing arg #4 pointing a project name}"
 
-DIST_TAG=${5:-"dev"}
+COMMIT_REF_PROTECTED="${5:-}"
+
+COMMIT_TAG="${6:-}"
+
+if [ "${CI_COMMIT_REF_PROTECTED}" == "true" ]; then
+  if [ -n "${CI_COMMIT_TAG}" ]; then
+    DIST_TAG="latest" # if package is built for protected tag, let's mark it as latest
+  else
+    DIST_TAG="stable" # otherwise, any build for protected branch will produce stable package
+  fi
+else
+  DIST_TAG="dev"
+fi
 
 git config --global --add safe.directory '*'
 
@@ -33,7 +45,7 @@ TAG="${_TAG/\-${PROJECT_NAME}\-/}"
 
 echo "Corrected tag (skipped subproject -${PROJECT_NAME}- suffix): ${TAG}"
 
-echo "Preparing npm package for ${PROJECT_NAME}@${TAG} (#${SHORT_HASH})"
+echo "Preparing npm package for ${SCOPE}/${PROJECT_NAME}@${TAG} (#${SHORT_HASH})"
 
 if [ "${TAG}" = "" ]; then
   echo "Could not find a valid tag name for branch"
@@ -51,7 +63,9 @@ else
   NEW_VERSION="${TAG}-${TAG_TIME}"
 fi
 
-git checkout "${PROJECT_DIR}/package.json" # be sure we're on clean version
+if ! git check-ignore "${PROJECT_DIR}/package.json"; then
+  git checkout "${PROJECT_DIR}/package.json" # be sure we're on clean version, but only if not under .gitignore
+fi
 
 jq ".name = \"${SCOPE}/${PROJECT_NAME}\" | .version = \"$NEW_VERSION\" | .publishConfig.registry = \"https://${REGISTRY_URL}\" | .publishConfig.tag = \"${DIST_TAG}\"" "${PROJECT_DIR}/package.json" > "${PROJECT_DIR}/package.json.tmp"
 

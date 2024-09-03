@@ -3,10 +3,10 @@ include:
 
 variables:
   # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:3.1.62-1
-  EMSCRIPTEN_IMAGE_TAG: "3.1.62-1@sha256:98b3062135cc4e31b9efc8343e2b8c0c66b25efad18c5b7255237797ebdad286"
+  EMSCRIPTEN_IMAGE_TAG: "3.1.62-1@sha256:1bc4876054017a7199b821f251f7e7a5d694616310410b13816e7ecff2d648d4"
   EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG"
 
-.npm_based_job_base:
+.node_based_job_base:
   extends: .job-defaults
 
   variables:
@@ -22,7 +22,78 @@ variables:
     - . "${NVM_DIR}/nvm.sh"  # This loads nvm environment
     - nvm use "${NODEJS_VERSION}"  # Force usage of preconfigured NodeJS version
     - cd "${SOURCE_DIR}"  # move to the project directory (where package.json file is located)
+
+.npm_based_job_base:
+  extends: .node_based_job_base
+
+  before_script:
+    - !reference [.node_based_job_base, before_script]
     - pnpm install --frozen-lockfile  # install all required dependencies
+
+.filter_out_swagger_json:
+  extends: .node_based_job_base
+  variables:
+    # The directory containing sources to be built - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    DIST_DIR: "${SOURCE_DIR}/build"
+    INPUT_SQL_SWAGGER_FILE: "${SOURCE_DIR}/endpoints/endpoint_schema.sql"
+    JSON_SWAGGER_FILE: "${DIST_DIR}/swagger-doc.json"
+
+  script:
+    - mkdir -vp "${DIST_DIR}"
+    - cat "${INPUT_SQL_SWAGGER_FILE}" | sed -n '/^  openapi json = \$\$/,/^\$\$/ { /^  openapi json = \$\$/d; /^\$\$/d; p }' > "${JSON_SWAGGER_FILE}"
+    - echo BUILT_JSON_SWAGGER_FILE="${JSON_SWAGGER_FILE}" > "${SOURCE_DIR}/built_swagger_json.env"
+
+  artifacts:
+    reports:
+      dotenv:
+        - "${SOURCE_DIR}/built_swagger_json.env"  # contains path to produced tgz
+    paths:
+      - "${JSON_SWAGGER_FILE}"
+    when: always
+    expire_in: 1 week
+
+.generate_swagger_package:
+  extends: .node_based_job_base
+  variables:
+    # The directory containing sources to be built - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    DIST_DIR: "${SOURCE_DIR}/build"
+    INPUT_JSON_SWAGGER_FILE: "${DIST_DIR}/swagger-doc.json"
+    OUT_DIR: "${DIST_DIR}/generated"
+    WAX_SPEC_GENERATOR_VERSION: "1.1.0-240903102246"
+    NPM_ALREADY_BUILT: 1
+    # Those variables should be overwriten by the derived job
+    NAMESPACE: ""
+    # Target package meta information - they should be overrided by derived job
+    NPM_PACKAGE_SCOPE: ""
+    NPM_PACKAGE_NAME: ""
+    NPM_REGISTRY_URL: "gitlab.syncad.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/"
+
+  before_script:
+    - mkdir -vp "${DIST_DIR}"
+    - pushd "${DIST_DIR}"
+    - echo @hiveio:registry=https://gitlab.syncad.com/api/v4/groups/136/-/packages/npm/ >> .npmrc
+    # Ignore package version as it will be replaced in the next step - npm generate version script
+    - npx --yes @hiveio/wax-spec-generator@${WAX_SPEC_GENERATOR_VERSION} generate-wax-spec -i "${INPUT_JSON_SWAGGER_FILE}" -o "${OUT_DIR}" -N "${NAMESPACE}" -e --npm-name "${NPM_PACKAGE_SCOPE}/${NPM_PACKAGE_NAME}" --npm-version "0.0.0"
+    - popd
+
+  script:
+    - /home/emscripten/scripts/npm_pack_package.sh "${OUT_DIR}" "${NPM_REGISTRY_URL}" "${NPM_PACKAGE_SCOPE}" "${NPM_PACKAGE_NAME}" "${DIST_DIR}" "${CI_COMMIT_REF_PROTECTED}" "${CI_COMMIT_TAG}"
+
+  artifacts:
+    reports:
+      dotenv:
+        - "${OUT_DIR}/built_package_info.env"  # contains path to produced tgz
+        - "${OUT_DIR}/built_package_version_info.env"  # contains information related to generated package version and git revision
+
+    paths:
+      - "${OUT_DIR}"  # Built source used for package.json manipulation
+      - "${DIST_DIR}/*.tgz"  # Built package for publishing
+      - "${DIST_DIR}/built_package_info.json"
+
+    when: always
+    expire_in: 1 week
 
 # Base definition for job performing an npm build step. Outputs packaged project in *.tgz form
 # tgz package path can be received by `BUILT_PACKAGE_PATH` .env variable
@@ -41,17 +112,7 @@ variables:
     NPM_REGISTRY_URL: "gitlab.syncad.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/"
 
   script:
-    - |
-      if [ "${CI_COMMIT_REF_PROTECTED}" == "true" ]; then
-        if [ -n "${CI_COMMIT_TAG}" ]; then
-          DIST_TAG="latest" # if package is built for protected tag, let's mark it as latest
-        else
-          DIST_TAG="stable" # otherwise, any build for protected branch will produce stable package
-        fi
-      else
-        DIST_TAG="dev"
-      fi
-      /home/emscripten/scripts/npm_build_package.sh "${SOURCE_DIR}" "${NPM_REGISTRY_URL}" "${NPM_PACKAGE_SCOPE}" "${NPM_PACKAGE_NAME}" "${DIST_DIR}" "${DIST_TAG}"
+    - /home/emscripten/scripts/npm_build_package.sh "${SOURCE_DIR}" "${NPM_REGISTRY_URL}" "${NPM_PACKAGE_SCOPE}" "${NPM_PACKAGE_NAME}" "${DIST_DIR}" "${CI_COMMIT_REF_PROTECTED}" "${CI_COMMIT_TAG}"
 
   artifacts:
     reports:
