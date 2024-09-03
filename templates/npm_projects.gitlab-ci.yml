@@ -166,6 +166,8 @@ variables:
     DIST_DIR: "$CI_PROJECT_DIR/dist"
 
   script:
+    # start always at project root dir, to make sure .env file (included in artifacts) is generated there
+    - cd "${CI_PROJECT_DIR}"
     - /home/emscripten/scripts/npm_push_doc.sh "${SOURCE_DIR}" "${PROJECT_URL}" "${WIKI_PUSH_TOKEN}" "${DIST_DIR}" "${CI_COMMIT_REF_NAME}" "${CI_COMMIT_REF_PROTECTED}"
 
   artifacts:
