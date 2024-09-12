@@ -3,7 +3,7 @@ include:
 
 variables:
   # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:3.1.62-1
-  EMSCRIPTEN_IMAGE_TAG: "3.1.62-1@sha256:1bc4876054017a7199b821f251f7e7a5d694616310410b13816e7ecff2d648d4"
+  EMSCRIPTEN_IMAGE_TAG: "3.1.62-1@sha256:3dcca5c27df79c2fc4be44ff3bc14c8a35008137fb7857001e9f63285d12dd77"
   EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG"
 
 .node_based_job_base:
@@ -199,12 +199,14 @@ variables:
     PACKAGE_TGZ_PATH: ""
     # registry.npmjs.org authentication token - it should be overrided by derived job
     NPM_PUBLISH_TOKEN: ""
+    # Should enable npm provenance signing
+    NPM_PROVENANCE_ENABLE: "0"
 
   script:
     # project version info must be regenerated accoring to correct target registry, package scope and name
     - /home/emscripten/scripts/npm_generate_version.sh "${SOURCE_DIR}" "registry.npmjs.org/" "@hiveio" "${NPM_PACKAGE_NAME}" "latest"
     - echo -e "\e[0Ksection_start:$(date +%s):publishing[collapsed=false]\r\e[0KAttempting to publish a package to registry.npmjs.org..."
-    - /home/emscripten/scripts/npm_publish.sh "${SOURCE_DIR}" "registry.npmjs.org/" "@hiveio" "${NPM_PUBLISH_TOKEN}"
+    - /home/emscripten/scripts/npm_publish.sh "${SOURCE_DIR}" "registry.npmjs.org/" "@hiveio" "${NPM_PUBLISH_TOKEN}" "${NPM_PROVENANCE_ENABLE}"
     - echo -e "\e[0Ksection_end:$(date +%s):publishing\r\e[0KDone"
 
   rules:
