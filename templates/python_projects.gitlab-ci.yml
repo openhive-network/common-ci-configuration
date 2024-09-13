@@ -22,10 +22,9 @@ variables:
 .configuration_template:
   extends: .job-defaults
   image: "${PYTHON_IMAGE}"
-  variables:
-    PYPROJECT_DIR: "$(pwd)"
 
   before_script:
+    - if [ -z "${PYPROJECT_DIR}" ]; then PYPROJECT_DIR="$(pwd)"; else echo "using - ${PYPROJECT_DIR}"; fi
     - poetry -C "${PYPROJECT_DIR}" env use python3  # create virtualenv if not exists
     - source $(poetry -C "${PYPROJECT_DIR}" env info --path)/bin/activate  # activate that virtualenv
     - python3 -V
@@ -37,7 +36,7 @@ variables:
   extends: .configuration_template
   before_script:
     - !reference [.configuration_template, before_script]
-    - poetry install
+    - poetry -C "${PYPROJECT_DIR}" install
     - pip list
 
 
@@ -45,11 +44,13 @@ variables:
 
 .pre_commit_checks_template:
   extends: .project_develop_configuration_template
+  variables:
+    PRE_COMMIT_CONFIG: "${PYPROJECT_DIR}/.pre-commit-config.yaml"
   script:
     - pushd . && cd /tmp && poetry self update && popd  # Bump poetry version so `poetry lock --no-update` will use the latest one; doing it in different directory to avoid `poetry.lock` and `pyproject.toml` changes
-    - poetry -V
+    - poetry -C "${PYPROJECT_DIR}" -V
     - echo -e "${TXT_BLUE}Checking all files with pre-commit hooks...${TXT_CLEAR}" &&
-      pre-commit run --all-files
+      pre-commit run --config ${PRE_COMMIT_CONFIG} --all-files
   artifacts:
     when: always
     expire_in: 1 week
