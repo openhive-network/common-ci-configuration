@@ -155,13 +155,14 @@ variables:
   variables:
     GIT_STRATEGY: clone
     GIT_DEPTH: 0  # We need full history to get correct version (dynamic versioning)
+    DIST_DIR: "${PYPROJECT_DIR}/dist"
   script:
     - echo -e "${TXT_BLUE}Building python wheel...${TXT_CLEAR}"
     - ls -al
     - poetry -C "${PYPROJECT_DIR}" version
     - poetry -C "${PYPROJECT_DIR}" build --format wheel
-    - if [ -d "${PYPROJECT_DIR}/dist" ] && [ ! -d "dist" ]; then cp -r "${PYPROJECT_DIR}/dist" "dist"; fi
-    - ls -al dist/
+    - if [ ! -d "${DIST_DIR}" ] && [ -d "dist" ]; then cp -r "dist" "${DIST_DIR}"; fi
+    - ls -al ${DIST_DIR}
   after_script:
     - WHEEL_BUILD_VERSION=$(poetry -C "${PYPROJECT_DIR}" version -s)
     - echo "WHEEL_BUILD_VERSION is ${WHEEL_BUILD_VERSION}"
@@ -169,8 +170,7 @@ variables:
   artifacts:
     expire_in: 1 week
     paths:
-      - "${PYPROJECT_DIR}/dist"
-      - dist/
+      - "${DIST_DIR}"
       - build_wheel.env
     reports:
       dotenv: build_wheel.env
