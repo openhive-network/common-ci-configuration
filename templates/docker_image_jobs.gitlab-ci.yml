@@ -65,5 +65,5 @@ include:
       echo -e "\e[0Ksection_end:$(date +%s):git\r\e[0K"
   rules:
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED == "true"'
-      when: manual
-      allow_failure: true
+      when: on_success
+    - when: never
