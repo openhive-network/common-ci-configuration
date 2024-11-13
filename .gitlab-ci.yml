@@ -76,12 +76,12 @@ lint_python_scripts:
       junit: pylint-junit-result.xml
 
 .build_docker_image:
-  extends: .docker_image_builder_job_template
+  extends: .pure_docker_image_builder_job_template
   image: docker:26.1.4-cli
   variables:
     BUILD_TARGET: ""
   before_script:
-    - !reference [.docker_image_builder_job_template, before_script]
+    - !reference [.pure_docker_image_builder_job_template, before_script]
     - |
       echo -e "\e[0Ksection_start:$(date +%s):login[collapsed=true]\r\e[0KLogging to Docker registry..."
       docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
@@ -249,7 +249,7 @@ buildkit_cache_cleanup:
     CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,python-scripts/cache,tox-test-runner/cache"
 
 example_docker_image_builder_job:
-  extends: .docker_image_builder_job_template
+  extends: .pure_docker_image_builder_job_template
   stage: example-build
   before_script:
     - !reference [.build_docker_image, before_script]
