@@ -6,7 +6,8 @@ variables:
 include:
   - local: templates/base.gitlab-ci.yml
 
-.docker_image_builder_job_template:
+# this version does not call git since it is not present in the pure dind image
+.pure_docker_image_builder_job_template:
   extends: .job-defaults
   variables:
     DOCKER_DRIVER: overlay2
@@ -21,6 +22,15 @@ include:
   services:
     - name: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-dind:${DOCKER_DIND_TAG}
       alias: docker
+
+.docker_image_builder_job_template:
+  extends: .pure_docker_image_builder_job_template
+  before_script:
+    - !reference [.pure_docker_image_builder_job_template, before_script]
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):git[collapsed=true]\r\e[0KDisabling Git directory permission check"
+      git config --global --add safe.directory '*'
+      echo -e "\e[0Ksection_end:$(date +%s):git\r\e[0K"
 
 .docker_image_cleanup_job_template:
   extends: .job-defaults
@@ -57,12 +67,6 @@ include:
   variables:
     DOCKER_HUB_USER: $DOCKER_HUB_USER
     DOCKER_HUB_PASSWORD: $DOCKER_HUB_PASSWORD
-  before_script:
-    - !reference [.docker_image_builder_job_template, before_script]
-    - |
-      echo -e "\e[0Ksection_start:$(date +%s):git[collapsed=true]\r\e[0KDisabling Git directory permission check"
-      git config --global --add safe.directory '*'
-      echo -e "\e[0Ksection_end:$(date +%s):git\r\e[0K"
   rules:
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED == "true"'
       when: on_success
