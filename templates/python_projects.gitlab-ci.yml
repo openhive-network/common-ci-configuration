@@ -22,9 +22,10 @@ variables:
 .configuration_template:
   extends: .job-defaults
   image: "${PYTHON_IMAGE}"
-
+  variables:
+    PYPROJECT_DIR: "${CI_PROJECT_DIR}"
   before_script:
-    - if [ -z "${PYPROJECT_DIR}" ]; then PYPROJECT_DIR="$(pwd)"; else echo "using - ${PYPROJECT_DIR}"; fi
+    - echo "Using Python project directory - ${PYPROJECT_DIR}"
     - poetry -C "${PYPROJECT_DIR}" env use python3  # create virtualenv if not exists
     - source $(poetry -C "${PYPROJECT_DIR}" env info --path)/bin/activate  # activate that virtualenv
     - python3 -V
