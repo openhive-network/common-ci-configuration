@@ -16,8 +16,15 @@ COMMIT_REF_PROTECTED="${5:-}"
 
 COMMIT_TAG="${6:-}"
 
-if [ "${CI_COMMIT_REF_PROTECTED}" == "true" ]; then
-  if [ -n "${CI_COMMIT_TAG}" ]; then
+STRICT_SEMVER="false"
+
+# for true NPM projects use strict semver rules 
+if [ -f "${PROJECT_DIR}/package.json" ]; then
+  STRICT_SEMVER="true"
+fi
+
+if [ "${COMMIT_REF_PROTECTED}" == "true" ]; then
+  if [ -n "${COMMIT_TAG}" ]; then
     DIST_TAG="latest" # if package is built for protected tag, let's mark it as latest
   else
     DIST_TAG="stable" # otherwise, any build for protected branch will produce stable package
@@ -37,7 +44,11 @@ SHORT_HASH=$(git rev-parse --short HEAD)
 
 GIT_COMMIT_TIME=$(TZ=UTC0 git show --quiet --date='format-local:%Y%m%d%H%M%S' --format="%cd")
 TAG_TIME=${GIT_COMMIT_TIME:2}
-_TAG=$(git tag --sort=-taggerdate | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+(-.+)?' | head -1)
+if [ "${STRICT_SEMVER}" == "true" ]; then
+  _TAG=$(git for-each-ref --sort=-creatordate --format '%(refname:lstrip=2)' refs/tags | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+(-.+)?' | head -1)
+else
+  _TAG=$(git for-each-ref --sort=-creatordate --format '%(refname:lstrip=2)' refs/tags | head -1)
+fi
 
 echo "Read project original git tag: ${_TAG} (#${SHORT_HASH})"
 # try to skip git tag project name suffix (useful for repositories where multiple targets are published, but sometimes they need to be tagged separately at git side)
@@ -63,16 +74,19 @@ else
   NEW_VERSION="${TAG}-${TAG_TIME}"
 fi
 
-if ! git check-ignore "${PROJECT_DIR}/package.json"; then
-  git checkout "${PROJECT_DIR}/package.json" # be sure we're on clean version, but only if not under .gitignore
+if [ -f "${PROJECT_DIR}/package.json" ];
+then
+  if ! git check-ignore "${PROJECT_DIR}/package.json"; then
+    git checkout "${PROJECT_DIR}/package.json" # be sure we're on clean version, but only if not under .gitignore
+  fi
+
+  jq ".name = \"${SCOPE}/${PROJECT_NAME}\" | .version = \"$NEW_VERSION\" | .publishConfig.registry = \"https://${REGISTRY_URL}\" | .publishConfig.tag = \"${DIST_TAG}\"" "${PROJECT_DIR}/package.json" > "${PROJECT_DIR}/package.json.tmp"
+
+  mv "${PROJECT_DIR}/package.json.tmp" "${PROJECT_DIR}/package.json"
+
+  # Display detailed publish config data
+  jq -r '.name + "@" + .version + " (" + .publishConfig.tag + ") " + .publishConfig.registry' "${PROJECT_DIR}/package.json"
 fi
-
-jq ".name = \"${SCOPE}/${PROJECT_NAME}\" | .version = \"$NEW_VERSION\" | .publishConfig.registry = \"https://${REGISTRY_URL}\" | .publishConfig.tag = \"${DIST_TAG}\"" "${PROJECT_DIR}/package.json" > "${PROJECT_DIR}/package.json.tmp"
-
-mv "${PROJECT_DIR}/package.json.tmp" "${PROJECT_DIR}/package.json"
-
-# Display detailed publish config data
-jq -r '.name + "@" + .version + " (" + .publishConfig.tag + ") " + .publishConfig.registry' "${PROJECT_DIR}/package.json"
 
  {
   echo BUILT_PACKAGE_NAME=${SCOPE}/${PROJECT_NAME}
