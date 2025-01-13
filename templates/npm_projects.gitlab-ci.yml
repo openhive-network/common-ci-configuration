@@ -48,7 +48,7 @@ variables:
     - /home/emscripten/scripts/npm_generate_version.sh "${SOURCE_DIR}" "gitlab.syncad.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/" "${NPM_PACKAGE_SCOPE}" "${NPM_PACKAGE_NAME}" "${CI_COMMIT_REF_PROTECTED}" "${CI_COMMIT_TAG}"
     - source "${SOURCE_DIR}/built_package_version_info.env"
     - mkdir -vp "${DIST_DIR}"
-    - cat "${INPUT_SQL_SWAGGER_FILE}" | sed -n '/^  openapi json = \$\$/,/^\$\$/ { /^  openapi json = \$\$/d; /^\$\$/d; p }' | jq ".version = \"${BUILT_PACKAGE_VERSION}\"" > "${JSON_SWAGGER_FILE}"
+    - cat "${INPUT_SQL_SWAGGER_FILE}" | sed -n '/^  openapi json = \$\$/,/^\$\$/ { /^  openapi json = \$\$/d; /^\$\$/d; p }' | jq ".info.version = \"${BUILT_PACKAGE_VERSION}\"" > "${JSON_SWAGGER_FILE}"
     - echo BUILT_JSON_SWAGGER_FILE="${JSON_SWAGGER_FILE}" > "${SOURCE_DIR}/built_swagger_json.env"
 
   artifacts:
