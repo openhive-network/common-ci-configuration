@@ -12,6 +12,7 @@ USER root
 
 RUN apt-get update && \
   DEBIAN_FRONTEND=noniteractive apt-get install -y \
+    apt-transport-https ca-certificates \
     git \
     jq \
     ninja-build \
@@ -22,7 +23,7 @@ RUN apt-get update && \
 
 FROM supplemented_emscripten_sdk AS supplemented_node_sdk
 
-ARG NODEJS_VERSION=v18.19.0
+ARG NODEJS_VERSION=v20.18.1
 ENV NODEJS_VERSION=${NODEJS_VERSION}
 
 USER emscripten
@@ -45,23 +46,23 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
     nvm install "${NODEJS_VERSION}" && \
     nvm use "${NODEJS_VERSION}" && \
     corepack enable pnpm && \
-    corepack install -g pnpm@9.1.1 && \
+    corepack install -g pnpm@9.15.4 && \
     pnpm config set store-dir ${PNPM_HOME}/preinstalled-store --global && \
     pnpm config set global-dir ${PNPM_HOME}/preinstalled-store-g --global && \
     pnpm env use --global "${NODEJS_VERSION}" && \
     pnpm add -g \
-      playwright@~1.39.0 \
-      @playwright/test@~1.39.0 \
+      playwright@~1.49.1 \
+      @playwright/test@~1.49.1 \
       ts-proto@~1.158.0 \
-      tslib@~2.6.2 \
-      typescript@~5.2.2 \
-      rollup@~4.3.0 \
+      tslib@~2.8.1 \
+      typescript@~5.7.3 \
+      rollup@~4.22.0 \
       rollup/plugin-node-resolve@~15.2.3 \
       rollup/plugin-commonjs@~25.0.7 \
       rollup-plugin-typescript2@~0.36.0 \
-      types/node@~20.10.6 \
-      typedoc@~0.25.3 \
-      typedoc-plugin-markdown@~3.17.1 \
+      types/node@~22.10.6 \
+      typedoc@~0.27.6 \
+      typedoc-plugin-markdown@~4.4.1 \
       protobufjs@~7.2.5 && \
     pnpm dlx playwright install chromium && \
     git config --global advice.detachedHead false && \

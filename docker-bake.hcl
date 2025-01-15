@@ -1,7 +1,7 @@
 variable "CI_REGISTRY_IMAGE" {}
 variable "CI_COMMIT_SHA" {}
 variable "EMSCRIPTEN_VERSION" {
-  default = "3.1.62"
+  default = "4.0.1"
 }
 variable "PSQL_IMAGE_VERSION" {
   default = "14-1" # After updating tag here, remeber to also update it in job 'psql_image_test'
@@ -83,7 +83,7 @@ target "tox-test-runner" {
 
 target "emsdk" {
   dockerfile = "Dockerfile.emscripten"
-  tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}-2")
+  tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}-1")
   cache-from = generate-cache-from("emsdk", "${EMSCRIPTEN_VERSION}")
   cache-to = generate-cache-to("emsdk", "${EMSCRIPTEN_VERSION}")
   args = {
