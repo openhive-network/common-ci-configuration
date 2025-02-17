@@ -1,0 +1,24 @@
+packages:
+  - ./* # maybe we can constrain it to some common subdirs
+
+catalogs:
+  # Can be referenced through "catalog:rollup-toolset"
+  rollup-toolset:
+    rollup: ^4.22.4
+    rollup-plugin-copy: ^3.5.0
+    rollup-plugin-dts: ^6.1.1
+    "@rollup/plugin-commonjs": ^27.0.0
+    "@rollup/plugin-node-resolve": ^15.3.0
+    "@rollup/plugin-replace": ^6.0.1
+
+  typedoc-toolset:
+    "typedoc": "0.27.3"
+    "typedoc-gitlab-wiki-theme": "^2.1.0"
+    "typedoc-plugin-markdown": "4.3.1"
+
+  typescript:
+    typescript: 5.7.3
+
+  # We can make also separate entries to allow choosing just a part of toolset defined above
+  rollup:
+    rollup: ^4.22.4
