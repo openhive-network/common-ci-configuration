@@ -18,7 +18,9 @@ RUN apt-get update && \
     ninja-build \
     autoconf \
     libtool \
-    protobuf-compiler && \
+    protobuf-compiler \
+    zopfli \
+    && \
     apt-get clean && rm -r /var/lib/apt/lists/*
 
 FROM supplemented_emscripten_sdk AS supplemented_node_sdk
