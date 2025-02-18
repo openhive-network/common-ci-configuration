@@ -16,9 +16,27 @@ catalogs:
     "typedoc-gitlab-wiki-theme": "^2.1.0"
     "typedoc-plugin-markdown": "4.3.1"
 
-  typescript:
+  typescript-toolset:
     typescript: 5.7.3
+    tslib: ^2.8.1
+    tsx: ^4.19.2
 
-  # We can make also separate entries to allow choosing just a part of toolset defined above
-  rollup:
-    rollup: ^4.22.4
+  proto-toolset:
+    protobufjs: ^7.2.5
+    ts-proto: ^1.172.0
+
+  playwright-toolset:
+    "@playwright/test": ^1.49.1
+    playwright: 1.49.1
+    http-server: ^14.1.1
+
+  husky:
+    husky: 8.0.3
+
+  terser:
+    terser: ^5.39.0
+
+  size-limit-toolset:
+    size-limit: ^11.1.6
+    "@size-limit/file": ^11.1.6
+
