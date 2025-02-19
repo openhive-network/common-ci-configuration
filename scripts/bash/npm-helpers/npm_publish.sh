@@ -40,7 +40,7 @@ else
   set -e
   echo "Publishing ${NAME}@${VERSION} to tag ${PACKAGE_DIST_TAG}"
   # We are going to repack the tarball as there are registry-dependent data in each job for package.json
-  pnpm publish --access=public --tag "${PACKAGE_DIST_TAG}"
+  pnpm publish --no-git-checks --access=public --tag "${PACKAGE_DIST_TAG}"
 fi
 
 popd
