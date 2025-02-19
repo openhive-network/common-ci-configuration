@@ -5,8 +5,8 @@ FROM emscripten/emsdk:${EMSCRIPTEN_VERSION} AS pure_emscripten_sdk
 
 FROM pure_emscripten_sdk AS supplemented_emscripten_sdk
 
-ARG PNPM_VERSION=9.1.1
-ENV PNPM_VERSION=9.1.1
+ARG PNPM_VERSION=10.0.0
+ENV PNPM_VERSION=${PNPM_VERSION}
 
 USER root
 
@@ -43,12 +43,12 @@ ENV PATH="${PNPM_HOME}:${NVM_DIR}:${PATH}"
 ENV PLAYWRIGHT_BROWSERS_PATH="${HOME}/pw-browsers"
 
 RUN source "${EMSDK}/emsdk_env.sh" && \
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && \
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash && \
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
     nvm install "${NODEJS_VERSION}" && \
     nvm use "${NODEJS_VERSION}" && \
     corepack enable pnpm && \
-    corepack install -g pnpm@9.15.4 && \
+    corepack install -g pnpm@${PNPM_VERSION} && \
     pnpm config set store-dir ${PNPM_HOME}/preinstalled-store --global && \
     pnpm config set global-dir ${PNPM_HOME}/preinstalled-store-g --global && \
     pnpm env use --global "${NODEJS_VERSION}" && \
