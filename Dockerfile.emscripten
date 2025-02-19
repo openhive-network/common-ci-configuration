@@ -25,7 +25,7 @@ RUN apt-get update && \
 
 FROM supplemented_emscripten_sdk AS supplemented_node_sdk
 
-ARG NODEJS_VERSION=v20.18.1
+ARG NODEJS_VERSION=v20.18.3
 ENV NODEJS_VERSION=${NODEJS_VERSION}
 
 USER emscripten
