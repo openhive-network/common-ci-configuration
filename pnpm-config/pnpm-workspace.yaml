@@ -4,12 +4,12 @@ packages:
 catalogs:
   # Can be referenced through "catalog:rollup-toolset"
   rollup-toolset:
-    rollup: ^4.22.4
+    rollup: 4.24.0
     rollup-plugin-copy: ^3.5.0
     rollup-plugin-dts: ^6.1.1
     "@rollup/plugin-commonjs": ^27.0.0
-    "@rollup/plugin-node-resolve": ^15.3.0
-    "@rollup/plugin-replace": ^6.0.1
+    "@rollup/plugin-node-resolve": ^15.3.1
+    "@rollup/plugin-replace": ^6.0.2
 
   typedoc-toolset:
     "typedoc": "0.27.3"
@@ -26,8 +26,8 @@ catalogs:
     ts-proto: ^1.172.0
 
   playwright-toolset:
-    "@playwright/test": ^1.49.1
-    playwright: 1.49.1
+    "@playwright/test": ^1.50.1
+    playwright: ^1.50.1
     http-server: ^14.1.1
 
   husky:
