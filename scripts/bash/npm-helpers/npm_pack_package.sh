@@ -15,7 +15,7 @@ pushd "${SOURCE_DIR}" # move to the project directory (where package.json file i
 
 "${SCRIPTPATH}/npm_generate_version.sh" "${SOURCE_DIR}" "${REGISTRY_URL}" "${SCOPE}" "${PROJECT_NAME}" "${COMMIT_REF_PROTECTED}" "${COMMIT_TAG}"
 
-pnpm pack --pack-destination "${OUTPUT_DIR}" --json | tail -n +5 > "${OUTPUT_DIR}/built_package_info.json"
+pnpm pack --pack-destination "${OUTPUT_DIR}" --json > "${OUTPUT_DIR}/built_package_info.json"
 BUILT_PACKAGE_NAME=$(jq -r .filename "${OUTPUT_DIR}/built_package_info.json")
 {
   echo PACKAGE_SOURCE_DIR="${SOURCE_DIR}"
