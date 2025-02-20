@@ -15,7 +15,8 @@ pushd "${SOURCE_DIR}" # move to the project directory (where package.json file i
 
 "${SCRIPTPATH}/npm_generate_version.sh" "${SOURCE_DIR}" "${REGISTRY_URL}" "${SCOPE}" "${PROJECT_NAME}" "${COMMIT_REF_PROTECTED}" "${COMMIT_TAG}"
 
-pnpm pack --pack-destination "${OUTPUT_DIR}" --json > "${OUTPUT_DIR}/built_package_info.json"
+# warning pnpm prints additional (non json) lines referencing prepack actions done while packing. They start from `>` and must be filtered out before processing by jq
+pnpm pack --pack-destination "${OUTPUT_DIR}" --json | grep -v '^>.*$' > "${OUTPUT_DIR}/built_package_info.json"
 BUILT_PACKAGE_NAME=$(jq -r .filename "${OUTPUT_DIR}/built_package_info.json")
 {
   echo PACKAGE_SOURCE_DIR="${SOURCE_DIR}"
