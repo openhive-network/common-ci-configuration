@@ -46,6 +46,7 @@ PROJECT_ACCESS_TOKEN="${3:?Missing arg #3 pointing a Gitlab repository access to
 DIST_DIR="${4:?Missing arg #4 pointing the dist directory}"
 FEATURE_BRANCH_NAME="${5:?Missing arg #5 pointing a branch name}"
 FINAL_MERGE="${6:?Missing arg #6 pointing the final merge flag value}"
+DOC_URL="${7:?Missing arg #7 pointing the documentation URL}"
 
 if [ "${FINAL_MERGE}" = "true" ]; then
   FINAL_MERGE=1
@@ -111,16 +112,8 @@ else
   git push origin "HEAD:main"
 fi
 
-if [ ${FINAL_MERGE} -eq 1 ]; then
-  DOC_URL="${PROJECT_URL}/-/wikis/home"
-else
-  DOC_URL="${PROJECT_URL}/-/wikis/non-stable/${FEATURE_BRANCH_NAME}/home"
-fi
-
 perform_wiki_cleanup "${WIKI_REPO_DIR}/non-stable" "${PROJECT_URL}"
 
-echo "Documentation is available at url: ${DOC_URL}"
+echo "Documentation url: ${DOC_URL}"
 
 popd
-
-echo GEN_DOC_URL="${DOC_URL}" > "gen_doc.env"
