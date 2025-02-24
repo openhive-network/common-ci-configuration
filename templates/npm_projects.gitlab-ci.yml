@@ -3,7 +3,7 @@ include:
 
 variables:
   # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:4.0.1-2
-  EMSCRIPTEN_IMAGE_TAG: "4.0.1-2@sha256:d0c5fbd811ef2447fdf411ee1e2a111c50ad0ec610cf3d6bf2d186530bc883ad"
+  EMSCRIPTEN_IMAGE_TAG: "4.0.1-2@sha256:a63a3ed761ce99ec858855bbdaf1cda03e383635dd7e88754010a746f7fd2cb3"
   EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG"
 
 .node_based_job_base:
