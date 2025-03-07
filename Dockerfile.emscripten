@@ -170,3 +170,5 @@ USER emscripten
 WORKDIR /home/emscripten
 
 ADD --chown=emscripten ./scripts/bash/npm-helpers /home/emscripten/scripts/
+
+RUN /home/emscripten/scripts/npm_download_browser_extensions.sh /home/emscripten/preinstalled_browser_extensions
