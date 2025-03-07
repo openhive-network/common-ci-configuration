@@ -14,6 +14,7 @@ pushd "${TARGET_DIR}"
 
 declare -A EXTENSION_LIST=(
   ["Hive-Keychain"]="jcacnejopjdphbnjgfaaobbfafkihpep"
+  ["Meta-mask"]="nkbihfbeogaeaoehlefnkodbefgpgknn"
 ) 
 
 for i in "${!EXTENSION_LIST[@]}"; do
