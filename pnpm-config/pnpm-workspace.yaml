@@ -1,5 +1,5 @@
 packages:
-  - ./* # maybe we can constrain it to some common subdirs
+  - ./**/* # maybe we can constrain it to some common subdirs
 
 catalogs:
   # Can be referenced through "catalog:rollup-toolset"
