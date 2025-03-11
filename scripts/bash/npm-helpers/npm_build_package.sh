@@ -15,7 +15,7 @@ pushd "${SOURCE_DIR}" # move to the project directory (where package.json file i
 
 "${SCRIPTPATH}/npm_generate_version.sh" "${SOURCE_DIR}" "${REGISTRY_URL}" "${SCOPE}" "${PROJECT_NAME}" "${COMMIT_REF_PROTECTED}" "${COMMIT_TAG}"
 
-npm run build
+pnpm --recursive --workspace-concurrency=1 run build
 
 "${SCRIPTPATH}/npm_pack_package.sh" "${SOURCE_DIR}" "${REGISTRY_URL}" "${SCOPE}" "${PROJECT_NAME}" "${OUTPUT_DIR}" "${COMMIT_REF_PROTECTED}" "${COMMIT_TAG}"
 
