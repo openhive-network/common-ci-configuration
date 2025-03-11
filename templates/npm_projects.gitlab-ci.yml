@@ -28,7 +28,7 @@ variables:
 
   before_script:
     - !reference [.node_based_job_base, before_script]
-    - pnpm install --frozen-lockfile  # install all required dependencies
+    - pnpm --recursive install --frozen-lockfile  # install all required dependencies
 
 .filter_out_swagger_json:
   extends: .node_based_job_base
