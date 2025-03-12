@@ -1,5 +1,7 @@
 packages:
-  - ./**/* # maybe we can constrain it to some common subdirs
+  - './src/**/*'
+  - './packages/**/*'
+  - './wasm/**/*'
 
 catalogs:
   # Can be referenced through "catalog:rollup-toolset"
