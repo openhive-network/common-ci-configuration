@@ -37,7 +37,7 @@ variables:
   extends: .configuration_template
   before_script:
     - !reference [.configuration_template, before_script]
-    - poetry -C "${PYPROJECT_DIR}" install
+    - poetry -C "${PYPROJECT_DIR}" install ${POETRY_INSTALL_ARGS}
     - pip list
 
 
