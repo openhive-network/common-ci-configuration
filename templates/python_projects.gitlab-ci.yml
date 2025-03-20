@@ -10,8 +10,8 @@ variables:
   PYTEST_LOG_DURATIONS: 0  # do not log test durations by default
   PYTEST_JUNIT_REPORT: "report.xml"  # junit report location, used by GitLab
   # registries:
-  # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu22.04-10
-  PYTHON_IMAGE_TAG: "@sha256:080b16fd53013aeb9b89b00a8dfc90fecf886173f46448b05f45cee376c43330"
+  # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu24.04-1
+  PYTHON_IMAGE_TAG: "@sha256:813f18c42929193036fc4e0017981c16913766442ef8d146313c64785df29c2e"
   PYTHON_IMAGE: "registry.gitlab.syncad.com/hive/hive/ci-base-image${PYTHON_IMAGE_TAG}"
   # colors:
   TXT_GREEN: "\e[1;32m"
