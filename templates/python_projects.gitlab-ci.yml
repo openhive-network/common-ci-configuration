@@ -63,9 +63,9 @@ variables:
   script:
     - if [ -z "${PYPROJECT_CONFIG_PATH}" ]; then MAYBE_EXPLICIT_CONFIG=""; else MAYBE_EXPLICIT_CONFIG="--config ${PYPROJECT_CONFIG_PATH}"; fi
     - echo -e "${TXT_BLUE}Linting all sources with Ruff (check)...${TXT_CLEAR}" &&
-      ruff ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
+      ruff check ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
     - echo -e "${TXT_BLUE}Linting all sources with Ruff (diff)...${TXT_CLEAR}" &&
-      ruff --diff ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
+      ruff check --diff ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
 
 .formatting_with_black_check_template:
   extends: .project_develop_configuration_template
