@@ -21,7 +21,7 @@ catalogs:
   typescript-toolset:
     typescript: 5.7.3
     tslib: 2.8.1
-    tsx: 4.19.2
+    tsx: 4.19.3
 
   proto-toolset:
     protobufjs: 7.2.5
