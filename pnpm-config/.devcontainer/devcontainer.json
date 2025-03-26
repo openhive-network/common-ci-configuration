@@ -20,11 +20,6 @@
 
   "mounts": [
     {
-      "source": "/storage1/",
-      "target": "/storage1/",
-      "type": "bind"
-    },
-    {
       "source": "${localEnv:HOME}/.gitconfig",
       "target": "/home/emscripten/.gitconfig",
       "type": "bind"
