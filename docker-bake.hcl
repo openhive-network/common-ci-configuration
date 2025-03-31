@@ -21,6 +21,9 @@ variable "BOOST_VERSION_TAG" {
 variable "OPENSSL_VERSION_TAG" {
   default = null
 }
+variable "ALPINE_VERSION" {
+  default = "3.21.3"
+}
 variable "tag" {
   default = "latest"
 }
@@ -125,4 +128,11 @@ target "postgrest" {
   tags = generate-tags("postgrest", "${POSTGREST_VERSION}")
   cache-from = generate-cache-from("postgrest", "${POSTGREST_VERSION}")
   cache-to = generate-cache-to("postgrest", "${POSTGREST_VERSION}")
+}
+
+target "alpine" {
+  dockerfile = "Dockerfile.alpine"
+  tags = generate-tags("alpine", "${ALPINE_VERSION}")
+  cache-from = generate-cache-from("alpine", "${ALPINE_VERSION}")
+  cache-to = generate-cache-to("alpine", "${ALPINE_VERSION}")
 }
