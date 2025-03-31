@@ -6,6 +6,9 @@ variable "EMSCRIPTEN_VERSION" {
 variable "PSQL_IMAGE_VERSION" {
   default = "14-1" # After updating tag here, remeber to also update it in job 'psql_image_test'
 }
+variable "DOCKERFILE_IMAGE_VERSION" {
+  default = "1.5"
+}
 variable "PAAS_PSQL_VERSION" {
   default = "11251948d5dd4867552f9b9836a9e02110304df5"
 }
@@ -98,4 +101,18 @@ target "psql" {
   tags = generate-tags("psql", "${PSQL_IMAGE_VERSION}")
   cache-from = generate-cache-from("psql", "${PSQL_IMAGE_VERSION}")
   cache-to = generate-cache-to("psql", "${PSQL_IMAGE_VERSION}")
+}
+
+target "dockerfile" {
+  dockerfile = "Dockerfile.dockerfile"
+  tags = generate-tags("dockerfile", "${DOCKERFILE_IMAGE_VERSION}")
+  cache-from = generate-cache-from("dockerfile", "${DOCKERFILE_IMAGE_VERSION}")
+  cache-to = generate-cache-to("dockerfile", "${DOCKERFILE_IMAGE_VERSION}")
+}
+
+target "nginx" {
+  dockerfile = "Dockerfile.nginx"
+  tags = generate-tags("nginx", "${tag}")
+  cache-from = generate-cache-from("nginx", "${tag}")
+  cache-to = generate-cache-to("nginx", "${tag}")
 }
