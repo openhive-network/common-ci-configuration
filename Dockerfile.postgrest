@@ -1,0 +1,2 @@
+ARG POSTGREST_VERSION=v12.0.2
+FROM postgrest/postgrest:${POSTGREST_VERSION}

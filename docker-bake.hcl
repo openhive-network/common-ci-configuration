@@ -9,6 +9,9 @@ variable "PSQL_IMAGE_VERSION" {
 variable "DOCKERFILE_IMAGE_VERSION" {
   default = "1.5"
 }
+variable "POSTGREST_VERSION" {
+  default = "v12.0.2"
+}
 variable "PAAS_PSQL_VERSION" {
   default = "11251948d5dd4867552f9b9836a9e02110304df5"
 }
@@ -115,4 +118,11 @@ target "nginx" {
   tags = generate-tags("nginx", "${tag}")
   cache-from = generate-cache-from("nginx", "${tag}")
   cache-to = generate-cache-to("nginx", "${tag}")
+}
+
+target "postgrest" {
+  dockerfile = "Dockerfile.postgrest"
+  tags = generate-tags("postgrest", "${POSTGREST_VERSION}")
+  cache-from = generate-cache-from("postgrest", "${POSTGREST_VERSION}")
+  cache-to = generate-cache-to("postgrest", "${POSTGREST_VERSION}")
 }
