@@ -187,6 +187,18 @@ build_postgrest_image:
       exists:
         - Dockerfile.postgrest
 
+build_alpine_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "alpine"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.alpine
+
 build_dockerfile_image:
   extends: .build_docker_image
   stage: build
