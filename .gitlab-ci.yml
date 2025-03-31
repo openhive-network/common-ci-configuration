@@ -175,6 +175,18 @@ build_nginx_image:
       exists:
         - Dockerfile.nginx
 
+build_postgrest_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "postgrest"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.postgrest
+
 build_dockerfile_image:
   extends: .build_docker_image
   stage: build
@@ -270,7 +282,7 @@ buildkit_cache_cleanup:
   extends: .buildkit_cleanup_job_template
   needs: []
   variables:
-    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache"
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache"
 
 example_docker_image_builder_job:
   extends: .pure_docker_image_builder_job_template
