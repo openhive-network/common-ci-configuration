@@ -75,15 +75,13 @@ variables:
     NPM_PACKAGE_NAME: ""
     NPM_REGISTRY_URL: "gitlab.syncad.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/"
 
-  before_script:
+  script:
     - mkdir -vp "${DIST_DIR}"
     - pushd "${DIST_DIR}"
     - echo @hiveio:registry=https://gitlab.syncad.com/api/v4/groups/136/-/packages/npm/ >> .npmrc
     # Ignore package version as it will be replaced in the next step - npm generate version script
     - npx --yes @hiveio/wax-spec-generator@${WAX_SPEC_GENERATOR_VERSION} generate-wax-spec -i "${INPUT_JSON_SWAGGER_FILE}" -o "${OUT_DIR}" -e --npm-name "${NPM_PACKAGE_SCOPE}/${NPM_PACKAGE_NAME}" --npm-version "0.0.0"
     - popd
-
-  script:
     - /home/emscripten/scripts/npm_pack_package.sh "${OUT_DIR}" "${NPM_REGISTRY_URL}" "${NPM_PACKAGE_SCOPE}" "${NPM_PACKAGE_NAME}" "${DIST_DIR}" "${CI_COMMIT_REF_PROTECTED}" "${CI_COMMIT_TAG}"
 
   artifacts:
