@@ -3,13 +3,15 @@ variables:
   DOCKER_DIND_TAG: "latest"
   IMAGE_REMOVER_TAG: "latest"
 
+  ALPINE_IMAGE_TAG: "3.21.3"
+
 include:
   - local: templates/base.gitlab-ci.yml
 
 
 .cleanup_cache_manual_template:
   extends: .job-defaults
-  image: alpine:3.16
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/alpine:${ALPINE_IMAGE_TAG}
   variables:
     CLEANUP_PATH_PATTERN: ""
   needs: []
@@ -21,7 +23,7 @@ include:
 
 .cleanup_old_cache_template:
   extends: .job-defaults
-  image: alpine:3.16
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/alpine:${ALPINE_IMAGE_TAG}
   variables:
     CLEANUP_PATH_PATTERN: ""
     CACHE_DAYS: 7
