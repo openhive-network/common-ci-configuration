@@ -12,6 +12,9 @@ variable "DOCKERFILE_IMAGE_VERSION" {
 variable "POSTGREST_VERSION" {
   default = "v12.0.2"
 }
+variable "PYTHON_VERSION" {
+  default = "3.8-slim"
+}
 variable "PAAS_PSQL_VERSION" {
   default = "11251948d5dd4867552f9b9836a9e02110304df5"
 }
@@ -135,4 +138,11 @@ target "alpine" {
   tags = generate-tags("alpine", "${ALPINE_VERSION}")
   cache-from = generate-cache-from("alpine", "${ALPINE_VERSION}")
   cache-to = generate-cache-to("alpine", "${ALPINE_VERSION}")
+}
+
+target "python" {
+  dockerfile = "Dockerfile.python"
+  tags = generate-tags("python", "${PYTHON_VERSION}")
+  cache-from = generate-cache-from("python", "${PYTHON_VERSION}")
+  cache-to = generate-cache-to("python", "${PYTHON_VERSION}")
 }
