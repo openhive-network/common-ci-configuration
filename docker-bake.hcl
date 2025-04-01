@@ -7,7 +7,7 @@ variable "PSQL_IMAGE_VERSION" {
   default = "14-1" # After updating tag here, remeber to also update it in job 'psql_image_test'
 }
 variable "DOCKERFILE_IMAGE_VERSION" {
-  default = "1.5"
+  default = "1.11"
 }
 variable "POSTGREST_VERSION" {
   default = "v12.0.2"
