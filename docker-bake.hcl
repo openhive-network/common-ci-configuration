@@ -13,7 +13,7 @@ variable "POSTGREST_VERSION" {
   default = "v12.0.2"
 }
 variable "PYTHON_VERSION" {
-  default = "3.8-slim"
+  default = "3.12.9-slim-bookworm"
 }
 variable "PAAS_PSQL_VERSION" {
   default = "11251948d5dd4867552f9b9836a9e02110304df5"
