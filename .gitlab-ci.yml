@@ -211,6 +211,30 @@ build_python_image:
       exists:
         - Dockerfile.python
 
+build_python_dev_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python_development"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.python_runtime
+
+build_python_runtime_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python_runtime"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.python_runtime
+
 build_dockerfile_image:
   extends: .build_docker_image
   stage: build

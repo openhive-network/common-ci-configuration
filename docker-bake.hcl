@@ -15,6 +15,11 @@ variable "POSTGREST_VERSION" {
 variable "PYTHON_VERSION" {
   default = "3.12.9-slim-bookworm"
 }
+
+variable "PYTHON_RUNTIME_VERSION" {
+  default = "3.12-u24.04"
+}
+
 variable "PAAS_PSQL_VERSION" {
   default = "11251948d5dd4867552f9b9836a9e02110304df5"
 }
@@ -146,3 +151,20 @@ target "python" {
   cache-from = generate-cache-from("python", "${PYTHON_VERSION}")
   cache-to = generate-cache-to("python", "${PYTHON_VERSION}")
 }
+
+target "python_runtime" {
+  dockerfile = "Dockerfile.python_runtime"
+  tags = generate-tags("python_runtime", "${PYTHON_RUNTIME_VERSION}")
+  cache-from = generate-cache-from("python_rutime", "${PYTHON_RUNTIME_VERSION}")
+  cache-to = generate-cache-to("python_runtime", "${PYTHON_RUNTIME_VERSION}")
+}
+
+target "python_development" {
+  dockerfile = "Dockerfile.python_runtime"
+  target = "python_dev"
+  tags = generate-tags("python_development", "${PYTHON_RUNTIME_VERSION}")
+  cache-from = generate-cache-from("python_development", "${PYTHON_RUNTIME_VERSION}")
+  cache-to = generate-cache-to("python_development", "${PYTHON_RUNTIME_VERSION}")
+}
+
+
