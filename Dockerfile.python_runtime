@@ -2,11 +2,14 @@ ARG PYTHON_VERSION=3.12-24.04_stable
 
 FROM ubuntu:24.04 AS python_dev
 
+# renovate: datasource=pypi depName=poetry versioning=semver
+ARG POETRY_VERSION=1.7.1
+ENV POETRY_VERSION=${POETRY_VERSION}
 ENV APT_CACHE_DIR=/var/cache/buildkit/apt
 
 RUN --mount=type=cache,mode=0777,sharing=locked,target=${APT_CACHE_DIR} \
     apt-get update && \
-    apt-get install -y wget git bash python3.12 python3.12-venv python3-pip && \
+    apt-get install -y wget git bash sudo python3.12 python3.12-venv python3-pip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
     python3 -m venv --system-site-packages /python_venv && \
@@ -38,6 +41,12 @@ RUN --mount=type=cache,mode=0777,sharing=locked,target=${APT_CACHE_DIR} \
       https://launchpad.net/ubuntu/+source/pam/1.5.3-5ubuntu5.1/+build/28291483/+files/libpam-modules-bin_1.5.3-5ubuntu5.1_amd64.deb \
       https://launchpad.net/ubuntu/+source/pam/1.5.3-7ubuntu2/+build/28874041/+files/libpam-runtime_1.5.3-7ubuntu2_all.deb \
       https://launchpad.net/ubuntu/+source/apparmor/4.1.0~beta1-0ubuntu3/+build/29135383/+files/libpam-apparmor_4.1.0~beta1-0ubuntu3_amd64.deb
+
+SHELL ["/bin/bash", "-c"]
+
+RUN set -ex; python3 -m venv --system-site-packages /poetry_venv && \
+    source /poetry_venv/bin/activate && \
+    pip install --no-cache-dir poetry==$POETRY_VERSION
 
 FROM ubuntu/python:${PYTHON_VERSION} AS python_u24_runtime
 
