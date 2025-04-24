@@ -6,12 +6,12 @@
 
     "incremental": false,
 
-    "target": "ES2020",
+    "target": "ES2022",
     "lib": [
       "DOM",
-      "ES2020"
+      "ES2022"
     ],
-    "module": "ES2020",
+    "module": "ES2022",
     "moduleResolution": "bundler",
 
     "noEmit": false,
