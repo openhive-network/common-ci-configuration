@@ -48,7 +48,6 @@ variables:
   variables:
     PRE_COMMIT_CONFIG: "${PYPROJECT_DIR}/.pre-commit-config.yaml"
   script:
-    - pushd . && cd /tmp && poetry self update && popd  # Bump poetry version so `poetry lock --no-update` will use the latest one; doing it in different directory to avoid `poetry.lock` and `pyproject.toml` changes
     - poetry -C "${PYPROJECT_DIR}" -V
     - echo -e "${TXT_BLUE}Checking all files with pre-commit hooks...${TXT_CLEAR}" &&
       pre-commit run --config ${PRE_COMMIT_CONFIG} --all-files
