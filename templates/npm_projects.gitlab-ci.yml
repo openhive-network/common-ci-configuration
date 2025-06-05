@@ -68,7 +68,7 @@ variables:
     DIST_DIR: "${SOURCE_DIR}/build"
     INPUT_JSON_SWAGGER_FILE: "${DIST_DIR}/swagger-doc.json"
     OUT_DIR: "${DIST_DIR}/generated"
-    WAX_SPEC_GENERATOR_VERSION: "1.2.1-250108151447"
+    WAX_SPEC_GENERATOR_VERSION: "1.3.0-250605102430"
     NPM_ALREADY_BUILT: 1
     # Target package meta information - they should be overrided by derived job
     NPM_PACKAGE_SCOPE: ""
