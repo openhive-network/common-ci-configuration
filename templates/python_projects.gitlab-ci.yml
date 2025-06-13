@@ -90,7 +90,7 @@ variables:
   image: "${PYTHON_IMAGE}"
   script:
     - cd "${PYPROJECT_DIR}"
-    - poetry lock --check # we have to stick to old syntax, because poetry-grpc-plugin used at wax repo disallows to upgrade poetry tool to version higher than 1.5.1
+    - poetry check --lock --verbose
 
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| STATIC CODE ANALYSIS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
