@@ -240,3 +240,48 @@ variables:
   script:
     - cd "${CI_PROJECT_DIR}"
     - /home/emscripten/scripts/npm_push_doc.sh "${SOURCE_DIR}" "${PROJECT_URL}" "${WIKI_PUSH_TOKEN}" "${DIST_DIR}" "${CI_COMMIT_REF_NAME}" "${CI_COMMIT_REF_PROTECTED}" "${DOC_URL}"
+
+.webapp_deploy_template:
+  extends: .job-defaults
+  variables:
+    GIT_SUBMODULE_STRATEGY: none
+    GIT_DEPTH: 1
+
+  before_script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):login[collapsed=true]\r\e[0KLogging to Docker registry..."
+      docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+      echo -e "\e[0Ksection_end:$(date +%s):login\r\e[0K"
+  script:
+    - |
+      # credits of solution for gitlab bug: https://gitlab.com/gitlab-org/gitlab/-/issues/294292#note_1070210709
+      export DEPLOYMENT_ENV_FILE=${!DEPLOYMENT_ENV_FILE}
+      # Make visible all vars in the bash env
+      source "${DEPLOYMENT_ENV_FILE}"
+
+      scripts/run_instance.sh \
+        --image="$IMAGE_NAME" \
+        --name="$CONTAINER_NAME" \
+        --port=$PORT \
+        --env-file="${DEPLOYMENT_ENV_FILE}" \
+        --detach
+  tags:
+    - hs-denser # Runner dedicated to automatic deployments of web-apps
+
+# Stop jobs template
+.webapp_stop_template:
+  extends: .job-defaults
+  variables:
+    CONTAINER_NAME: ""
+    GIT_SUBMODULE_STRATEGY: none
+    GIT_DEPTH: 1
+
+  script:
+    - docker ps -q --filter "name=$CONTAINER_NAME" | grep -q . && docker stop $CONTAINER_NAME
+    - docker container rm --force "$CONTAINER_NAME"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+      allow_failure: true
+  tags:
+    - hs-denser # Runner dedicated to automatic deployments of web-apps
