@@ -212,7 +212,7 @@ variables:
 
   script:
     # project version info must be regenerated accoring to correct target registry, package scope and name
-    - /home/emscripten/scripts/npm_generate_version.sh "${SOURCE_DIR}" "registry.npmjs.org/" "@hiveio" "${NPM_PACKAGE_NAME}" "latest"
+    - /home/emscripten/scripts/npm_generate_version.sh "${SOURCE_DIR}" "registry.npmjs.org/" "@hiveio" "${NPM_PACKAGE_NAME}" "${CI_COMMIT_REF_PROTECTED}" "${CI_COMMIT_TAG}"
     - echo -e "\e[0Ksection_start:$(date +%s):publishing[collapsed=false]\r\e[0KAttempting to publish a package to registry.npmjs.org..."
     - /home/emscripten/scripts/npm_publish.sh "${SOURCE_DIR}" "registry.npmjs.org/" "@hiveio" "${NPM_PUBLISH_TOKEN}"
     - echo -e "\e[0Ksection_end:$(date +%s):publishing\r\e[0KDone"
