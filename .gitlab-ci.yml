@@ -103,6 +103,25 @@ lint_python_scripts:
   tags:
     - public-runner-docker
 
+.effective_build_docker_image:
+  extends: .build_docker_image
+  variables:
+    DOCKERFILE_PATH: ""
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
+      exists:
+        - ${DOCKERFILE_PATH}
+      changes:
+        paths:
+          - ${DOCKERFILE_PATH}
+    - if: $CI_COMMIT_BRANCH !~ /^main$/ # for other branches compare to develop and run if there are differences
+      exists:
+        - ${DOCKERFILE_PATH}
+      changes:
+        paths:
+          - ${DOCKERFILE_PATH}
+        compare_to: 'refs/heads/develop'
+
 build_docker_dind_image:
   extends: .build_docker_image
   stage: pre-build
@@ -200,40 +219,31 @@ build_alpine_image:
         - Dockerfile.alpine
 
 build_python_image:
-  extends: .build_docker_image
+  extends: .effective_build_docker_image
   stage: build
   variables:
     BUILD_TARGET: "python"
+    DOCKERFILE_PATH: "Dockerfile.python"
   needs:
     - build_docker_dind_image
-  rules:
-    - if: $CI_COMMIT_BRANCH
-      exists:
-        - Dockerfile.python
 
 build_python_dev_image:
-  extends: .build_docker_image
+  extends: .effective_build_docker_image
   stage: build
   variables:
     BUILD_TARGET: "python_development"
+    DOCKERFILE_PATH: "Dockerfile.python_runtime"
   needs:
     - build_docker_dind_image
-  rules:
-    - if: $CI_COMMIT_BRANCH
-      exists:
-        - Dockerfile.python_runtime
 
 build_python_runtime_image:
-  extends: .build_docker_image
+  extends: .effective_build_docker_image
   stage: build
   variables:
     BUILD_TARGET: "python_runtime"
+    DOCKERFILE_PATH: "Dockerfile.python_runtime"
   needs:
     - build_docker_dind_image
-  rules:
-    - if: $CI_COMMIT_BRANCH
-      exists:
-        - Dockerfile.python_runtime
 
 build_dockerfile_image:
   extends: .build_docker_image
