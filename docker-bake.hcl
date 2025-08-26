@@ -17,7 +17,7 @@ variable "PYTHON_VERSION" {
 }
 
 variable "PYTHON_RUNTIME_VERSION" {
-  default = "3.12-u24.04"
+  default = "3.12-u24.04-1"
 }
 
 variable "PAAS_PSQL_VERSION" {
