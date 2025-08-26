@@ -127,4 +127,6 @@ RUN ln -sf /bin/bash /bin/sh && \
          /packages_to_install && \
   popd
 
-
+# Compile so __pycache__ will be already created for standard Python modules
+# Will work similar as e.g. `python -m compileall /urs/lib/python3.12` but is more flexible
+RUN python3 -c "import sysconfig, compileall; compileall.compile_dir(sysconfig.get_path('stdlib'))"
