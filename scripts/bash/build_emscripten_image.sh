@@ -5,12 +5,12 @@ SCRIPTSDIR="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 SRCDIR="${SCRIPTSDIR}/../../"
 
 REGISTRY=${1:-"registry.gitlab.syncad.com/hive/common-ci-configuration/"}
-EMSDK_VERSION=${1:-"4.0.1"}
+EMSDK_VERSION=${1:-"4.0.18"}
 
 export DOCKER_BUILDKIT=1
 
 docker build --target=supplemented_emscripten_builder \
   --progress=plain \
   --build-arg "EMSCRIPTEN_VERSION=${EMSDK_VERSION}" \
-  --tag "${REGISTRY}emsdk:${EMSDK_VERSION}-5" \
+  --tag "${REGISTRY}emsdk:${EMSDK_VERSION}-1" \
   --file "${SRCDIR}/Dockerfile.emscripten" "${SRCDIR}"
