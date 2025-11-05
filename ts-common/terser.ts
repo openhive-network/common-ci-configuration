@@ -54,6 +54,10 @@ const minifyOptions: MinifyOptions = {
 
 for(const file of jsSources) {
   const inputCode = readFileSync(file, { encoding: "utf-8" });
+  if (inputCode.includes("/* @terser-ignore */")) {
+    console.log(`Minification skipped for ${file}`);
+    continue;
+  }
 
   void minify(inputCode, minifyOptions).then(({ code }) => {
     if (!code)
