@@ -4,6 +4,8 @@ variables:
   DOCKER_DIND_TAG: "$CI_COMMIT_SHA"
   IMAGE_REMOVER_TAG: "$CI_COMMIT_SHA"
   TOX_IMAGE_TAG: "$CI_COMMIT_SHA"
+  PYTHON_IMAGE_TAG: 3.12.12
+  SHELLCHECK_ALPINE_TAG: v0.11.0
 
 stages:
   - validation
@@ -31,7 +33,7 @@ include:
 
 lint_bash_scripts:
   extends: .validation_job
-  image: koalaman/shellcheck-alpine:latest
+  image: koalaman/shellcheck-alpine:${SHELLCHECK_ALPINE_TAG}
   before_script:
     - apk add xmlstarlet
   script:
@@ -47,7 +49,7 @@ lint_bash_scripts:
 
 lint_ci_templates:
   extends: .validation_job
-  image: python:latest
+  image: python:${PYTHON_IMAGE_TAG}
   before_script:
     - pip install yamllint-junit
   script:
@@ -63,7 +65,7 @@ lint_ci_templates:
 
 lint_python_scripts:
   extends: .validation_job
-  image: python:latest
+  image: python:${PYTHON_IMAGE_TAG}
   before_script:
     - pip install pylint==2.17.7 pylint_junit==0.3.2
   script:
