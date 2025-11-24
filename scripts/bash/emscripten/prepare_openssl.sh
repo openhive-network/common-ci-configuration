@@ -27,7 +27,7 @@ emconfigure ./Configure \
 
 # shellcheck disable=SC2016
 sed -i 's/$(CROSS_COMPILE)//' Makefile
-emmake make -j 8 
+emmake make -j 8 CFLAGS="-Oz" CXXFLAGS="-Oz" LDFLAGS="-Oz"
 emmake make install
 
 echo "OpenSSL build finished."

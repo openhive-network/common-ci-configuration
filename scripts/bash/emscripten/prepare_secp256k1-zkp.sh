@@ -29,7 +29,7 @@ emconfigure ./configure --prefix="${INSTALL_PREFIX}" \
   --with-ecmult-window=4 \
   --with-ecmult-gen-precision=2
 
-emmake make -j $(nproc)
+emmake make CFLAGS="-Oz" CXXFLAGS="-Oz" LDFLAGS="-Oz" -j $(nproc)
 emmake make install
 
 echo "Secp256k1-zkp build finished."
