@@ -38,6 +38,8 @@ printf "using clang : emscripten : emcc -s USE_ZLIB=1 -s USE_ICU=0 : <archiver>e
   toolset=clang-emscripten \
   variant=release \
   threading=single \
+  cxxflags=-Oz \
+  linkflags=-Oz \
   --with-atomic \
   --with-chrono \
   --with-date_time \
