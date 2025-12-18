@@ -181,8 +181,13 @@ variables:
     expire_in: 1 week
 
 
-# Base definition for NPM package publishing job.
+# Base definition for NPM package publishing job (to internal GitLab registry).
 # The derived job, should have in its dependencies a final job performing a npm-build (derived from `.npm_build_template`)
+#
+# Skip variables (set to "true" to skip this job):
+#   - QUICK_TEST: Skip during quick test pipelines
+#   - SKIP_DEV_DEPLOY: Skip dev package deployments specifically
+#   - SKIP_NPM_PUBLISH: Skip all npm publishing jobs
 .npm_deploy_package_template:
   extends: .npm_process_built_package_tarball
   variables:
@@ -200,8 +205,25 @@ variables:
     - /home/emscripten/scripts/npm_publish.sh "${SOURCE_DIR}" "${NPM_REGISTRY_URL}" "${NPM_PACKAGE_SCOPE}" "${NPM_PUBLISH_TOKEN}"
     - echo -e "\e[0Ksection_end:$(date +%s):publishing\r\e[0KDone"
 
-# Base definition for NPM package publishing job to the registry.npmjs.org.
+  rules:
+    - if: $QUICK_TEST == "true"
+      when: never
+    - if: $SKIP_DEV_DEPLOY == "true"
+      when: never
+    - if: $SKIP_NPM_PUBLISH == "true"
+      when: never
+    - when: on_success
+
+# Base definition for NPM package publishing job to the registry.npmjs.org (PUBLIC production registry).
 # The derived job, should have in its dependencies a final job performing a npm-build (derived from `.npm_build_template`)
+#
+# IMPORTANT: This template publishes to the PUBLIC npmjs.org registry!
+# By default, only runs on protected tags with manual trigger.
+#
+# Skip variables (set to "true" to skip this job):
+#   - QUICK_TEST: Skip during quick test pipelines
+#   - SKIP_PRODUCTION_DEPLOY: Skip all production deployments
+#   - SKIP_NPM_PUBLISH: Skip all npm publishing jobs
 .registry_npmjs_org_deploy_package_template:
   extends: .npm_process_built_package_tarball
   variables:
@@ -222,6 +244,12 @@ variables:
     - echo -e "\e[0Ksection_end:$(date +%s):publishing\r\e[0KDone"
 
   rules:
+    - if: $QUICK_TEST == "true"
+      when: never
+    - if: $SKIP_PRODUCTION_DEPLOY == "true"
+      when: never
+    - if: $SKIP_NPM_PUBLISH == "true"
+      when: never
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED == "true"'
       when: manual
       allow_failure: true

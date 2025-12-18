@@ -13,7 +13,22 @@ This project contains the common CI templates and scripts for Hive and Hive-rela
 ## Job templates
 
 - [docker_image_jobs.gitlab-ci.yml](templates/docker_image_jobs.gitlab-ci.yml) - templates for managing Docker images
+- [npm_projects.gitlab-ci.yml](templates/npm_projects.gitlab-ci.yml) - templates for NPM package building and publishing
 - [test_jobs.gitlab-ci.yml](templates/test_jobs.gitlab-ci.yml) - templates for running tests
+
+## Pipeline Skip Variables
+
+The following variables can be set to `"true"` when running a pipeline to skip certain jobs:
+
+| Variable | Effect |
+|----------|--------|
+| `QUICK_TEST` | Skip all production deployments and dev package deployments |
+| `SKIP_PRODUCTION_DEPLOY` | Skip all production deployments (npm to npmjs.org, Docker to Docker Hub) |
+| `SKIP_DEV_DEPLOY` | Skip dev package deployments (npm to internal GitLab registry) |
+| `SKIP_NPM_PUBLISH` | Skip all npm publishing jobs (both dev and production) |
+| `SKIP_DOCKER_PUBLISH` | Skip Docker Hub publishing jobs |
+
+These variables are checked in the template rules, so projects that extend templates without overriding rules automatically get this behavior.
 
 ## Example jobs
 
