@@ -20,13 +20,15 @@ pnpm pack --pack-destination "${OUTPUT_DIR}" --json | grep -v '^>.*$' > "${OUTPU
 BUILT_PACKAGE_NAME=$(jq -r .filename "${OUTPUT_DIR}/built_package_info.json")
 # Extract just the filename for cross-runner compatibility
 BUILT_PACKAGE_FILENAME=$(basename "${BUILT_PACKAGE_NAME}")
-# Compute relative path from CI_PROJECT_DIR (strip CI_PROJECT_DIR prefix and leading slash)
-BUILT_PACKAGE_RELPATH="${OUTPUT_DIR#${CI_PROJECT_DIR}/}/${BUILT_PACKAGE_FILENAME}"
+# Store paths relative to CI_PROJECT_DIR so they work across different runner slots.
+# GitLab CI expands variables in dotenv files at load time, so we use \$ to delay expansion.
+RELATIVE_SOURCE_DIR="${SOURCE_DIR#${CI_PROJECT_DIR}/}"
+RELATIVE_PACKAGE_PATH="${OUTPUT_DIR#${CI_PROJECT_DIR}/}/${BUILT_PACKAGE_FILENAME}"
 {
-  echo PACKAGE_SOURCE_DIR="${SOURCE_DIR}"
-  echo BUILT_PACKAGE_PATH="${BUILT_PACKAGE_NAME}"
-  echo BUILT_PACKAGE_FILENAME="${BUILT_PACKAGE_FILENAME}"
-  echo BUILT_PACKAGE_RELPATH="${BUILT_PACKAGE_RELPATH}"
+  echo "PACKAGE_SOURCE_DIR=\${CI_PROJECT_DIR}/${RELATIVE_SOURCE_DIR}"
+  echo "BUILT_PACKAGE_PATH=\${CI_PROJECT_DIR}/${RELATIVE_PACKAGE_PATH}"
+  echo "BUILT_PACKAGE_FILENAME=${BUILT_PACKAGE_FILENAME}"
+  echo "BUILT_PACKAGE_RELPATH=${RELATIVE_PACKAGE_PATH}"
 } > "${SOURCE_DIR}/built_package_info.env"
 
 echo "built_package_info.env file contents:"

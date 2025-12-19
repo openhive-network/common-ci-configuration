@@ -49,7 +49,9 @@ variables:
     - source "${SOURCE_DIR}/built_package_version_info.env"
     - mkdir -vp "${DIST_DIR}"
     - cat "${INPUT_SQL_SWAGGER_FILE}" | sed -n '/^  openapi json = \$\$/,/^\$\$/ { /^  openapi json = \$\$/d; /^\$\$/d; p }' | jq ".info.version = \"${BUILT_PACKAGE_VERSION}\"" > "${JSON_SWAGGER_FILE}"
-    - echo BUILT_JSON_SWAGGER_FILE="${JSON_SWAGGER_FILE}" > "${SOURCE_DIR}/built_swagger_json.env"
+    # Store path relative to CI_PROJECT_DIR so it works across different runner slots.
+    # GitLab CI expands variables in dotenv files at load time.
+    - echo "BUILT_JSON_SWAGGER_FILE=\${CI_PROJECT_DIR}/${JSON_SWAGGER_FILE#${CI_PROJECT_DIR}/}" > "${SOURCE_DIR}/built_swagger_json.env"
 
   artifacts:
     reports:
