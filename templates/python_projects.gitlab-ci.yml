@@ -9,9 +9,13 @@ variables:
   PYTEST_NUMBER_OF_PROCESSES: "auto" # will use nproc to determine number of processes, override on specific project CI/job level
   PYTEST_LOG_DURATIONS: 0  # do not log test durations by default
   PYTEST_JUNIT_REPORT: "report.xml"  # junit report location, used by GitLab
+  # Python version - ci-base-image is the single source of truth
+  # To upgrade Python: rebuild ci-base-image in hive/hive, then update PYTHON_IMAGE_TAG SHA here
+  PYTHON_VERSION: "3.14"
+  PYTHON_VERSION_FULL: "3.14.2"
   # registries:
-  # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu24.04-2
-  PYTHON_IMAGE_TAG: "@sha256:81f56a1820497ff3cb1342327b7242dc50270db04cbfdd8d6198af1bb0e910b3"
+  # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu24.04-py3.14-1
+  PYTHON_IMAGE_TAG: "@sha256:64bc6a41d7811e6caace5fed8c82ca1ee6c26bfdcae8b29546d830a63bfe1f17"
   PYTHON_IMAGE: "registry.gitlab.syncad.com/hive/hive/ci-base-image${PYTHON_IMAGE_TAG}"
   # colors:
   TXT_GREEN: "\e[1;32m"
