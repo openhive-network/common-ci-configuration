@@ -247,6 +247,15 @@ build_python_runtime_image:
   needs:
     - build_docker_dind_image
 
+build_ci_base_image:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "ci-base-image"
+    DOCKERFILE_PATH: "Dockerfile.ci-base-image"
+  needs:
+    - build_docker_dind_image
+
 build_dockerfile_image:
   extends: .build_docker_image
   stage: build
@@ -342,7 +351,7 @@ buildkit_cache_cleanup:
   extends: .buildkit_cleanup_job_template
   needs: []
   variables:
-    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache"
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache"
 
 example_docker_image_builder_job:
   extends: .pure_docker_image_builder_job_template

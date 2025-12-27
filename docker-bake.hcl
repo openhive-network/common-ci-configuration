@@ -20,6 +20,10 @@ variable "PYTHON_RUNTIME_VERSION" {
   default = "3.12-u24.04-1"
 }
 
+variable "CI_BASE_IMAGE_VERSION" {
+  default = "ubuntu24.04-py3.14-1"
+}
+
 variable "PAAS_PSQL_VERSION" {
   default = "11251948d5dd4867552f9b9836a9e02110304df5"
 }
@@ -165,6 +169,13 @@ target "python_development" {
   tags = generate-tags("python_development", "${PYTHON_RUNTIME_VERSION}")
   cache-from = generate-cache-from("python_development", "${PYTHON_RUNTIME_VERSION}")
   cache-to = generate-cache-to("python_development", "${PYTHON_RUNTIME_VERSION}")
+}
+
+target "ci-base-image" {
+  dockerfile = "Dockerfile.ci-base-image"
+  tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
+  cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
+  cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
 }
 
 
