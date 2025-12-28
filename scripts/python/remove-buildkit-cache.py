@@ -39,7 +39,7 @@ def process_cache_registry_repository(gitlab_api_url, project_id,
     response = requests.get(url=tags_url, params=params, timeout=60)
     data = response.json()
     headers = response.headers
-    total_pages = int(headers['x-total-pages'])
+    total_pages = int(headers.get('x-total-pages', 1) if data else 0)
     print(f"Total pages available: {total_pages}.")
 
     append_names(image_tags, data)
@@ -94,7 +94,7 @@ def main():
     response = requests.get(url=branches_url, params=params, timeout=60)
     data = response.json()
     headers = response.headers
-    total_pages = int(headers['x-total-pages'])
+    total_pages = int(headers.get('x-total-pages', 1))
     print(f"Total pages available: {total_pages}.")
 
     branches = data.copy()
