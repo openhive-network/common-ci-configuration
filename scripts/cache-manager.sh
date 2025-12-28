@@ -173,24 +173,107 @@ _write_metadata() {
 EOF
 }
 
+# Fix pg_tblspc symlinks to use relative paths
+# PostgreSQL creates symlinks like pg_tblspc/16396 -> /home/hived/datadir/haf_db_store/tablespace
+# These absolute paths become invalid when data is extracted to a different location or mounted inside containers
+# We update them to use relative paths (../../tablespace) which work in any location
+_fix_pg_tblspc_symlinks() {
+    local source_dir="$1"
+    local pg_tblspc="${source_dir}/datadir/haf_db_store/pgdata/pg_tblspc"
+    local tablespace_dir="${source_dir}/datadir/haf_db_store/tablespace"
+
+    if [[ ! -d "$pg_tblspc" ]]; then
+        return 0
+    fi
+
+    # Relative path from pg_tblspc/16396 to tablespace is ../../tablespace
+    # This works both on the host AND inside Docker containers where datadir is mounted at a different path
+    local relative_path="../../tablespace"
+
+    # Find all symlinks in pg_tblspc and update to point to current tablespace location
+    for link in "$pg_tblspc"/*; do
+        if [[ -L "$link" ]]; then
+            local link_name
+            link_name=$(basename "$link")
+            local target
+            target=$(readlink "$link")
+
+            # Check if target contains 'tablespace' (the directory we need to point to)
+            if [[ "$target" == *"tablespace"* ]] && [[ -d "$tablespace_dir" ]]; then
+                _log "Fixing pg_tblspc symlink: $link_name (was -> $target)"
+                # Remove old symlink and create new one with relative path
+                # Use sudo since symlink may be owned by postgres (uid 105)
+                sudo rm -f "$link" 2>/dev/null || rm -f "$link"
+                sudo ln -s "$relative_path" "$link" 2>/dev/null || ln -s "$relative_path" "$link"
+                _log "Fixed pg_tblspc symlink: $link_name -> $relative_path"
+            fi
+        fi
+    done
+}
+
+# Convert pg_tblspc absolute symlinks to relative symlinks
+# This ensures symlinks work correctly when data is copied to different locations
+_convert_pg_tblspc_to_relative() {
+    local source_dir="$1"
+    local pg_tblspc="${source_dir}/datadir/haf_db_store/pgdata/pg_tblspc"
+
+    if [[ ! -d "$pg_tblspc" ]]; then
+        return 0
+    fi
+
+    # Relative path from pg_tblspc to tablespace is ../../tablespace
+    local relative_path="../../tablespace"
+
+    for link in "$pg_tblspc"/*; do
+        if [[ -L "$link" ]]; then
+            local link_name
+            link_name=$(basename "$link")
+            local target
+            target=$(readlink "$link")
+
+            # Only convert if it's an absolute path pointing to tablespace
+            if [[ "$target" == /* ]] && [[ "$target" == *"tablespace"* ]]; then
+                _log "Converting pg_tblspc symlink to relative: $link_name"
+                sudo rm -f "$link" 2>/dev/null || rm -f "$link"
+                sudo ln -s "$relative_path" "$link" 2>/dev/null || ln -s "$relative_path" "$link"
+            fi
+        fi
+    done
+}
+
 # Relax PostgreSQL pgdata permissions for caching
-# Makes pgdata readable so it can be copied to NFS
+# Makes pgdata and tablespace readable so they can be copied to NFS
 _relax_pgdata_permissions() {
     local source_dir="$1"
-    local pgdata_path="${source_dir}/datadir/haf_db_store/pgdata"
+    local haf_db_store="${source_dir}/datadir/haf_db_store"
+    local pgdata_path="${haf_db_store}/pgdata"
+    local tablespace_path="${haf_db_store}/tablespace"
 
     if [[ -d "$pgdata_path" ]]; then
         _log "Relaxing pgdata permissions for caching"
         # Make readable for copying (PostgreSQL creates mode 700)
         sudo chmod -R a+rX "$pgdata_path" 2>/dev/null || chmod -R a+rX "$pgdata_path" 2>/dev/null || true
     fi
+
+    if [[ -d "$tablespace_path" ]]; then
+        _log "Relaxing tablespace permissions for caching"
+        sudo chmod -R a+rX "$tablespace_path" 2>/dev/null || chmod -R a+rX "$tablespace_path" 2>/dev/null || true
+    fi
+
+    # Convert absolute symlinks to relative so they work when copied anywhere
+    _convert_pg_tblspc_to_relative "$source_dir"
 }
 
 # Restore PostgreSQL pgdata permissions after cache retrieval
 # pgdata must be mode 700 or 750, owned by postgres user for PostgreSQL to start
 _restore_pgdata_permissions() {
     local dest_dir="$1"
-    local pgdata_path="${dest_dir}/datadir/haf_db_store/pgdata"
+    local haf_db_store="${dest_dir}/datadir/haf_db_store"
+    local pgdata_path="${haf_db_store}/pgdata"
+    local tablespace_path="${haf_db_store}/tablespace"
+
+    # Fix tablespace symlinks in case cache was created before symlink fixing was enabled
+    _fix_pg_tblspc_symlinks "$dest_dir"
 
     if [[ -d "$pgdata_path" ]]; then
         _log "Restoring pgdata permissions to mode 700"
@@ -198,6 +281,12 @@ _restore_pgdata_permissions() {
         sudo chmod 700 "$pgdata_path" 2>/dev/null || chmod 700 "$pgdata_path" 2>/dev/null || true
         # Restore ownership to postgres user (uid 105 in HAF containers)
         sudo chown -R 105:105 "$pgdata_path" 2>/dev/null || true
+    fi
+
+    if [[ -d "$tablespace_path" ]]; then
+        _log "Restoring tablespace permissions"
+        sudo chmod 700 "$tablespace_path" 2>/dev/null || chmod 700 "$tablespace_path" 2>/dev/null || true
+        sudo chown -R 105:105 "$tablespace_path" 2>/dev/null || true
     fi
 }
 
