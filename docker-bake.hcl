@@ -21,7 +21,7 @@ variable "PYTHON_RUNTIME_VERSION" {
 }
 
 variable "CI_BASE_IMAGE_VERSION" {
-  default = "ubuntu24.04-py3.14-1"
+  default = "ubuntu24.04-py3.14-2"
 }
 
 variable "PAAS_PSQL_VERSION" {
