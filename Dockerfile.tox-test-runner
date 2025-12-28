@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM python:3.11.0-alpine3.17
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/python-3.11.0-alpine3.17
 
 RUN <<-EOF 
   # Install system dependencies

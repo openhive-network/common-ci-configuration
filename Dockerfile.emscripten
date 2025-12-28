@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1.5
-ARG EMSCRIPTEN_VERSION=4.0.18
 
-FROM emscripten/emsdk:${EMSCRIPTEN_VERSION} AS pure_emscripten_sdk
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/emscripten-emsdk-4.0.18 AS pure_emscripten_sdk
 
 FROM pure_emscripten_sdk AS supplemented_emscripten_sdk
 

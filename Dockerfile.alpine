@@ -1,2 +1,1 @@
-ARG ALPINE_VERSION=3.21.3
-FROM alpine:${ALPINE_VERSION}
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/alpine-3.21.3
