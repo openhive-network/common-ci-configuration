@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM alpine:3.17.0 as build
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/alpine-3.17.0 as build
 
 COPY <<-EOF /opt/patch.sed
   s/jtl2junit/m2u/g
@@ -50,7 +50,7 @@ RUN <<EOF
   chmod +x m2u
 EOF
 
-FROM alpine:3.17.0
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/alpine-3.17.0
 
 COPY --from=build /opt/tools /opt/tools
 

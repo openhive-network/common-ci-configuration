@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM docker:26.1.4-cli AS docker-builder
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-26.1.4-cli AS docker-builder
 
 RUN apk add --no-cache bash git coreutils ca-certificates curl sudo
 RUN <<EOF
