@@ -2,6 +2,7 @@
 # Provides full build toolchain for C++ projects (hived, HAF) and Python testing
 #
 # This replaces the ci-base-image previously built from hive/hive repo
+# Version: ubuntu24.04-py3.14-2 (includes libpq-dev for psycopg2-binary)
 
 ARG BASE_IMAGE=phusion/baseimage:noble-1.0.1
 FROM ${BASE_IMAGE}
