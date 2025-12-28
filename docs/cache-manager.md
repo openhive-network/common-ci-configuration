@@ -142,22 +142,18 @@ pipeline_id=98765
 
 This helps diagnose stale locks.
 
-### BusyBox Compatibility
+### flock Requirements
 
-Alpine-based images (docker-builder, docker-dind) may have BusyBox flock which lacks timeout support. The script detects this and falls back to a retry loop:
+**util-linux is required.** BusyBox flock does not work with NFS - it returns "Bad file descriptor" when locking NFS files.
 
-```bash
-# GNU coreutils flock
-flock -x -w 120 lockfile command
+The script checks for proper flock support at startup and fails with a clear error if BusyBox flock is detected:
 
-# BusyBox fallback (retry every 5s for up to timeout)
-while [[ $elapsed -lt $timeout ]]; do
-    flock -x -n lockfile command && return 0
-    sleep 5
-done
+```
+[cache-manager] ERROR: BusyBox flock detected - this does not work with NFS!
+[cache-manager] ERROR: Install util-linux package: apk add util-linux (Alpine)
 ```
 
-**Note:** util-linux must be installed in Alpine images for proper NFS flock support. BusyBox flock returns "Bad file descriptor" on NFS mounts.
+The `docker-builder` and `docker-dind` images already include util-linux.
 
 ## Handling Failures and Canceled Jobs
 

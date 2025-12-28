@@ -29,13 +29,19 @@
 
 set -euo pipefail
 
-# Detect flock capabilities (BusyBox vs GNU coreutils)
-# BusyBox flock doesn't support -w (timeout), only -n (nonblock)
-_flock_supports_timeout() {
-    flock --help 2>&1 | grep -q -- '-w' 2>/dev/null
+# Check for proper flock support (util-linux, not BusyBox)
+# BusyBox flock returns "Bad file descriptor" on NFS mounts and lacks -w timeout support
+_check_flock_support() {
+    # Check if flock supports -w (timeout) - util-linux does, BusyBox doesn't
+    if ! flock --help 2>&1 | grep -q -- '-w'; then
+        _error "BusyBox flock detected - this does not work with NFS!"
+        _error "Install util-linux package: apk add util-linux (Alpine) or apt install util-linux (Debian)"
+        _error "Docker images docker-builder and docker-dind should already have util-linux installed."
+        exit 1
+    fi
 }
 
-# Wrapper for flock that handles BusyBox compatibility
+# Wrapper for flock with timeout
 # Usage: _flock_with_timeout <timeout> <mode> <lockfile> <command...>
 #   mode: -s (shared) or -x (exclusive)
 _flock_with_timeout() {
@@ -44,23 +50,7 @@ _flock_with_timeout() {
     local lockfile="$3"
     shift 3
 
-    if _flock_supports_timeout; then
-        # GNU coreutils flock - use -w for timeout
-        flock "$mode" -w "$timeout" "$lockfile" "$@"
-    else
-        # BusyBox flock - no timeout support, use -n (non-blocking) with retry loop
-        local elapsed=0
-        local interval=5
-        while [[ $elapsed -lt $timeout ]]; do
-            if flock "$mode" -n "$lockfile" "$@" 2>/dev/null; then
-                return 0
-            fi
-            sleep "$interval"
-            elapsed=$((elapsed + interval))
-        done
-        _error "Timeout waiting for lock after ${timeout}s"
-        return 1
-    fi
+    flock "$mode" -w "$timeout" "$lockfile" "$@"
 }
 
 # Configuration with defaults
@@ -872,13 +862,16 @@ shift
 case "$cmd" in
     get)
         [[ $# -lt 3 ]] && { _error "get requires: <cache-type> <cache-key> <local-dest>"; exit 1; }
+        _check_flock_support
         cmd_get "$@"
         ;;
     put)
         [[ $# -lt 3 ]] && { _error "put requires: <cache-type> <cache-key> <local-source>"; exit 1; }
+        _check_flock_support
         cmd_put "$@"
         ;;
     cleanup)
+        _check_flock_support
         cmd_cleanup "$@"
         ;;
     list)
