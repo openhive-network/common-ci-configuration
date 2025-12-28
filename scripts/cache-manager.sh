@@ -68,7 +68,8 @@ CACHE_NFS_PATH="${CACHE_NFS_PATH:-/nfs/ci-cache}"
 CACHE_LOCAL_PATH="${CACHE_LOCAL_PATH:-/cache}"
 CACHE_MAX_SIZE_GB="${CACHE_MAX_SIZE_GB:-2000}"
 CACHE_MAX_AGE_DAYS="${CACHE_MAX_AGE_DAYS:-30}"
-CACHE_LOCK_TIMEOUT="${CACHE_LOCK_TIMEOUT:-3600}"
+CACHE_LOCK_TIMEOUT="${CACHE_LOCK_TIMEOUT:-120}"  # 2 minutes (NFS writes take ~10s, 12x margin)
+CACHE_STALE_LOCK_MINUTES="${CACHE_STALE_LOCK_MINUTES:-10}"  # Break locks older than this (writes take ~10s)
 CACHE_QUIET="${CACHE_QUIET:-false}"
 
 # Logging
@@ -80,6 +81,75 @@ _log() {
 
 _error() {
     echo "[cache-manager] ERROR: $1" >&2
+}
+
+# Write lock holder info for debugging stale locks
+_write_lock_info() {
+    local lockfile="$1"
+    local infofile="${lockfile}.info"
+    cat > "$infofile" 2>/dev/null <<EOF || true
+hostname=$(hostname)
+pid=$$
+started=$(date -Iseconds)
+job_id=${CI_JOB_ID:-unknown}
+pipeline_id=${CI_PIPELINE_ID:-unknown}
+EOF
+}
+
+# Check for and clean stale locks
+# Returns 0 if lock was stale and cleaned, 1 otherwise
+_check_stale_lock() {
+    local lockfile="$1"
+    local stale_minutes="${CACHE_STALE_LOCK_MINUTES:-10}"
+
+    # If lock file doesn't exist, nothing to check
+    [[ -f "$lockfile" ]] || return 1
+
+    # Check if lock file is older than stale threshold
+    local lock_age_minutes
+    lock_age_minutes=$(( ($(date +%s) - $(stat -c %Y "$lockfile" 2>/dev/null || echo 0)) / 60 ))
+
+    if [[ $lock_age_minutes -lt $stale_minutes ]]; then
+        return 1  # Not stale yet
+    fi
+
+    # Lock file is old - check if anyone is actually holding it
+    if flock -n "$lockfile" -c "true" 2>/dev/null; then
+        # Lock is not held, just stale file - clean it up silently
+        rm -f "$lockfile" "${lockfile}.info" 2>/dev/null || true
+        return 0  # Cleaned stale file
+    fi
+
+    # Lock IS held but file is very old - likely stale NFS lock
+    _log "WARNING: Lock file is ${lock_age_minutes} minutes old and appears stuck"
+
+    # Read lock holder info if available
+    local infofile="${lockfile}.info"
+    if [[ -f "$infofile" ]]; then
+        _log "Lock holder info:"
+        cat "$infofile" >&2 || true
+    fi
+
+    # Break the stale lock
+    _log "Breaking stale lock (${lock_age_minutes} min old, threshold: ${stale_minutes} min)"
+    rm -f "$lockfile" "${lockfile}.info" 2>/dev/null || true
+    return 0  # Lock was broken
+}
+
+# Clean up all stale lock files in a directory
+_cleanup_stale_locks() {
+    local dir="$1"
+    local stale_minutes="${CACHE_STALE_LOCK_MINUTES:-10}"
+    local cleaned=0
+
+    for lockfile in "$dir"/*.lock "$dir"/*/*.lock; do
+        [[ -f "$lockfile" ]] || continue
+        if _check_stale_lock "$lockfile"; then
+            cleaned=$((cleaned + 1))
+        fi
+    done
+
+    [[ $cleaned -gt 0 ]] && _log "Cleaned up $cleaned stale lock files"
 }
 
 # Check if running on the NFS host (where NFS path is local, not a mount)
@@ -381,9 +451,21 @@ cmd_get() {
         local NFS_TAR_LOCK="${NFS_TAR_FILE}.lock"
         touch "$NFS_TAR_LOCK" 2>/dev/null || true
 
+        local get_start_time=$(date +%s.%N)
         if _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -s "$NFS_TAR_LOCK" -c "
-            echo '[cache-manager] Extracting tar archive to local: $local_dest' >&2
+            lock_acquired=\$(date +%s.%N)
+            echo \"[cache-manager] Shared lock acquired in \$(echo \"\$lock_acquired - $get_start_time\" | bc)s\" >&2
+
+            tar_size=\$(stat -c %s '$NFS_TAR_FILE' 2>/dev/null || echo 0)
+            tar_size_gb=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / 1024\" | bc)
+            echo \"[cache-manager] Extracting tar archive (\${tar_size_gb}GB) to local: $local_dest\" >&2
+
+            extract_start=\$(date +%s.%N)
             tar xf '$NFS_TAR_FILE' -C '$local_dest'
+            extract_end=\$(date +%s.%N)
+            extract_duration=\$(echo \"\$extract_end - \$extract_start\" | bc)
+            throughput=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / \$extract_duration\" | bc 2>/dev/null || echo '?')
+            echo \"[cache-manager] Extraction completed in \${extract_duration}s (\${throughput} MB/s)\" >&2
         "; then
             _log "Extracted tar archive successfully"
         else
@@ -536,13 +618,33 @@ cmd_put() {
         echo "$tar_excludes" > "$excludes_file"
     fi
 
+    # Check for stale locks before attempting to acquire
+    _check_stale_lock "$NFS_TAR_LOCK"
+
+    local lock_start_time=$(date +%s.%N)
+    _log "Attempting to acquire lock: $NFS_TAR_LOCK"
+
     if ! _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$NFS_TAR_LOCK" -c "
+        # Record lock acquisition time
+        lock_acquired=\$(date +%s.%N)
+        echo \"[cache-manager] Lock acquired in \$(echo \"\$lock_acquired - $lock_start_time\" | bc)s\" >&2
+
+        # Write lock holder info for debugging
+        cat > '${NFS_TAR_LOCK}.info' 2>/dev/null <<LOCKINFO || true
+hostname=\$(hostname)
+pid=\$\$
+started=\$(date -Iseconds)
+job_id=${CI_JOB_ID:-unknown}
+pipeline_id=${CI_PIPELINE_ID:-unknown}
+LOCKINFO
+
         # Double-check after acquiring lock
         if [[ -f '$NFS_TAR_FILE' ]]; then
             echo '[cache-manager] Cache was created while waiting for lock' >&2
             exit 0
         fi
 
+        tar_start=\$(date +%s.%N)
         echo '[cache-manager] Creating tar archive on NFS: $NFS_TAR_FILE' >&2
         # Read exclusions from temp file if present
         excludes=''
@@ -552,7 +654,23 @@ cmd_put() {
         # Write tar archive directly to NFS (single file = fast)
         # shellcheck disable=SC2086
         tar cf '$NFS_TAR_FILE.tmp' \$excludes -C '$local_source' .
+        tar_end=\$(date +%s.%N)
+        tar_duration=\$(echo \"\$tar_end - \$tar_start\" | bc)
+
+        # Get file size for throughput calculation
+        tar_size=\$(stat -c %s '$NFS_TAR_FILE.tmp' 2>/dev/null || echo 0)
+        tar_size_gb=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / 1024\" | bc)
+        throughput=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / \$tar_duration\" | bc 2>/dev/null || echo '?')
+
+        echo \"[cache-manager] Tar completed: \${tar_size_gb}GB in \${tar_duration}s (\${throughput} MB/s)\" >&2
+
         mv '$NFS_TAR_FILE.tmp' '$NFS_TAR_FILE'
+
+        # Clean up lock info file
+        rm -f '${NFS_TAR_LOCK}.info' 2>/dev/null || true
+
+        total_duration=\$(echo \"\$(date +%s.%N) - $lock_start_time\" | bc)
+        echo \"[cache-manager] Total put operation: \${total_duration}s\" >&2
     "; then
         [[ -n "$excludes_file" ]] && rm -f "$excludes_file"
         _error "Failed to acquire exclusive lock"
@@ -613,6 +731,9 @@ cmd_cleanup() {
 
     _log "Starting cleanup (max_size=${max_size_gb}GB, max_age=${max_age_days}days)"
 
+    # Clean up stale lock files first
+    _cleanup_stale_locks "$CACHE_NFS_PATH"
+
     local max_size_bytes=$((max_size_gb * 1024 * 1024 * 1024))
     local cutoff_timestamp=$(($(date +%s) - max_age_days * 86400))
 
@@ -622,7 +743,9 @@ cmd_cleanup() {
     local search_path="$CACHE_NFS_PATH"
     [[ -n "$cache_type" ]] && search_path="$CACHE_NFS_PATH/$cache_type"
 
-    local total_size=$(du -sb "$search_path" 2>/dev/null | cut -f1 || echo 0)
+    local total_size
+    total_size=$(du -sb "$search_path" 2>/dev/null | awk '{print $1}' | head -1) || total_size=0
+    [[ -z "$total_size" || ! "$total_size" =~ ^[0-9]+$ ]] && total_size=0
     _log "Current cache size: $((total_size / 1024 / 1024 / 1024))GB"
 
     if [[ ! -f "$lru_index" ]]; then
