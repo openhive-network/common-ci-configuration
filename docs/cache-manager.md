@@ -142,18 +142,22 @@ pipeline_id=98765
 
 This helps diagnose stale locks.
 
-### flock Requirements
+### BusyBox Compatibility
 
-**util-linux is required.** BusyBox flock does not work with NFS - it returns "Bad file descriptor" when locking NFS files.
+Alpine-based images (docker-builder, docker-dind) may have BusyBox flock which lacks timeout support. The script detects this and falls back to a retry loop:
 
-The script checks for proper flock support at startup and fails with a clear error if BusyBox flock is detected:
+```bash
+# GNU coreutils flock
+flock -x -w 120 lockfile command
 
+# BusyBox fallback (retry every 5s for up to timeout)
+while [[ $elapsed -lt $timeout ]]; do
+    flock -x -n lockfile command && return 0
+    sleep 5
+done
 ```
-[cache-manager] ERROR: BusyBox flock detected - this does not work with NFS!
-[cache-manager] ERROR: Install util-linux package: apk add util-linux (Alpine)
-```
 
-The `docker-builder` and `docker-dind` images already include util-linux.
+**Note:** util-linux must be installed in Alpine images for proper NFS flock support. BusyBox flock returns "Bad file descriptor" on NFS mounts.
 
 ## Handling Failures and Canceled Jobs
 
@@ -352,67 +356,3 @@ find /cache -name "*.tar" -mtime +7 -delete
 ```
 
 Local caches are automatically populated when fetching from NFS and persist across jobs on the same builder.
-
-## Block Log Storage
-
-Block logs are static, read-only data stored separately from the cache-manager system. They are used as input for replay operations.
-
-### Storage Location
-
-Each builder has block logs at `/storage1/blockchain/` (symlinked to `/blockchain/`):
-
-```
-/blockchain/
-├── block_log_5m/           # 3.4G - 5 million blocks (mainnet)
-│   ├── block_log
-│   ├── block_log.artifacts
-│   └── block_log_part.*
-└── block_log_5m_mirrornet/ # 1.7G - 5 million blocks (mirrornet)
-    ├── block_log
-    └── block_log.artifacts
-```
-
-### Usage in CI
-
-CI jobs reference these via variables defined in `.gitlab-ci.yml`:
-
-```yaml
-variables:
-  BLOCK_LOG_SOURCE_DIR_5M: /blockchain/block_log_5m
-  BLOCK_LOG_SOURCE_DIR_MIRRORNET_5M: /blockchain/block_log_5m_mirrornet
-```
-
-Jobs mount the block_log directory into containers for replay:
-
-```yaml
-script:
-  - |
-    docker run \
-      -v $BLOCK_LOG_SOURCE_DIR_5M:/blockchain:ro \
-      hived --replay
-```
-
-### Why Block Logs Are Not Cached
-
-Block logs are excluded from cache-manager for several reasons:
-
-1. **Static data**: Block logs don't change - they're fixed test datasets
-2. **Already local**: Every builder has a local copy, no NFS fetch needed
-3. **Read-only mounts**: Jobs mount them read-only, preventing corruption
-4. **Size efficiency**: The 5M block logs (3.4G) are small enough to store everywhere
-
-The `put` command automatically excludes `datadir/blockchain` from HAF/hive caches since jobs use the local block_log mount instead of copying block data into each cache.
-
-### Maintenance
-
-Block logs are manually updated when new test data is needed. No automatic cleanup is required since they're static.
-
-```bash
-# Check block_log on a builder
-ls -la /blockchain/block_log_5m/
-
-# Verify all builders have consistent data
-for i in 5 6 7 8 9 10 11; do
-  ssh hive-builder-$i 'ls -la /blockchain/block_log_5m/'
-done
-```
