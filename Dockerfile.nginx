@@ -1,1 +1,1 @@
-FROM openresty/openresty:alpine
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/openresty-openresty-alpine

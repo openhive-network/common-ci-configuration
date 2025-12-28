@@ -1,4 +1,4 @@
-FROM python:3.12.2 AS python-scripts
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/python-3.12.2 AS python-scripts
 
 COPY scripts/python/*.py /
 COPY scripts/python/requirements.txt /
