@@ -209,30 +209,19 @@ Python tox test runner for multi-version Python testing.
 | `postgrest` | Yes | REST API for PostgreSQL |
 | `psql` | Yes | PostgreSQL client |
 | `ci-base-image` | No | Used directly by hive/haf pipelines |
-| `python` | No | Used directly by repos needing Python 3.12 (api_client_generator) |
+| `python` | No | Used by hive for api_client_generator (needs Python 3.12) |
+| `python_runtime` | No | Used by clive as runtime base image |
+| `python_development` | No | Used by clive as testnet base image |
 | `dockerfile` | No | BuildKit frontend |
-
-### Potentially Redundant Images
-
-These images are built but do not appear to be used in templates or downstream projects:
-
-| Image | Python | Notes |
-|-------|--------|-------|
-| `python_runtime` | 3.12 | Minimal Ubuntu runtime - no known usage |
-| `python_development` | 3.12 | Ubuntu dev environment - may be replaced by ci-base-image |
-
-Before removing these images, verify:
-1. Check GitLab registry for recent pulls
-2. Search for usage in external projects not in the main repos
 
 ## Python Version Summary
 
 | Image | Python Version | Notes |
 |-------|----------------|-------|
 | ci-base-image | 3.14 | Latest Python for hive/HAF testing |
-| python | 3.12.9 | With poetry+git, for Python 3.12 CI jobs |
-| python_runtime | 3.12 | Minimal Ubuntu runtime |
-| python_development | 3.12 | Ubuntu with dev tools |
+| python | 3.12.9 | With poetry+git, used by hive for api_client_generator |
+| python_runtime | 3.12 | Minimal Ubuntu runtime, used by clive |
+| python_development | 3.12 | Ubuntu with dev tools, used by clive |
 | python-scripts | 3.12.2 | CI utilities |
 | tox-test-runner | 3.11 | Multi-version testing |
 | benchmark-test-runner | 3.x | Alpine system Python |
