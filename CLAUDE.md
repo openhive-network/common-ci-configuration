@@ -9,6 +9,13 @@ This is **common-ci-configuration** - a shared CI/CD template library for Hive b
 - Pre-built Docker images (emsdk, python, nginx, postgrest, psql, etc.)
 - npm/pnpm package build and publish scripts
 - Python utilities for GitLab registry management
+- Cache management system for CI replay data (`scripts/cache-manager.sh`)
+
+## Documentation
+
+Detailed documentation is available in `docs/`:
+- `cache-manager.md` - NFS-backed cache system for HAF/hive replay data
+- `common-ci-images.md` - Docker images, their purposes, and Python versions
 
 ## Validation Commands
 
@@ -87,3 +94,14 @@ Located in `scripts/bash/npm-helpers/`:
 - Python version: `docker-bake.hcl` (`PYTHON_VERSION`, `PYTHON_RUNTIME_VERSION`)
 - Emscripten version: `docker-bake.hcl` (`EMSCRIPTEN_VERSION`)
 - emsdk image tag for consumers: `templates/npm_projects.gitlab-ci.yml` (`EMSCRIPTEN_IMAGE_TAG`)
+
+## CI Builder Infrastructure
+
+Jobs run on builders `hive-builder-5` through `hive-builder-11`. Key paths:
+- `/cache/` - Local SSD cache (tar files)
+- `/nfs/ci-cache/` - Shared NFS cache (hive-builder-10 is the NFS server)
+- `/blockchain/block_log_5m/` - Static 5M block test data (read-only, don't copy)
+
+## NFS Locking Requirement
+
+Alpine-based images (`docker-builder`, `docker-dind`) must include `util-linux` for NFS flock support. BusyBox flock fails on NFS with "Bad file descriptor".
