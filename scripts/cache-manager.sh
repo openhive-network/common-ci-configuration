@@ -73,6 +73,20 @@ _error() {
     echo "[cache-manager] ERROR: $1" >&2
 }
 
+# Create or update a lock file with world-writable permissions
+# This ensures lock files can be used by any user/container (different UIDs)
+_touch_lock() {
+    local lockfile="$1"
+    if [[ ! -f "$lockfile" ]]; then
+        # Create new lock file with 666 permissions
+        install -m 666 /dev/null "$lockfile" 2>/dev/null || touch "$lockfile" 2>/dev/null || true
+    else
+        # Update timestamp, fix permissions if we can
+        touch "$lockfile" 2>/dev/null || true
+        chmod 666 "$lockfile" 2>/dev/null || true
+    fi
+}
+
 # Write lock holder info for debugging stale locks
 _write_lock_info() {
     local lockfile="$1"
@@ -198,7 +212,7 @@ _update_lru() {
     local entry="${cache_type}/${cache_key}"
 
     # Acquire global lock for index update
-    touch "$GLOBAL_LOCK"
+    _touch_lock "$GLOBAL_LOCK"
     _flock_with_timeout 30 -x "$GLOBAL_LOCK" -c "
         # Create or update LRU index (simple format: timestamp|path per line)
         if [[ -f '$LRU_INDEX' ]]; then
@@ -413,7 +427,7 @@ cmd_get() {
     mkdir -p "$local_dest"
 
     local tar_lock="${source_tar}.lock"
-    touch "$tar_lock" 2>/dev/null || true
+    _touch_lock "$tar_lock"
 
     local get_start_time=$(date +%s.%N)
     if _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -s "$tar_lock" -c "
@@ -498,7 +512,7 @@ cmd_put() {
         # Create tar archive (local I/O on NFS host, still fast)
         _log "Storing cache on NFS host: $NFS_TAR_FILE"
         mkdir -p "$(dirname "$NFS_TAR_FILE")"
-        touch "$NFS_TAR_LOCK"
+        _touch_lock "$NFS_TAR_LOCK"
 
         # shellcheck disable=SC2086
         if ! _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$NFS_TAR_LOCK" -c "
@@ -569,7 +583,7 @@ cmd_put() {
     fi
 
     mkdir -p "$(dirname "$NFS_TAR_FILE")"
-    touch "$NFS_TAR_LOCK"
+    _touch_lock "$NFS_TAR_LOCK"
 
     # Check for stale locks before attempting to acquire
     _check_stale_lock "$NFS_TAR_LOCK"
