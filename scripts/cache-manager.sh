@@ -587,7 +587,8 @@ cmd_put() {
     _touch_lock "$NFS_TAR_LOCK"
 
     # Check for stale locks before attempting to acquire
-    _check_stale_lock "$NFS_TAR_LOCK"
+    # Note: _check_stale_lock returns 1 if not stale, which would trigger errexit
+    _check_stale_lock "$NFS_TAR_LOCK" || true
 
     local lock_start_time=$(date +%s.%N)
     _log "Pushing to NFS: $NFS_TAR_FILE"
