@@ -13,7 +13,7 @@ variable "POSTGREST_VERSION" {
   default = "v12.0.2"
 }
 variable "PYTHON_VERSION" {
-  default = "3.12.9-slim-bookworm"
+  default = "3.12.9-1"
 }
 
 variable "PYTHON_RUNTIME_VERSION" {

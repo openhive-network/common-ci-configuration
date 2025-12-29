@@ -86,9 +86,13 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 
 **Python:** 3.12.9
 
-Lightweight Python runtime with poetry for running Python applications.
+Lightweight Python environment with poetry and git for running Python applications and CI jobs.
 
-**Used by:** Python-based services and test runners.
+**Includes:** poetry, git
+
+**Current version:** `3.12.9-1`
+
+**Used by:** Python-based services, test runners, and API generation jobs that require Python 3.12 (e.g., api_client_generator which doesn't support Python 3.14 yet).
 
 ### python_runtime
 
@@ -205,6 +209,7 @@ Python tox test runner for multi-version Python testing.
 | `postgrest` | Yes | REST API for PostgreSQL |
 | `psql` | Yes | PostgreSQL client |
 | `ci-base-image` | No | Used directly by hive/haf pipelines |
+| `python` | No | Used directly by repos needing Python 3.12 (api_client_generator) |
 | `dockerfile` | No | BuildKit frontend |
 
 ### Potentially Redundant Images
@@ -213,7 +218,6 @@ These images are built but do not appear to be used in templates or downstream p
 
 | Image | Python | Notes |
 |-------|--------|-------|
-| `python` | 3.12.9 | Slim Debian runtime - may be replaced by ci-base-image |
 | `python_runtime` | 3.12 | Minimal Ubuntu runtime - no known usage |
 | `python_development` | 3.12 | Ubuntu dev environment - may be replaced by ci-base-image |
 
@@ -226,7 +230,7 @@ Before removing these images, verify:
 | Image | Python Version | Notes |
 |-------|----------------|-------|
 | ci-base-image | 3.14 | Latest Python for hive/HAF testing |
-| python | 3.12.9 | Slim Debian-based runtime |
+| python | 3.12.9 | With poetry+git, for Python 3.12 CI jobs |
 | python_runtime | 3.12 | Minimal Ubuntu runtime |
 | python_development | 3.12 | Ubuntu with dev tools |
 | python-scripts | 3.12.2 | CI utilities |
@@ -240,7 +244,7 @@ Image versions are defined in `docker-bake.hcl`:
 | Variable | Current Value | Description |
 |----------|---------------|-------------|
 | `EMSCRIPTEN_VERSION` | 4.0.18 | Emscripten SDK version |
-| `PYTHON_VERSION` | 3.12.9-slim-bookworm | Python base image version |
+| `PYTHON_VERSION` | 3.12.9-1 | Python image version (with poetry) |
 | `PYTHON_RUNTIME_VERSION` | 3.12-u24.04-1 | Python runtime version |
 | `CI_BASE_IMAGE_VERSION` | ubuntu24.04-py3.14-2 | CI base image version |
 | `PSQL_IMAGE_VERSION` | 14-1 | PostgreSQL client version |
