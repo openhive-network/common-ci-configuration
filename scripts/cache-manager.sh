@@ -480,7 +480,8 @@ cmd_put() {
     fi
 
     # Relax pgdata permissions for HAF caches so they can be copied
-    if [[ "$cache_type" == "haf" ]]; then
+    # Covers: haf, haf_sync, haf_pipeline, haf_filtered, etc.
+    if [[ "$cache_type" == haf* ]]; then
         _relax_pgdata_permissions "$local_source"
     fi
 
@@ -505,7 +506,7 @@ cmd_put() {
                 tar_excludes="--exclude=./datadir/blockchain"
                 _log "Excluding datadir/blockchain"
             fi
-        elif [[ "$cache_type" == "haf" || "$cache_type" == "haf_sync" ]]; then
+        elif [[ "$cache_type" == haf* ]]; then
             tar_excludes=$(_build_haf_tar_excludes "$local_source")
         fi
 
@@ -553,7 +554,7 @@ cmd_put() {
             tar_excludes="--exclude=./datadir/blockchain"
             _log "Excluding datadir/blockchain"
         fi
-    elif [[ "$cache_type" == "haf" || "$cache_type" == "haf_sync" ]]; then
+    elif [[ "$cache_type" == haf* ]]; then
         tar_excludes=$(_build_haf_tar_excludes "$local_source")
     fi
 
