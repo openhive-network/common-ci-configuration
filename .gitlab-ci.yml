@@ -409,7 +409,8 @@ psql_image_test:
 buildkit_cache_cleanup:
   stage: cleanup
   extends: .buildkit_cleanup_job_template
-  needs: []
+  # Don't use needs: [] - let it wait for build stage to complete
+  # Otherwise it runs concurrently with builds and overloads the registry
   variables:
     CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache"
 
