@@ -21,9 +21,10 @@
 #       - pytest tests/
 
 variables:
-  # Docker image versions (override if needed)
-  DOCKER_BUILDER_TAG: "latest"
-  DOCKER_DIND_TAG: "latest"
+  # Docker image versions - use specific commit with util-linux for NFS flock support
+  # Override these if you need a different version
+  DOCKER_BUILDER_TAG: "3dd346380da7f28cdaf3ef3955559c905d94bd1c"
+  DOCKER_DIND_TAG: "3dd346380da7f28cdaf3ef3955559c905d94bd1c"
 
   # Cache manager configuration
   CACHE_MANAGER: "/tmp/cache-manager.sh"
