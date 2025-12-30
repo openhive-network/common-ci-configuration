@@ -67,149 +67,101 @@ include:
 # =============================================================================
 # CHANGE DETECTION TEMPLATE
 # =============================================================================
-# Analyzes changed files to determine if full HAF sync can be skipped.
-# When only tests/docs/CI config change, we can use cached HAF data.
+# Simplified detect_changes template - analyzes changed files to determine
+# if full HAF sync/build can be skipped. When only tests/docs change, we can
+# use cached HAF data.
 #
 # Required variables to set in derived job:
-#   HAF_APP_CACHE_TYPE: Cache type name (e.g., "haf_btracker_sync")
-#
-# Optional overrides:
 #   HAF_APP_SKIP_PATTERNS: Regex patterns for files that don't need sync
-#   HAF_COMMIT: Specific HAF commit (usually from submodule)
+#   HAF_COMMIT: HAF commit (for cache key lookup)
 #
 # Outputs (via dotenv artifact):
-#   AUTO_SKIP_SYNC: "true" if sync can be skipped
-#   AUTO_CACHE_KEY: Cache key to use (HAF_COMMIT_APP_COMMIT format)
-#   AUTO_HAF_COMMIT: HAF commit from discovered cache
+#   AUTO_SKIP_BUILD: "true" if build/sync can be skipped
+#   CACHE_COMMIT: HAF commit to use for cached data
+#
+# Note: This template handles the common case. For apps with custom cache
+# discovery logic, you can override the script section.
 
 .haf_app_detect_changes:
   extends: .job-defaults
   stage: detect
   image: alpine:latest
   variables:
-    HAF_APP_CACHE_TYPE: ""  # Must be set by derived job
-    GIT_DEPTH: 0
-    GIT_STRATEGY: fetch
-  tags:
-    - data-cache-storage
+    GIT_SUBMODULE_STRATEGY: none
   before_script:
-    - apk add --no-cache git bash curl jq
+    - apk add --no-cache git
   script:
     - |
-      set -euo pipefail
+      set -e
 
-      echo "=== Change Detection for HAF App ==="
-      echo "Cache type: ${HAF_APP_CACHE_TYPE}"
-      echo "Skip patterns: ${HAF_APP_SKIP_PATTERNS}"
+      # Initialize defaults
+      CAN_SKIP_BUILD=false
+      CACHE_COMMIT=""
 
-      # Initialize outputs
-      AUTO_SKIP_SYNC="false"
-      AUTO_CACHE_KEY=""
-      AUTO_HAF_COMMIT=""
-
-      # Determine base commit for comparison
-      if [[ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-}" ]]; then
-        BASE_SHA="$CI_MERGE_REQUEST_TARGET_BRANCH_SHA"
-        echo "MR detected, comparing to target: $BASE_SHA"
-      elif [[ -n "${CI_COMMIT_BEFORE_SHA:-}" && "$CI_COMMIT_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
-        BASE_SHA="$CI_COMMIT_BEFORE_SHA"
-        echo "Push detected, comparing to previous: $BASE_SHA"
-      else
-        # Fallback to develop or default branch
-        git fetch origin "${CI_DEFAULT_BRANCH:-develop}" --depth=1 || true
-        BASE_SHA=$(git rev-parse "origin/${CI_DEFAULT_BRANCH:-develop}" 2>/dev/null || echo "")
-        if [[ -z "$BASE_SHA" ]]; then
-          echo "Cannot determine base commit, full sync required"
-          echo "AUTO_SKIP_SYNC=false" > detect_changes.env
-          exit 0
+      # Handle manual QUICK_TEST mode
+      if [ "$QUICK_TEST" = "true" ]; then
+        echo "=== Manual QUICK_TEST Mode ==="
+        CAN_SKIP_BUILD=true
+        CACHE_COMMIT="${QUICK_TEST_HAF_COMMIT}"
+        if [ -z "$CACHE_COMMIT" ]; then
+          echo "ERROR: QUICK_TEST_HAF_COMMIT must be set when QUICK_TEST=true"
+          echo ""
+          echo "Find available caches:"
+          echo "  ssh hive-builder-10 'ls -lt /nfs/ci-cache/haf/*.tar | head -5'"
+          exit 1
         fi
-        echo "Using default branch as base: $BASE_SHA"
-      fi
+        echo "Using cached data from: $CACHE_COMMIT"
+      else
+        # Automatic detection mode
+        echo "=== Detecting Changed Files ==="
 
-      # Get list of changed files
-      echo ""
-      echo "=== Changed Files ==="
-      CHANGED_FILES=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null || echo "")
-
-      if [[ -z "$CHANGED_FILES" ]]; then
-        echo "No changed files detected or git diff failed"
-        echo "AUTO_SKIP_SYNC=false" > detect_changes.env
-        exit 0
-      fi
-
-      echo "$CHANGED_FILES"
-
-      # Check if all changed files match skip patterns
-      echo ""
-      echo "=== Checking Skip Patterns ==="
-      NEEDS_SYNC="false"
-
-      while IFS= read -r file; do
-        [[ -z "$file" ]] && continue
-        if ! echo "$file" | grep -qE "${HAF_APP_SKIP_PATTERNS}"; then
-          echo "  $file -> REQUIRES SYNC"
-          NEEDS_SYNC="true"
+        # Get changed files based on pipeline type
+        if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+          BASE_SHA="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+          echo "MR pipeline: comparing against target branch"
+        elif [ "${CI_PIPELINE_SOURCE:-}" = "push" ]; then
+          BASE_SHA="HEAD~1"
+          echo "Push pipeline: comparing against previous commit"
         else
-          echo "  $file -> can skip"
+          BASE_SHA=$(git merge-base HEAD origin/develop 2>/dev/null || echo "HEAD~1")
+          echo "Other pipeline: comparing against develop"
         fi
-      done <<< "$CHANGED_FILES"
 
-      if [[ "$NEEDS_SYNC" == "true" ]]; then
-        echo ""
-        echo "Code changes detected, full sync required"
-        echo "AUTO_SKIP_SYNC=false" > detect_changes.env
-        exit 0
+        echo "Comparing $BASE_SHA to HEAD"
+        CHANGED_FILES=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null || git show --name-only --pretty=format: HEAD | grep -v '^$' || true)
+
+        # Last resort: require full build
+        if [ -z "$CHANGED_FILES" ]; then
+          echo "WARNING: Could not determine changed files - requiring full build"
+          CHANGED_FILES="unknown-changes"
+        fi
+
+        echo "Changed files:"
+        echo "$CHANGED_FILES" | head -50
+
+        NEEDS_BUILD=$(echo "$CHANGED_FILES" | grep -vE "${HAF_APP_SKIP_PATTERNS}" || true)
+
+        if [ -z "$NEEDS_BUILD" ]; then
+          echo ""
+          echo "=== Can skip data prep (only tests/docs changed) ==="
+          CAN_SKIP_BUILD=true
+          # Use current HAF submodule commit as cache key
+          CACHE_COMMIT="${HAF_COMMIT}"
+        else
+          echo ""
+          echo "=== Files requiring full build: ==="
+          echo "$NEEDS_BUILD"
+        fi
       fi
 
-      echo ""
-      echo "=== All changes are skippable, searching for cached data ==="
-
-      # Search for available cache in NFS
-      CACHE_DIR="${DATA_CACHE_NFS_PREFIX}/${HAF_APP_CACHE_TYPE}"
-      if [[ ! -d "$CACHE_DIR" ]]; then
-        echo "No cache directory found: $CACHE_DIR"
-        echo "AUTO_SKIP_SYNC=false" > detect_changes.env
-        exit 0
-      fi
-
-      # Find most recent cache (format: HAF_COMMIT_APP_COMMIT.tar)
-      LATEST_CACHE=$(ls -t "$CACHE_DIR"/*.tar 2>/dev/null | head -1 || echo "")
-
-      if [[ -z "$LATEST_CACHE" ]]; then
-        echo "No cached data found in $CACHE_DIR"
-        echo "AUTO_SKIP_SYNC=false" > detect_changes.env
-        exit 0
-      fi
-
-      # Extract cache key and HAF commit from filename
-      CACHE_FILENAME=$(basename "$LATEST_CACHE" .tar)
-      echo "Found cache: $CACHE_FILENAME"
-
-      # Cache key format is typically: HAF_COMMIT_APP_SHORT_SHA
-      # Extract HAF commit (first 40 chars if full hash, or first part before _)
-      if [[ "$CACHE_FILENAME" =~ ^([a-f0-9]{40})_ ]]; then
-        AUTO_HAF_COMMIT="${BASH_REMATCH[1]}"
-      elif [[ "$CACHE_FILENAME" =~ ^([a-f0-9]+)_ ]]; then
-        AUTO_HAF_COMMIT="${BASH_REMATCH[1]}"
-      else
-        AUTO_HAF_COMMIT="$CACHE_FILENAME"
-      fi
-
-      AUTO_CACHE_KEY="$CACHE_FILENAME"
-      AUTO_SKIP_SYNC="true"
+      # Write dotenv artifact
+      echo "AUTO_SKIP_BUILD=${CAN_SKIP_BUILD}" > detect_changes.env
+      echo "CACHE_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
 
       echo ""
       echo "=== Detection Results ==="
-      echo "AUTO_SKIP_SYNC: $AUTO_SKIP_SYNC"
-      echo "AUTO_CACHE_KEY: $AUTO_CACHE_KEY"
-      echo "AUTO_HAF_COMMIT: $AUTO_HAF_COMMIT"
-
-      # Write dotenv artifact
-      cat > detect_changes.env <<EOF
-      AUTO_SKIP_SYNC=${AUTO_SKIP_SYNC}
-      AUTO_CACHE_KEY=${AUTO_CACHE_KEY}
-      AUTO_HAF_COMMIT=${AUTO_HAF_COMMIT}
-      EOF
+      echo "AUTO_SKIP_BUILD: $CAN_SKIP_BUILD"
+      echo "CACHE_COMMIT: $CACHE_COMMIT"
 
   artifacts:
     reports:
@@ -218,9 +170,6 @@ include:
   rules:
     # Never run for tags (always full build for releases)
     - if: $CI_COMMIT_TAG
-      when: never
-    # Skip if QUICK_TEST is explicitly set
-    - if: $QUICK_TEST == "true"
       when: never
     - when: on_success
 
