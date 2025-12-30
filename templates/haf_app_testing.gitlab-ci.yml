@@ -451,6 +451,196 @@ include:
     - when: on_success
 
 # =============================================================================
+# SYNC JOB COMPONENTS
+# =============================================================================
+# Composable building blocks for HAF app sync jobs.
+# Use !reference to compose your sync job from these components.
+#
+# Typical sync job structure:
+#   extends: .docker_image_builder_job_template
+#   before_script:
+#     - !reference [.haf_app_sync_setup, script]
+#     - !reference [.haf_app_fetch_haf_cache, script]
+#   script:
+#     - # Your app-specific sync logic
+#     - !reference [.haf_app_sync_shutdown, script]
+#     - !reference [.haf_app_sync_save_cache, script]
+#   after_script: !reference [.haf_app_sync_cleanup, after_script]
+#   artifacts: !reference [.haf_app_sync_artifacts, artifacts]
+
+# Common sync job variables
+.haf_app_sync_variables:
+  variables:
+    # Directories (using CI_JOB_ID for isolation)
+    DATADIR: "${CI_PROJECT_DIR}/${CI_JOB_ID}/datadir"
+    SHM_DIR: "${CI_PROJECT_DIR}/${CI_JOB_ID}/shm_dir"
+    HAF_DATA_DIRECTORY: "${DATADIR}"
+    HAF_SHM_DIRECTORY: "${SHM_DIR}"
+    # Docker compose options (override per-app)
+    COMPOSE_OPTIONS_STRING: "--env-file ci.env --file docker-compose.yml --ansi never"
+    # Timeout for graceful PostgreSQL shutdown
+    COMPOSE_DOWN_TIMEOUT: "60"
+    # Postgres user in HAF container (UID:GID)
+    POSTGRES_UID: "105"
+    POSTGRES_GID: "109"
+
+# Docker login and git safe.directory setup
+# Use: !reference [.haf_app_sync_setup, script]
+.haf_app_sync_setup:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):login[collapsed=true]\r\e[0KLogging to Docker registry..."
+      docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+      echo -e "\e[0Ksection_end:$(date +%s):login\r\e[0K"
+      echo -e "\e[0Ksection_start:$(date +%s):git[collapsed=true]\r\e[0KConfiguring Git..."
+      git config --global --add safe.directory "$CI_PROJECT_DIR"
+      git config --global --add safe.directory "$CI_PROJECT_DIR/haf"
+      echo -e "\e[0Ksection_end:$(date +%s):git\r\e[0K"
+
+# Fetch HAF replay data from local cache or NFS
+# Requires: HAF_COMMIT, DATA_CACHE_HAF_PREFIX variables
+# Use: !reference [.haf_app_fetch_haf_cache, script]
+.haf_app_fetch_haf_cache:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):haf_cache[collapsed=true]\r\e[0KFetching HAF replay data..."
+      LOCAL_HAF_CACHE="${DATA_CACHE_HAF_PREFIX}_${HAF_COMMIT}"
+      if [[ -d "${LOCAL_HAF_CACHE}/datadir" ]]; then
+        echo "Local HAF cache found at ${LOCAL_HAF_CACHE}"
+      else
+        echo "Local HAF cache not found, fetching from NFS..."
+        # Fetch cache-manager if not already present
+        if [[ ! -x "$CACHE_MANAGER" ]]; then
+          curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF:-develop}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+          chmod +x "$CACHE_MANAGER"
+        fi
+        if "$CACHE_MANAGER" get haf "${HAF_COMMIT}" "${LOCAL_HAF_CACHE}"; then
+          echo "Fetched HAF replay data from NFS cache"
+        else
+          echo "ERROR: Failed to fetch HAF replay data from NFS cache"
+          exit 1
+        fi
+      fi
+      echo -e "\e[0Ksection_end:$(date +%s):haf_cache\r\e[0K"
+
+# Copy datadir from HAF cache and fix ownership/permissions
+# Requires: HAF submodule with scripts/copy_datadir.sh, DATADIR, POSTGRES_UID/GID
+# Use: !reference [.haf_app_copy_datadir, script]
+.haf_app_copy_datadir:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):copy_datadir[collapsed=true]\r\e[0KCopying HAF datadir..."
+      "${CI_PROJECT_DIR}/haf/scripts/copy_datadir.sh"
+
+      # Fix pgdata ownership and permissions for HAF container
+      if [[ -d "${DATADIR}/haf_db_store" ]]; then
+        echo "Fixing haf_db_store ownership to UID ${POSTGRES_UID}:${POSTGRES_GID}"
+        sudo chown -R "${POSTGRES_UID}:${POSTGRES_GID}" "${DATADIR}/haf_db_store"
+        sudo chown -R "${POSTGRES_UID}:${POSTGRES_GID}" "${DATADIR}/haf_postgresql_conf.d" 2>/dev/null || true
+        # Fix pgdata permissions - PostgreSQL requires 700 or 750
+        if [[ -d "${DATADIR}/haf_db_store/pgdata" ]]; then
+          echo "Fixing pgdata permissions to 700"
+          sudo chmod 700 "${DATADIR}/haf_db_store/pgdata"
+        fi
+      fi
+      echo -e "\e[0Ksection_end:$(date +%s):copy_datadir\r\e[0K"
+
+# Copy block_log to docker directory
+# Requires: BLOCK_LOG_SOURCE_DIR_5M variable
+# Use: !reference [.haf_app_copy_blockchain, script]
+.haf_app_copy_blockchain:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):blockchain[collapsed=true]\r\e[0KCopying blockchain files..."
+      mkdir -p "${CI_PROJECT_DIR}/docker/blockchain"
+      cp "${BLOCK_LOG_SOURCE_DIR_5M}/block_log" "${CI_PROJECT_DIR}/docker/blockchain/block_log"
+      cp "${BLOCK_LOG_SOURCE_DIR_5M}/block_log.artifacts" "${CI_PROJECT_DIR}/docker/blockchain/block_log.artifacts"
+      chmod a+w docker/blockchain/block_log
+      echo -e "\e[0Ksection_end:$(date +%s):blockchain\r\e[0K"
+
+# Shutdown containers: checkpoint PostgreSQL, collect logs, compose down
+# Requires: COMPOSE_OPTIONS_STRING, COMPOSE_DOWN_TIMEOUT variables
+# Use: !reference [.haf_app_sync_shutdown, script]
+.haf_app_sync_shutdown:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):shutdown[collapsed=true]\r\e[0KStopping containers..."
+      pushd docker
+      IFS=" " read -ra COMPOSE_OPTIONS <<< $COMPOSE_OPTIONS_STRING
+
+      # Force PostgreSQL checkpoint before shutdown to ensure all data is written to disk
+      echo "Forcing PostgreSQL checkpoint..."
+      docker compose "${COMPOSE_OPTIONS[@]}" exec -T haf psql -U haf_admin -d haf_block_log -c "CHECKPOINT;" || true
+
+      # Collect logs before stopping
+      docker compose "${COMPOSE_OPTIONS[@]}" logs haf > haf.log || true
+      docker compose "${COMPOSE_OPTIONS[@]}" logs backend-setup > backend-setup.log || true
+      docker compose "${COMPOSE_OPTIONS[@]}" logs backend-block-processing > backend-block-processing.log || true
+      docker compose "${COMPOSE_OPTIONS[@]}" logs backend-postgrest > backend-postgrest.log || true
+
+      # Use longer timeout for graceful PostgreSQL shutdown
+      docker compose "${COMPOSE_OPTIONS[@]}" down --volumes --timeout "${COMPOSE_DOWN_TIMEOUT:-60}"
+      popd
+
+      # Archive logs
+      tar -czvf docker/container-logs.tar.gz $(pwd)/docker/*.log
+      echo -e "\e[0Ksection_end:$(date +%s):shutdown\r\e[0K"
+
+# Save sync data to local cache and push to NFS
+# Requires: APP_SYNC_CACHE_TYPE, APP_CACHE_KEY, DATADIR, SHM_DIR
+# Use: !reference [.haf_app_sync_save_cache, script]
+.haf_app_sync_save_cache:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):save_cache[collapsed=true]\r\e[0KSaving sync data to cache..."
+
+      # Prepare data for caching
+      sudo cp -a "${SHM_DIR}" "${DATADIR}/shm_dir"
+      mkdir -p "${DATADIR}/blockchain"
+      sudo cp -a "${CI_PROJECT_DIR}/docker/blockchain/block_log" "${DATADIR}/blockchain/block_log"
+      sudo cp -a "${CI_PROJECT_DIR}/docker/blockchain/block_log.artifacts" "${DATADIR}/blockchain/block_log.artifacts"
+
+      # Save to local cache
+      LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${APP_CACHE_KEY}"
+      mkdir -p "${LOCAL_APP_CACHE}"
+      sudo cp -a "${DATADIR}" "${LOCAL_APP_CACHE}"
+
+      ls -lah "${LOCAL_APP_CACHE}"
+      ls -lah "${LOCAL_APP_CACHE}/datadir" || true
+
+      # Push to NFS cache
+      if [[ ! -x "$CACHE_MANAGER" ]]; then
+        curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF:-develop}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+        chmod +x "$CACHE_MANAGER"
+      fi
+
+      echo "Pushing sync data to NFS: ${APP_SYNC_CACHE_TYPE}/${APP_CACHE_KEY}"
+      if CACHE_HANDLING=haf "$CACHE_MANAGER" put "${APP_SYNC_CACHE_TYPE}" "${APP_CACHE_KEY}" "${LOCAL_APP_CACHE}"; then
+        echo "Successfully pushed cache to NFS"
+      else
+        echo "WARNING: Failed to push to NFS cache"
+      fi
+      echo -e "\e[0Ksection_end:$(date +%s):save_cache\r\e[0K"
+
+# Cleanup job directory in after_script
+# Use: after_script: !reference [.haf_app_sync_cleanup, after_script]
+.haf_app_sync_cleanup:
+  after_script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):cleanup[collapsed=true]\r\e[0KCleaning up..."
+      sudo rm -rf ${CI_PROJECT_DIR}/${CI_JOB_ID} 2>/dev/null || true
+      echo -e "\e[0Ksection_end:$(date +%s):cleanup\r\e[0K"
+
+# Standard artifacts for sync jobs
+# Use: artifacts: !reference [.haf_app_sync_artifacts, artifacts]
+.haf_app_sync_artifacts:
+  artifacts:
+    paths:
+      - docker/container-logs.tar.gz
+    expire_in: 1 week
+    when: always
+
+# =============================================================================
 # CLEANUP TEMPLATES
 # =============================================================================
 # Manual cleanup jobs for cache data
