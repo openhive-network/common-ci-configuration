@@ -16,6 +16,7 @@ This is **common-ci-configuration** - a shared CI/CD template library for Hive b
 Detailed documentation is available in `docs/`:
 - `cache-manager.md` - NFS-backed cache system for HAF/hive replay data
 - `common-ci-images.md` - Docker images, their purposes, and Python versions
+- `haf-app-testing.md` - Templates for HAF-dependent application testing
 
 ## Validation Commands
 
@@ -57,6 +58,8 @@ Templates are in `templates/` and are included by downstream projects:
 | `npm_projects.gitlab-ci.yml` | npm/pnpm package builds |
 | `test_jobs.gitlab-ci.yml` | pytest, jmeter, tox test runners |
 | `python_projects.gitlab-ci.yml` | Python linting/testing |
+| `haf_app_testing.gitlab-ci.yml` | HAF app change detection, DinD testing, Tavern |
+| `cache-manager.gitlab-ci.yml` | Cache-manager script setup |
 | `base.gitlab-ci.yml` | Common job defaults |
 
 ## Pipeline Skip Variables

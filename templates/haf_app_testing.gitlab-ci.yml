@@ -1,0 +1,531 @@
+# HAF Application Testing Templates
+#
+# Provides reusable CI patterns for HAF-dependent applications.
+# These templates standardize common patterns found across HAfAH,
+# reputation_tracker, balance_tracker, and hivemind.
+#
+# Usage in your .gitlab-ci.yml:
+#   include:
+#     - project: 'hive/common-ci-configuration'
+#       ref: develop
+#       file: '/templates/haf_app_testing.gitlab-ci.yml'
+#
+#   detect_changes:
+#     extends: .haf_app_detect_changes
+#     variables:
+#       HAF_APP_CACHE_TYPE: "haf_myapp_sync"
+#
+#   my_test_job:
+#     extends: .haf_app_dind_test_base
+#     script:
+#       - pytest tests/
+
+variables:
+  # Docker image versions (override if needed)
+  DOCKER_BUILDER_TAG: "latest"
+  DOCKER_DIND_TAG: "latest"
+
+  # Cache manager configuration
+  CACHE_MANAGER: "/tmp/cache-manager.sh"
+  CACHE_MANAGER_REF: "develop"
+
+  # NFS and local cache paths (standard across all builders)
+  DATA_CACHE_NFS_PREFIX: "/nfs/ci-cache"
+  DATA_CACHE_HAF_PREFIX: "/cache/replay_data_haf"
+  DATA_CACHE_LOCAL_PREFIX: "/cache"
+
+  # Common skip patterns for change detection
+  # Files matching these patterns don't require full HAF sync
+  HAF_APP_SKIP_PATTERNS: '^tests/|^docs/|\.md$|^README|^CHANGELOG|^LICENSE|^CLAUDE|^\.gitlab-ci'
+
+  # Default timeouts (can be overridden per job)
+  HAF_SYNC_TIMEOUT: "7200"    # 2 hours for sync jobs
+  HAF_TEST_TIMEOUT: "1800"    # 30 minutes for test jobs
+  HAF_EXTRACT_TIMEOUT: "300"  # 5 minutes for cache extraction
+
+include:
+  - local: templates/base.gitlab-ci.yml
+  - local: templates/docker_image_jobs.gitlab-ci.yml
+
+# =============================================================================
+# CACHE MANAGER SETUP
+# =============================================================================
+# Standardized cache-manager.sh fetching that all HAF apps should use.
+# This ensures consistent caching behavior across all applications.
+
+.fetch_cache_manager:
+  before_script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):cache_manager_setup[collapsed=true]\r\e[0KSetting up cache-manager..."
+      mkdir -p "$(dirname "$CACHE_MANAGER")"
+      curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+      chmod +x "$CACHE_MANAGER"
+      echo "Cache manager ready: $CACHE_MANAGER (ref: ${CACHE_MANAGER_REF})"
+      echo -e "\e[0Ksection_end:$(date +%s):cache_manager_setup\r\e[0K"
+
+# =============================================================================
+# CHANGE DETECTION TEMPLATE
+# =============================================================================
+# Analyzes changed files to determine if full HAF sync can be skipped.
+# When only tests/docs/CI config change, we can use cached HAF data.
+#
+# Required variables to set in derived job:
+#   HAF_APP_CACHE_TYPE: Cache type name (e.g., "haf_btracker_sync")
+#
+# Optional overrides:
+#   HAF_APP_SKIP_PATTERNS: Regex patterns for files that don't need sync
+#   HAF_COMMIT: Specific HAF commit (usually from submodule)
+#
+# Outputs (via dotenv artifact):
+#   AUTO_SKIP_SYNC: "true" if sync can be skipped
+#   AUTO_CACHE_KEY: Cache key to use (HAF_COMMIT_APP_COMMIT format)
+#   AUTO_HAF_COMMIT: HAF commit from discovered cache
+
+.haf_app_detect_changes:
+  extends: .job-defaults
+  stage: detect
+  image: alpine:latest
+  variables:
+    HAF_APP_CACHE_TYPE: ""  # Must be set by derived job
+    GIT_DEPTH: 0
+    GIT_STRATEGY: fetch
+  tags:
+    - data-cache-storage
+  before_script:
+    - apk add --no-cache git bash curl jq
+  script:
+    - |
+      set -euo pipefail
+
+      echo "=== Change Detection for HAF App ==="
+      echo "Cache type: ${HAF_APP_CACHE_TYPE}"
+      echo "Skip patterns: ${HAF_APP_SKIP_PATTERNS}"
+
+      # Initialize outputs
+      AUTO_SKIP_SYNC="false"
+      AUTO_CACHE_KEY=""
+      AUTO_HAF_COMMIT=""
+
+      # Determine base commit for comparison
+      if [[ -n "${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-}" ]]; then
+        BASE_SHA="$CI_MERGE_REQUEST_TARGET_BRANCH_SHA"
+        echo "MR detected, comparing to target: $BASE_SHA"
+      elif [[ -n "${CI_COMMIT_BEFORE_SHA:-}" && "$CI_COMMIT_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+        BASE_SHA="$CI_COMMIT_BEFORE_SHA"
+        echo "Push detected, comparing to previous: $BASE_SHA"
+      else
+        # Fallback to develop or default branch
+        git fetch origin "${CI_DEFAULT_BRANCH:-develop}" --depth=1 || true
+        BASE_SHA=$(git rev-parse "origin/${CI_DEFAULT_BRANCH:-develop}" 2>/dev/null || echo "")
+        if [[ -z "$BASE_SHA" ]]; then
+          echo "Cannot determine base commit, full sync required"
+          echo "AUTO_SKIP_SYNC=false" > detect_changes.env
+          exit 0
+        fi
+        echo "Using default branch as base: $BASE_SHA"
+      fi
+
+      # Get list of changed files
+      echo ""
+      echo "=== Changed Files ==="
+      CHANGED_FILES=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null || echo "")
+
+      if [[ -z "$CHANGED_FILES" ]]; then
+        echo "No changed files detected or git diff failed"
+        echo "AUTO_SKIP_SYNC=false" > detect_changes.env
+        exit 0
+      fi
+
+      echo "$CHANGED_FILES"
+
+      # Check if all changed files match skip patterns
+      echo ""
+      echo "=== Checking Skip Patterns ==="
+      NEEDS_SYNC="false"
+
+      while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+        if ! echo "$file" | grep -qE "${HAF_APP_SKIP_PATTERNS}"; then
+          echo "  $file -> REQUIRES SYNC"
+          NEEDS_SYNC="true"
+        else
+          echo "  $file -> can skip"
+        fi
+      done <<< "$CHANGED_FILES"
+
+      if [[ "$NEEDS_SYNC" == "true" ]]; then
+        echo ""
+        echo "Code changes detected, full sync required"
+        echo "AUTO_SKIP_SYNC=false" > detect_changes.env
+        exit 0
+      fi
+
+      echo ""
+      echo "=== All changes are skippable, searching for cached data ==="
+
+      # Search for available cache in NFS
+      CACHE_DIR="${DATA_CACHE_NFS_PREFIX}/${HAF_APP_CACHE_TYPE}"
+      if [[ ! -d "$CACHE_DIR" ]]; then
+        echo "No cache directory found: $CACHE_DIR"
+        echo "AUTO_SKIP_SYNC=false" > detect_changes.env
+        exit 0
+      fi
+
+      # Find most recent cache (format: HAF_COMMIT_APP_COMMIT.tar)
+      LATEST_CACHE=$(ls -t "$CACHE_DIR"/*.tar 2>/dev/null | head -1 || echo "")
+
+      if [[ -z "$LATEST_CACHE" ]]; then
+        echo "No cached data found in $CACHE_DIR"
+        echo "AUTO_SKIP_SYNC=false" > detect_changes.env
+        exit 0
+      fi
+
+      # Extract cache key and HAF commit from filename
+      CACHE_FILENAME=$(basename "$LATEST_CACHE" .tar)
+      echo "Found cache: $CACHE_FILENAME"
+
+      # Cache key format is typically: HAF_COMMIT_APP_SHORT_SHA
+      # Extract HAF commit (first 40 chars if full hash, or first part before _)
+      if [[ "$CACHE_FILENAME" =~ ^([a-f0-9]{40})_ ]]; then
+        AUTO_HAF_COMMIT="${BASH_REMATCH[1]}"
+      elif [[ "$CACHE_FILENAME" =~ ^([a-f0-9]+)_ ]]; then
+        AUTO_HAF_COMMIT="${BASH_REMATCH[1]}"
+      else
+        AUTO_HAF_COMMIT="$CACHE_FILENAME"
+      fi
+
+      AUTO_CACHE_KEY="$CACHE_FILENAME"
+      AUTO_SKIP_SYNC="true"
+
+      echo ""
+      echo "=== Detection Results ==="
+      echo "AUTO_SKIP_SYNC: $AUTO_SKIP_SYNC"
+      echo "AUTO_CACHE_KEY: $AUTO_CACHE_KEY"
+      echo "AUTO_HAF_COMMIT: $AUTO_HAF_COMMIT"
+
+      # Write dotenv artifact
+      cat > detect_changes.env <<EOF
+      AUTO_SKIP_SYNC=${AUTO_SKIP_SYNC}
+      AUTO_CACHE_KEY=${AUTO_CACHE_KEY}
+      AUTO_HAF_COMMIT=${AUTO_HAF_COMMIT}
+      EOF
+
+  artifacts:
+    reports:
+      dotenv: detect_changes.env
+    expire_in: 1 day
+  rules:
+    # Never run for tags (always full build for releases)
+    - if: $CI_COMMIT_TAG
+      when: never
+    # Skip if QUICK_TEST is explicitly set
+    - if: $QUICK_TEST == "true"
+      when: never
+    - when: on_success
+
+# =============================================================================
+# HAF COMMIT VALIDATION TEMPLATE
+# =============================================================================
+# Ensures HAF_COMMIT variable matches include ref and submodule commit.
+# This prevents subtle bugs from version mismatches.
+
+.haf_commit_validation:
+  extends: .job-defaults
+  stage: build
+  image: alpine:latest
+  variables:
+    HAF_COMMIT: ""           # Must be set by derived job
+    HAF_INCLUDE_REF: ""      # Should match the 'ref' in your HAF include
+    HAF_SUBMODULE_PATH: "haf"  # Path to HAF submodule
+  before_script:
+    - apk add --no-cache git
+  script:
+    - |
+      set -euo pipefail
+
+      echo "=== HAF Commit Validation ==="
+      echo "HAF_COMMIT variable: ${HAF_COMMIT}"
+      echo "HAF_INCLUDE_REF: ${HAF_INCLUDE_REF:-not set}"
+      echo "HAF_SUBMODULE_PATH: ${HAF_SUBMODULE_PATH}"
+
+      ERRORS=0
+
+      # Check submodule commit matches
+      if [[ -d "${HAF_SUBMODULE_PATH}/.git" ]] || [[ -f "${HAF_SUBMODULE_PATH}/.git" ]]; then
+        SUBMODULE_COMMIT=$(git -C "${HAF_SUBMODULE_PATH}" rev-parse HEAD 2>/dev/null || echo "")
+        echo "Submodule commit: ${SUBMODULE_COMMIT}"
+
+        if [[ -n "$SUBMODULE_COMMIT" && "$SUBMODULE_COMMIT" != "$HAF_COMMIT" ]]; then
+          echo "ERROR: HAF_COMMIT ($HAF_COMMIT) does not match submodule ($SUBMODULE_COMMIT)"
+          ERRORS=$((ERRORS + 1))
+        fi
+      else
+        echo "WARNING: HAF submodule not found at ${HAF_SUBMODULE_PATH}"
+      fi
+
+      # Check include ref matches (if provided)
+      if [[ -n "${HAF_INCLUDE_REF:-}" && "$HAF_INCLUDE_REF" != "$HAF_COMMIT" ]]; then
+        echo "ERROR: HAF_COMMIT ($HAF_COMMIT) does not match include ref ($HAF_INCLUDE_REF)"
+        ERRORS=$((ERRORS + 1))
+      fi
+
+      if [[ $ERRORS -gt 0 ]]; then
+        echo ""
+        echo "VALIDATION FAILED: $ERRORS errors found"
+        echo "Please ensure HAF_COMMIT, include ref, and submodule are all in sync"
+        exit 1
+      fi
+
+      echo ""
+      echo "VALIDATION PASSED"
+  tags:
+    - public-runner-docker
+
+# =============================================================================
+# DOCKER-IN-DOCKER TEST BASE TEMPLATE
+# =============================================================================
+# Base template for running tests with Docker Compose in a DinD environment.
+# Provides proper cache extraction and service orchestration.
+#
+# Required variables:
+#   HAF_APP_CACHE_TYPE: Cache type to extract
+#   HAF_APP_CACHE_KEY: Cache key (usually from detect_changes or sync job)
+#
+# Optional:
+#   COMPOSE_FILE: Path to docker-compose file (default: docker/docker-compose-test.yml)
+#   COMPOSE_PROJECT_NAME: Docker Compose project name
+#   HAF_DATA_DIRECTORY: Where to extract cache data
+
+.haf_app_dind_test_base:
+  extends: .docker_image_builder_job_template
+  stage: test
+  timeout: 30 minutes
+  variables:
+    FF_NETWORK_PER_BUILD: "true"
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: "tcp://docker:2375"
+
+    # Cache configuration
+    HAF_APP_CACHE_TYPE: ""    # Must be set
+    HAF_APP_CACHE_KEY: ""     # Must be set (from detect_changes or sync)
+    HAF_DATA_DIRECTORY: "${CI_PROJECT_DIR}/.haf-data"
+
+    # Docker Compose configuration
+    COMPOSE_FILE: "docker/docker-compose-test.yml"
+    COMPOSE_PROJECT_NAME: "haf-test-${CI_JOB_ID}"
+
+  before_script:
+    - !reference [.docker_image_builder_job_template, before_script]
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):cache_setup[collapsed=true]\r\e[0KSetting up HAF cache..."
+
+      # Fetch cache-manager
+      mkdir -p "$(dirname "$CACHE_MANAGER")"
+      curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+      chmod +x "$CACHE_MANAGER"
+
+      # Extract cache
+      echo "Extracting cache: ${HAF_APP_CACHE_TYPE}/${HAF_APP_CACHE_KEY}"
+      mkdir -p "${HAF_DATA_DIRECTORY}"
+      "$CACHE_MANAGER" get "${HAF_APP_CACHE_TYPE}" "${HAF_APP_CACHE_KEY}" "${HAF_DATA_DIRECTORY}"
+
+      echo -e "\e[0Ksection_end:$(date +%s):cache_setup\r\e[0K"
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):compose_start[collapsed=true]\r\e[0KStarting Docker Compose services..."
+
+      # Start services
+      if [[ -f "${COMPOSE_FILE}" ]]; then
+        docker compose -f "${COMPOSE_FILE}" -p "${COMPOSE_PROJECT_NAME}" up -d --quiet-pull
+
+        # Wait for services to be healthy
+        echo "Waiting for services to be ready..."
+        WAIT_START=$(date +%s)
+        WAIT_TIMEOUT=${HAF_EXTRACT_TIMEOUT:-300}
+
+        while true; do
+          UNHEALTHY=$(docker compose -f "${COMPOSE_FILE}" -p "${COMPOSE_PROJECT_NAME}" ps --format json 2>/dev/null | jq -r 'select(.Health != "healthy" and .Health != "" and .State == "running") | .Name' | wc -l || echo "0")
+
+          if [[ "$UNHEALTHY" == "0" ]]; then
+            echo "All services healthy"
+            break
+          fi
+
+          ELAPSED=$(($(date +%s) - WAIT_START))
+          if [[ $ELAPSED -ge $WAIT_TIMEOUT ]]; then
+            echo "WARNING: Timeout waiting for services (${WAIT_TIMEOUT}s)"
+            docker compose -f "${COMPOSE_FILE}" -p "${COMPOSE_PROJECT_NAME}" ps
+            break
+          fi
+
+          echo "Waiting for $UNHEALTHY services... (${ELAPSED}s)"
+          sleep 5
+        done
+      else
+        echo "No compose file found at ${COMPOSE_FILE}, skipping service startup"
+      fi
+
+      echo -e "\e[0Ksection_end:$(date +%s):compose_start\r\e[0K"
+
+  after_script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):compose_cleanup\r\e[0KCleaning up Docker Compose..."
+
+      if [[ -f "${COMPOSE_FILE:-docker/docker-compose-test.yml}" ]]; then
+        # Capture logs before cleanup
+        docker compose -f "${COMPOSE_FILE:-docker/docker-compose-test.yml}" -p "${COMPOSE_PROJECT_NAME:-haf-test}" logs --no-color > container-logs.txt 2>&1 || true
+
+        # Cleanup
+        docker compose -f "${COMPOSE_FILE:-docker/docker-compose-test.yml}" -p "${COMPOSE_PROJECT_NAME:-haf-test}" down -v --remove-orphans || true
+      fi
+
+      echo -e "\e[0Ksection_end:$(date +%s):compose_cleanup\r\e[0K"
+
+  artifacts:
+    when: always
+    paths:
+      - container-logs.txt
+    expire_in: 1 week
+
+  tags:
+    - data-cache-storage
+    - fast
+
+# =============================================================================
+# TAVERN API TEST TEMPLATE
+# =============================================================================
+# Specialized template for running Tavern-based API tests.
+# Extends the DinD test base with Python/Tavern setup.
+#
+# Optional variables:
+#   PYTEST_WORKERS: Number of parallel workers (default: 4)
+#   TAVERN_VERSION: Tavern package version (default: 2.2.0)
+#   PYTEST_ARGS: Additional pytest arguments
+#   TEST_DIR: Directory containing tests (default: tests/api_tests)
+
+.haf_app_tavern_tests:
+  extends: .haf_app_dind_test_base
+  variables:
+    PYTEST_WORKERS: "4"
+    TAVERN_VERSION: "2.2.0"
+    PYTEST_ARGS: ""
+    TEST_DIR: "tests/api_tests"
+    JUNIT_REPORT: "tavern-results.xml"
+
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):venv_setup[collapsed=true]\r\e[0KSetting up Python environment..."
+
+      # Create and activate virtual environment
+      python3 -m venv venv
+      . venv/bin/activate
+
+      # Install test dependencies
+      pip install --quiet \
+        "tavern==${TAVERN_VERSION}" \
+        "pytest-xdist>=3.2.0" \
+        "pyyaml>=6.0" \
+        "requests>=2.28.0"
+
+      echo -e "\e[0Ksection_end:$(date +%s):venv_setup\r\e[0K"
+    - |
+      echo "=== Running Tavern API Tests ==="
+      echo "Test directory: ${TEST_DIR}"
+      echo "Parallel workers: ${PYTEST_WORKERS}"
+      echo "Additional args: ${PYTEST_ARGS}"
+
+      cd "${TEST_DIR}"
+      pytest \
+        -n "${PYTEST_WORKERS}" \
+        --dist loadfile \
+        --junitxml="${CI_PROJECT_DIR}/${JUNIT_REPORT}" \
+        ${PYTEST_ARGS} \
+        . || TEST_EXIT_CODE=$?
+
+      exit ${TEST_EXIT_CODE:-0}
+
+  artifacts:
+    when: always
+    paths:
+      - container-logs.txt
+      - "${JUNIT_REPORT}"
+    reports:
+      junit: "${JUNIT_REPORT}"
+    expire_in: 1 week
+
+# =============================================================================
+# QUICK TEST MODE HELPERS
+# =============================================================================
+# Templates for handling QUICK_TEST mode (manual cache selection)
+
+.quick_test_variables:
+  variables:
+    # Set these to use quick test mode
+    QUICK_TEST: ""                    # Set to "true" to enable
+    QUICK_TEST_HAF_COMMIT: ""         # Required if QUICK_TEST=true
+    QUICK_TEST_APP_COMMIT: ""         # Optional, defaults to current commit
+
+# Rule to skip jobs when QUICK_TEST is enabled
+.skip_on_quick_test:
+  rules:
+    - if: $QUICK_TEST == "true"
+      when: never
+    - when: on_success
+
+# Rule to skip jobs when AUTO_SKIP_SYNC is true (from detect_changes)
+.skip_on_auto_skip:
+  rules:
+    - if: $AUTO_SKIP_SYNC == "true"
+      when: never
+    - when: on_success
+
+# Combined rule for both skip conditions
+.skip_on_cached_data:
+  rules:
+    - if: $QUICK_TEST == "true"
+      when: never
+    - if: $AUTO_SKIP_SYNC == "true"
+      when: never
+    - when: on_success
+
+# =============================================================================
+# CLEANUP TEMPLATES
+# =============================================================================
+# Manual cleanup jobs for cache data
+
+.haf_app_cache_cleanup:
+  extends: .job-defaults
+  stage: cleanup
+  image: alpine:latest
+  variables:
+    HAF_APP_CACHE_TYPE: ""    # Must be set
+    CLEANUP_PATTERN: ""       # Optional glob pattern
+  before_script:
+    - apk add --no-cache bash
+  script:
+    - |
+      set -euo pipefail
+
+      echo "=== Cache Cleanup ==="
+      echo "Cache type: ${HAF_APP_CACHE_TYPE}"
+      echo "Local prefix: ${DATA_CACHE_LOCAL_PREFIX}"
+
+      # Build pattern
+      if [[ -n "${CLEANUP_PATTERN}" ]]; then
+        PATTERN="${DATA_CACHE_LOCAL_PREFIX}/${CLEANUP_PATTERN}"
+      else
+        PATTERN="${DATA_CACHE_LOCAL_PREFIX}/${HAF_APP_CACHE_TYPE}_*"
+      fi
+
+      echo "Cleanup pattern: $PATTERN"
+      echo ""
+      echo "Files to remove:"
+      ls -la $PATTERN 2>/dev/null || echo "(none found)"
+
+      echo ""
+      echo "Removing..."
+      rm -rf $PATTERN || true
+      echo "Done"
+  when: manual
+  allow_failure: true
+  tags:
+    - data-cache-storage
