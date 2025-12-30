@@ -108,3 +108,96 @@ Jobs run on builders `hive-builder-5` through `hive-builder-11`. Key paths:
 ## NFS Locking Requirement
 
 Alpine-based images (`docker-builder`, `docker-dind`) must include `util-linux` for NFS flock support. BusyBox flock fails on NFS with "Bad file descriptor".
+
+## HAF App Testing Templates
+
+The `templates/haf_app_testing.gitlab-ci.yml` provides composable building blocks for HAF applications. See `docs/haf-app-testing-templates.md` for full documentation.
+
+### Available Templates
+
+**Change Detection:**
+- `.haf_app_detect_changes` - Detects if only tests/docs changed, enabling skip of heavy sync jobs
+
+**Sync Job Components** (use with `!reference` tags):
+- `.haf_app_sync_variables` - Common directory and compose variables
+- `.haf_app_sync_setup` - Docker login and git safe.directory
+- `.haf_app_fetch_haf_cache` - Simple HAF cache lookup (local then NFS)
+- `.haf_app_smart_cache_lookup` - Advanced lookup with QUICK_TEST and AUTO_SKIP_SYNC support
+- `.haf_app_copy_datadir` - Copy datadir and fix postgres ownership
+- `.haf_app_copy_blockchain` - Copy block_log to docker directory
+- `.haf_app_sync_shutdown` - PostgreSQL checkpoint, collect logs, compose down
+- `.haf_app_sync_save_cache` - Save to local and push to NFS (unconditional)
+- `.haf_app_sync_save_cache_conditional` - Only saves if CACHE_HIT is false
+- `.haf_app_sync_cleanup` - after_script cleanup
+- `.haf_app_sync_artifacts` - Standard artifacts configuration
+
+**Tavern Test Components:**
+- `.tavern_test_variables` - pytest workers, tavern version, directories
+- `.tavern_install_deps` - Install tavern in a venv
+- `.tavern_run_tests` - Run pytest with tavern
+- `.tavern_test_artifacts` - Artifacts for tavern tests
+
+**Skip Rules:**
+- `.skip_on_quick_test` - Skip job when QUICK_TEST=true
+- `.skip_on_auto_skip` - Skip job when AUTO_SKIP_SYNC=true
+- `.skip_on_cached_data` - Skip on either condition
+
+### Migrating a HAF App to Use Templates
+
+1. **Add the include** to your `.gitlab-ci.yml`:
+   ```yaml
+   include:
+     - project: 'hive/common-ci-configuration'
+       ref: develop
+       file: '/templates/haf_app_testing.gitlab-ci.yml'
+   ```
+
+2. **Identify common patterns** in your CI:
+   - Sync jobs that fetch HAF cache, run docker-compose, save cache
+   - Test jobs that extract cache, start services, run tests
+   - Change detection logic for skipping heavy jobs
+
+3. **Replace inline scripts** with `!reference` tags:
+   ```yaml
+   sync:
+     extends:
+       - .docker_image_builder_job_template
+       - .haf_app_sync_variables
+     variables:
+       APP_SYNC_CACHE_TYPE: "haf_myapp_sync"
+       APP_CACHE_KEY: "${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}"
+     before_script:
+       - !reference [.haf_app_sync_setup, script]
+       - !reference [.haf_app_smart_cache_lookup, script]
+     script:
+       - # App-specific startup logic
+       - !reference [.haf_app_sync_shutdown, script]
+       - !reference [.haf_app_sync_save_cache_conditional, script]
+     after_script: !reference [.haf_app_sync_cleanup, after_script]
+     artifacts: !reference [.haf_app_sync_artifacts, artifacts]
+   ```
+
+4. **Test the migration** by running the pipeline and comparing behavior.
+
+### Migration Status
+
+| Application | Status | Notes |
+|-------------|--------|-------|
+| reputation_tracker | Merged | Sync + detect_changes |
+| balance_tracker | Merged | Sync + smart cache lookup |
+| hafah | Not started | Different pattern (no sync job) |
+| hivemind | Not started | Complex, multiple test types |
+| hivesense | Not started | |
+| nft_tracker | Not started | |
+| haf_block_explorer | Not started | |
+
+### Required Variables
+
+For sync templates:
+- `HAF_COMMIT` - HAF submodule commit SHA
+- `APP_SYNC_CACHE_TYPE` - App-specific cache type (e.g., "haf_btracker_sync")
+- `APP_CACHE_KEY` - Cache key (typically `${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}`)
+
+For QUICK_TEST mode:
+- `QUICK_TEST` - Set to "true" to enable
+- `QUICK_TEST_HAF_COMMIT` - HAF commit to use for cache
