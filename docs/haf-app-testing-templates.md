@@ -65,13 +65,10 @@ sync:
 
 | Application | Branch | Status |
 |-------------|--------|--------|
-| reputation_tracker | develop | Merged |
-| balance_tracker | develop | Merged |
+| reputation_tracker | feature/use-common-ci-templates | Migrated |
+| balance_tracker | feature/use-common-ci-templates | Migrated |
 | hafah | - | Not started |
 | hivemind | - | Not started |
-| hivesense | - | Not started |
-| nft_tracker | - | Not started |
-| haf_block_explorer | - | Not started |
 
 ## Future Plans
 
