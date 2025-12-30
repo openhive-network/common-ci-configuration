@@ -77,7 +77,10 @@ include:
 #
 # Outputs (via dotenv artifact):
 #   AUTO_SKIP_BUILD: "true" if build/sync can be skipped
+#   AUTO_SKIP_SYNC: alias for AUTO_SKIP_BUILD (compatibility)
 #   CACHE_COMMIT: HAF commit to use for cached data
+#   AUTO_CACHE_HAF_COMMIT: alias for CACHE_COMMIT (compatibility)
+#   AUTO_CACHE_COMMIT: alias for CACHE_COMMIT (compatibility)
 #
 # Note: This template handles the common case. For apps with custom cache
 # discovery logic, you can override the script section.
@@ -154,13 +157,16 @@ include:
         fi
       fi
 
-      # Write dotenv artifact
+      # Write dotenv artifact (output multiple names for compatibility across apps)
       echo "AUTO_SKIP_BUILD=${CAN_SKIP_BUILD}" > detect_changes.env
+      echo "AUTO_SKIP_SYNC=${CAN_SKIP_BUILD}" >> detect_changes.env
       echo "CACHE_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
+      echo "AUTO_CACHE_HAF_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
+      echo "AUTO_CACHE_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
 
       echo ""
       echo "=== Detection Results ==="
-      echo "AUTO_SKIP_BUILD: $CAN_SKIP_BUILD"
+      echo "AUTO_SKIP_BUILD/SYNC: $CAN_SKIP_BUILD"
       echo "CACHE_COMMIT: $CACHE_COMMIT"
 
   artifacts:
