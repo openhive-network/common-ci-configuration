@@ -497,7 +497,7 @@ include:
       git config --global --add safe.directory "$CI_PROJECT_DIR/haf"
       echo -e "\e[0Ksection_end:$(date +%s):git\r\e[0K"
 
-# Fetch HAF replay data from local cache or NFS
+# Fetch HAF replay data from local cache or NFS (simple version)
 # Requires: HAF_COMMIT, DATA_CACHE_HAF_PREFIX variables
 # Use: !reference [.haf_app_fetch_haf_cache, script]
 .haf_app_fetch_haf_cache:
@@ -522,6 +522,170 @@ include:
         fi
       fi
       echo -e "\e[0Ksection_end:$(date +%s):haf_cache\r\e[0K"
+
+# Advanced cache lookup with QUICK_TEST and AUTO_SKIP_SYNC support
+# Checks for existing app sync cache first (avoiding re-sync), then falls back to HAF cache.
+# When AUTO_SKIP_SYNC is true, also searches for any compatible app cache with matching HAF commit.
+#
+# Requires variables:
+#   HAF_COMMIT: Current HAF submodule commit
+#   APP_SYNC_CACHE_TYPE: App-specific cache type (e.g., "haf_btracker_sync")
+#   DATA_CACHE_HAF_PREFIX: Local cache directory prefix
+#   DATA_CACHE_NFS_PREFIX: NFS cache directory prefix
+#
+# Optional variables (from detect_changes job):
+#   QUICK_TEST: Set to "true" to use QUICK_TEST_HAF_COMMIT
+#   QUICK_TEST_HAF_COMMIT: HAF commit to use in quick test mode
+#   AUTO_SKIP_SYNC: Set to "true" when only tests/docs changed
+#   AUTO_CACHE_HAF_COMMIT: HAF commit from detect_changes
+#
+# Outputs (written to /tmp for use in script section):
+#   /tmp/cache_hit: "true" if app sync cache was found (skip sync)
+#   /tmp/effective_cache_key: The cache key to use for saving
+#   /tmp/effective_haf_commit: The HAF commit being used
+#
+# Use: !reference [.haf_app_smart_cache_lookup, script]
+.haf_app_smart_cache_lookup:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):cache_lookup[collapsed=true]\r\e[0KSmart cache lookup..."
+
+      # Determine effective HAF commit based on mode
+      EFFECTIVE_HAF_COMMIT="${HAF_COMMIT}"
+      if [[ "${QUICK_TEST:-false}" == "true" ]]; then
+        echo "=== QUICK_TEST Mode (manual) ==="
+        if [[ -z "${QUICK_TEST_HAF_COMMIT}" ]]; then
+          echo "ERROR: QUICK_TEST=true but QUICK_TEST_HAF_COMMIT not set"
+          echo ""
+          echo "Find available caches:"
+          echo "  ssh hive-builder-10 'ls -lt /nfs/ci-cache/haf/*.tar | head -5'"
+          exit 1
+        fi
+        EFFECTIVE_HAF_COMMIT="${QUICK_TEST_HAF_COMMIT}"
+        echo "Using cached HAF data from: ${EFFECTIVE_HAF_COMMIT}"
+      elif [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]] && [[ -n "${AUTO_CACHE_HAF_COMMIT}" ]]; then
+        echo "=== AUTO_SKIP_SYNC Mode (only tests/docs changed) ==="
+        EFFECTIVE_HAF_COMMIT="${AUTO_CACHE_HAF_COMMIT}"
+        echo "Using cached HAF data from: ${EFFECTIVE_HAF_COMMIT}"
+      fi
+
+      # Build cache paths
+      EFFECTIVE_CACHE_KEY="${EFFECTIVE_HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}"
+      LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${EFFECTIVE_CACHE_KEY}"
+      LOCAL_HAF_CACHE="${DATA_CACHE_HAF_PREFIX}_${EFFECTIVE_HAF_COMMIT}"
+
+      # Fetch cache-manager
+      if [[ ! -x "$CACHE_MANAGER" ]]; then
+        curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF:-develop}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+        chmod +x "$CACHE_MANAGER"
+      fi
+
+      CACHE_HIT="false"
+
+      # Check for existing app sync cache (local first, then NFS)
+      if [[ -d "${LOCAL_APP_CACHE}/datadir" ]]; then
+        echo "Local app sync cache found at ${LOCAL_APP_CACHE} - skipping sync"
+        CACHE_HIT="true"
+        export DATA_SOURCE="${LOCAL_APP_CACHE}"
+      else
+        echo "Checking NFS for app sync cache: ${APP_SYNC_CACHE_TYPE}/${EFFECTIVE_CACHE_KEY}"
+        if CACHE_HANDLING=haf "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${EFFECTIVE_CACHE_KEY}" "${LOCAL_APP_CACHE}" 2>/dev/null; then
+          echo "Fetched app sync cache from NFS - skipping sync"
+          CACHE_HIT="true"
+          export DATA_SOURCE="${LOCAL_APP_CACHE}"
+        elif [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]]; then
+          # For docs-only changes, search for ANY app cache with matching HAF commit
+          # since app code hasn't changed
+          echo "Exact cache not found, searching for compatible app cache with HAF commit ${EFFECTIVE_HAF_COMMIT}..."
+          NFS_CACHE_DIR="${DATA_CACHE_NFS_PREFIX}/${APP_SYNC_CACHE_TYPE}"
+          FOUND_CACHE=$(ls -t "${NFS_CACHE_DIR}/${EFFECTIVE_HAF_COMMIT}_"*.tar 2>/dev/null | head -1 || true)
+          if [[ -n "$FOUND_CACHE" ]]; then
+            FOUND_KEY=$(basename "$FOUND_CACHE" .tar)
+            echo "Found compatible app cache: ${FOUND_KEY}"
+            LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${FOUND_KEY}"
+            if CACHE_HANDLING=haf "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${FOUND_KEY}" "${LOCAL_APP_CACHE}" 2>/dev/null; then
+              echo "Fetched compatible app sync cache from NFS - skipping sync"
+              CACHE_HIT="true"
+              export DATA_SOURCE="${LOCAL_APP_CACHE}"
+            fi
+          fi
+          if [[ "$CACHE_HIT" != "true" ]]; then
+            echo "No compatible app cache found, will use HAF-only cache and run sync"
+          fi
+        else
+          echo "App sync cache not found, will use HAF-only cache and run sync"
+        fi
+      fi
+
+      # Fall back to HAF-only cache if no app cache found
+      if [[ "$CACHE_HIT" != "true" ]]; then
+        if [[ -d "${LOCAL_HAF_CACHE}/datadir" ]]; then
+          echo "Local HAF cache found at ${LOCAL_HAF_CACHE}"
+        else
+          echo "Local HAF cache not found, checking NFS..."
+          if "$CACHE_MANAGER" get haf "${EFFECTIVE_HAF_COMMIT}" "${LOCAL_HAF_CACHE}"; then
+            echo "Fetched HAF replay data from NFS cache"
+          else
+            echo "ERROR: Failed to fetch HAF replay data from NFS cache"
+            exit 1
+          fi
+        fi
+      fi
+
+      # Export state for script section
+      echo "$CACHE_HIT" > /tmp/cache_hit
+      echo "$EFFECTIVE_CACHE_KEY" > /tmp/effective_cache_key
+      echo "$EFFECTIVE_HAF_COMMIT" > /tmp/effective_haf_commit
+
+      echo "Cache lookup result: CACHE_HIT=$CACHE_HIT, KEY=$EFFECTIVE_CACHE_KEY"
+      echo -e "\e[0Ksection_end:$(date +%s):cache_lookup\r\e[0K"
+
+# Conditional save cache - only saves if CACHE_HIT is false
+# Use this instead of .haf_app_sync_save_cache when using smart cache lookup
+# Requires: APP_SYNC_CACHE_TYPE, DATADIR, SHM_DIR, /tmp/cache_hit, /tmp/effective_cache_key
+# Use: !reference [.haf_app_sync_save_cache_conditional, script]
+.haf_app_sync_save_cache_conditional:
+  script:
+    - |
+      CACHE_HIT=$(cat /tmp/cache_hit 2>/dev/null || echo "false")
+      EFFECTIVE_CACHE_KEY=$(cat /tmp/effective_cache_key 2>/dev/null || echo "${APP_CACHE_KEY}")
+
+      if [[ "$CACHE_HIT" == "true" ]]; then
+        echo "Cache hit - skipping cache save (data already in cache)"
+      else
+        echo -e "\e[0Ksection_start:$(date +%s):save_cache[collapsed=true]\r\e[0KSaving sync data to cache..."
+
+        # Prepare data for caching
+        sudo cp -a "${SHM_DIR}" "${DATADIR}/shm_dir"
+
+        # Save to local cache
+        LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${EFFECTIVE_CACHE_KEY}"
+        mkdir -p "${LOCAL_APP_CACHE}"
+        sudo cp -a "${DATADIR}" "${LOCAL_APP_CACHE}"
+
+        # Remove empty blockchain dir to trigger symlink on test runners
+        if [[ -d "${LOCAL_APP_CACHE}/datadir/blockchain" ]] && [[ -z "$(ls -A "${LOCAL_APP_CACHE}/datadir/blockchain" 2>/dev/null)" ]]; then
+          echo "Removing empty blockchain directory from local cache"
+          rmdir "${LOCAL_APP_CACHE}/datadir/blockchain" 2>/dev/null || true
+        fi
+
+        ls -lah "${LOCAL_APP_CACHE}"
+        ls -lah "${LOCAL_APP_CACHE}/datadir" || true
+
+        # Push to NFS cache
+        if [[ ! -x "$CACHE_MANAGER" ]]; then
+          curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF:-develop}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+          chmod +x "$CACHE_MANAGER"
+        fi
+
+        echo "Pushing sync data to NFS: ${APP_SYNC_CACHE_TYPE}/${EFFECTIVE_CACHE_KEY}"
+        if CACHE_HANDLING=haf "$CACHE_MANAGER" put "${APP_SYNC_CACHE_TYPE}" "${EFFECTIVE_CACHE_KEY}" "${LOCAL_APP_CACHE}"; then
+          echo "Successfully pushed cache to NFS"
+        else
+          echo "WARNING: Failed to push to NFS cache"
+        fi
+        echo -e "\e[0Ksection_end:$(date +%s):save_cache\r\e[0K"
+      fi
 
 # Copy datadir from HAF cache and fix ownership/permissions
 # Requires: HAF submodule with scripts/copy_datadir.sh, DATADIR, POSTGRES_UID/GID
