@@ -347,66 +347,73 @@ include:
     - fast
 
 # =============================================================================
-# TAVERN API TEST TEMPLATE
+# TAVERN TEST HELPERS
 # =============================================================================
-# Specialized template for running Tavern-based API tests.
-# Extends the DinD test base with Python/Tavern setup.
-#
-# Optional variables:
-#   PYTEST_WORKERS: Number of parallel workers (default: 4)
-#   TAVERN_VERSION: Tavern package version (default: 2.2.0)
-#   PYTEST_ARGS: Additional pytest arguments
-#   TEST_DIR: Directory containing tests (default: tests/api_tests)
+# Composable templates for running Tavern API tests.
+# Apps can mix these with their own DinD/cache setup.
 
-.haf_app_tavern_tests:
-  extends: .haf_app_dind_test_base
+# Variables for tavern tests (set these in your job)
+.tavern_test_variables:
   variables:
     PYTEST_WORKERS: "4"
     TAVERN_VERSION: "2.2.0"
-    PYTEST_ARGS: ""
-    TEST_DIR: "tests/api_tests"
-    JUNIT_REPORT: "tavern-results.xml"
+    TAVERN_DIR: "tests/tavern"
+    JUNIT_REPORT: "tests/tavern/report.xml"
 
+# Script to install tavern dependencies in a venv
+# Use with: !reference [.tavern_install_deps, script]
+.tavern_install_deps:
   script:
     - |
-      echo -e "\e[0Ksection_start:$(date +%s):venv_setup[collapsed=true]\r\e[0KSetting up Python environment..."
-
-      # Create and activate virtual environment
+      echo -e "\e[0Ksection_start:$(date +%s):tavern_deps[collapsed=true]\r\e[0KInstalling Tavern dependencies..."
       python3 -m venv venv
       . venv/bin/activate
-
-      # Install test dependencies
       pip install --quiet \
-        "tavern==${TAVERN_VERSION}" \
+        "tavern==${TAVERN_VERSION:-2.2.0}" \
         "pytest-xdist>=3.2.0" \
         "pyyaml>=6.0" \
-        "requests>=2.28.0"
+        "requests>=2.28.0" \
+        "deepdiff>=6.0" \
+        "prettytable>=3.0"
+      echo -e "\e[0Ksection_end:$(date +%s):tavern_deps\r\e[0K"
 
-      echo -e "\e[0Ksection_end:$(date +%s):venv_setup\r\e[0K"
+# Script to run tavern tests with pytest
+# Requires: venv activated, TAVERN_DIR set, JUNIT_REPORT set
+# Use with: !reference [.tavern_run_tests, script]
+.tavern_run_tests:
+  script:
     - |
       echo "=== Running Tavern API Tests ==="
-      echo "Test directory: ${TEST_DIR}"
-      echo "Parallel workers: ${PYTEST_WORKERS}"
-      echo "Additional args: ${PYTEST_ARGS}"
+      . venv/bin/activate
+      cd "${TAVERN_DIR}"
+      pytest -n "${PYTEST_WORKERS:-4}" --junitxml "${JUNIT_REPORT}" . || exit $?
 
-      cd "${TEST_DIR}"
-      pytest \
-        -n "${PYTEST_WORKERS}" \
-        --dist loadfile \
-        --junitxml="${CI_PROJECT_DIR}/${JUNIT_REPORT}" \
-        ${PYTEST_ARGS} \
-        . || TEST_EXIT_CODE=$?
-
-      exit ${TEST_EXIT_CODE:-0}
-
+# Artifacts configuration for tavern tests
+# Use with: artifacts: !reference [.tavern_test_artifacts, artifacts]
+.tavern_test_artifacts:
   artifacts:
     when: always
     paths:
-      - container-logs.txt
-      - "${JUNIT_REPORT}"
+      - "**/*.out.json"
+      - docker/container-logs.tar.gz
+      - docker/docker-compose-logs.txt
     reports:
       junit: "${JUNIT_REPORT}"
     expire_in: 1 week
+
+# Combined tavern test job template (for simple cases)
+# Extends .docker_image_builder_job_template, provides test execution
+# Apps must provide their own before_script for cache/compose setup
+.haf_app_tavern_tests:
+  extends:
+    - .docker_image_builder_job_template
+    - .tavern_test_variables
+  stage: test
+  timeout: 30 minutes
+  script:
+    - !reference [.tavern_install_deps, script]
+    - !reference [.tavern_run_tests, script]
+  artifacts: !reference [.tavern_test_artifacts, artifacts]
 
 # =============================================================================
 # QUICK TEST MODE HELPERS
