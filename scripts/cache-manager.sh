@@ -153,7 +153,7 @@ _cleanup_stale_locks() {
         fi
     done
 
-    [[ $cleaned -gt 0 ]] && _log "Cleaned up $cleaned stale lock files"
+    if [[ $cleaned -gt 0 ]]; then _log "Cleaned up $cleaned stale lock files"; fi
 }
 
 # Check if running on the NFS host (where NFS path is local, not a mount)
