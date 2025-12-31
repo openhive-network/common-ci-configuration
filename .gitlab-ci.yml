@@ -239,8 +239,10 @@ build_haf_app_test_runner_image:
     BUILD_TARGET: "haf-app-test-runner"
   needs:
     - build_docker_dind_image
-    - build_ci_base_image
-    - build_benchmark_test_runner_image
+    - job: build_ci_base_image
+      optional: true
+    - job: build_benchmark_test_runner_image
+      optional: true
   rules:
     - if: $CI_COMMIT_BRANCH
       exists:
