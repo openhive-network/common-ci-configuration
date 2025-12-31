@@ -49,6 +49,143 @@ include:
   - local: templates/docker_image_jobs.gitlab-ci.yml
 
 # =============================================================================
+# FETCH STRATEGY SUPPORT
+# =============================================================================
+# Templates for using GIT_STRATEGY=fetch instead of clone.
+# Fetch strategy reduces GitLab server load by reusing workspace between jobs,
+# but requires manual submodule handling and corruption cleanup.
+#
+# Usage:
+#   # In your .gitlab-ci.yml variables section, add fetch strategy defaults:
+#   variables:
+#     GIT_STRATEGY: fetch
+#     GIT_DEPTH: 0
+#     GIT_SUBMODULE_STRATEGY: none
+#     # ... other fetch settings from .haf_fetch_strategy_variables
+#
+#   # Add corruption cleanup hook at default level:
+#   default:
+#     hooks: !reference [.haf_git_corruption_cleanup, hooks]
+#
+#   # In jobs that need submodules, prepend initialization:
+#   my_job:
+#     before_script:
+#       - !reference [.haf_submodule_init, script]
+#       - # ... rest of your before_script
+
+# Variables for fetch strategy (copy these to your variables section)
+# These are provided as documentation - GitLab doesn't support extending variables
+.haf_fetch_strategy_variables:
+  variables:
+    # Fetch strategy reuses workspace between jobs, reducing GitLab server load.
+    # Full clone (depth 0) enables efficient incremental fetches.
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: 0
+    # Disable automatic submodule fetching - we handle it manually
+    # This is needed because HAF contains nested hive submodule with relative URLs
+    GIT_SUBMODULE_STRATEGY: none
+    GIT_SUBMODULE_FORCE_HTTPS: "true"
+    # Allow file:// protocol for nested submodules (required for test-tools in hive)
+    GIT_CONFIG_COUNT: 1
+    GIT_CONFIG_KEY_0: "protocol.file.allow"
+    GIT_CONFIG_VALUE_0: "always"
+    # Separate clone path prevents clone-strategy jobs from erasing fetch workspaces
+    GIT_CLONE_PATH: $CI_BUILDS_DIR/fetch/$CI_RUNNER_SHORT_TOKEN/$CI_CONCURRENT_ID/$CI_PROJECT_PATH
+
+# Git corruption cleanup hook for fetch strategy
+# Cleans corrupt git state left by cancelled pipelines (see GitLab #296638, #4600)
+# Usage: default: hooks: !reference [.haf_git_corruption_cleanup, hooks]
+.haf_git_corruption_cleanup:
+  hooks:
+    pre_get_sources_script:
+      - |
+        (
+        cd "${CI_PROJECT_DIR:-/builds}" 2>/dev/null || exit 0
+        echo "pre_get_sources: checking $(pwd) for corrupt git state"
+        if [ -d ".git" ]; then
+          # Remove stale lock files that block git operations
+          find .git -name "*.lock" -delete 2>/dev/null || true
+
+          # Check if main repo is corrupt - if so, remove .git to force fresh clone
+          if ! git rev-parse HEAD >/dev/null 2>&1; then
+            echo "pre_get_sources: main repository corrupt, forcing fresh clone"
+            rm -rf .git
+          else
+            # Main repo OK - check and clean corrupt submodules
+            if [ -f ".gitmodules" ]; then
+              git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{print $2}' | while read submod; do
+                needs_clean=false
+                [ -z "$submod" ] && continue
+                # Check if submodule working directory exists but is corrupt
+                if [ -d "$submod" ] && [ -f "$submod/.git" ]; then
+                  if ! git -C "$submod" rev-parse HEAD >/dev/null 2>&1; then
+                    needs_clean=true
+                  fi
+                fi
+                # Check if .git/modules exists but is corrupt (even if working dir is gone)
+                if [ -d ".git/modules/$submod" ]; then
+                  if ! git --git-dir=".git/modules/$submod" rev-parse HEAD >/dev/null 2>&1; then
+                    echo "pre_get_sources: $submod corrupt (rev-parse failed)"
+                    needs_clean=true
+                  fi
+                fi
+                if [ "$needs_clean" = true ]; then
+                  echo "pre_get_sources: cleaning corrupt submodule: $submod"
+                  rm -rf "$submod" ".git/modules/$submod"
+                fi
+              done
+            fi
+            echo "pre_get_sources: existing repo OK"
+          fi
+        else
+          echo "pre_get_sources: no .git directory (fresh workspace)"
+        fi
+        )
+
+# HAF submodule initialization for fetch strategy
+# Manually clones and checks out HAF submodule with nested hive submodules
+# Required because GIT_SUBMODULE_STRATEGY: none disables automatic handling
+# Usage: before_script: - !reference [.haf_submodule_init, script]
+.haf_submodule_init:
+  script:
+    - |
+      if command -v git >/dev/null 2>&1; then
+        echo -e "\e[0Ksection_start:$(date +%s):init_submodules[collapsed=true]\r\e[0KInitializing submodules..."
+        git config --global --add safe.directory '*'
+        # Get the commit we need from the haf submodule
+        HAF_URL="https://gitlab.syncad.com/hive/haf.git"
+        HAF_SUBMOD_COMMIT=$(git ls-tree HEAD haf | awk '{print $3}')
+        echo "Need haf submodule at commit $HAF_SUBMOD_COMMIT"
+        # Remove existing haf directory if it exists (can be stale from GIT_STRATEGY=fetch)
+        sudo rm -rf haf 2>/dev/null || rm -rf haf
+        # Clone and checkout specific commit
+        git clone --no-checkout "$HAF_URL" haf
+        cd haf
+        git fetch origin develop
+        git checkout $HAF_SUBMOD_COMMIT
+        # Initialize nested submodules inside haf (hive and its submodules)
+        git submodule update --init --recursive --jobs 4
+        cd ..
+        echo -e "\e[0Ksection_end:$(date +%s):init_submodules\r\e[0K"
+      fi
+
+# Combined fetch strategy defaults (for reference/documentation)
+# Shows all the pieces needed for fetch strategy in one place
+.haf_fetch_strategy_example:
+  variables:
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: 0
+    GIT_SUBMODULE_STRATEGY: none
+    GIT_SUBMODULE_FORCE_HTTPS: "true"
+    GIT_CONFIG_COUNT: 1
+    GIT_CONFIG_KEY_0: "protocol.file.allow"
+    GIT_CONFIG_VALUE_0: "always"
+    GIT_CLONE_PATH: $CI_BUILDS_DIR/fetch/$CI_RUNNER_SHORT_TOKEN/$CI_CONCURRENT_ID/$CI_PROJECT_PATH
+  hooks: !reference [.haf_git_corruption_cleanup, hooks]
+  before_script:
+    - !reference [.haf_submodule_init, script]
+
+# =============================================================================
 # CACHE MANAGER SETUP
 # =============================================================================
 # Standardized cache-manager.sh fetching that all HAF apps should use.
