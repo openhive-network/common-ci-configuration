@@ -29,6 +29,9 @@ RUN <<EOF
   ln -s /opt/tools/jmeter/bin/jmeter.sh /usr/bin/jmeter
   ln -s /opt/tools/m2u/m2u /usr/bin/m2u
 
+  # Install Python packages needed by HAF app tests
+  pip3 install --no-cache-dir psycopg2-binary
+
   # Create hived user for compatibility (ci-base-image has hived_admin)
   id hived 2>/dev/null || useradd -ms /bin/bash hived
   echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
