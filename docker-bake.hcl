@@ -24,6 +24,10 @@ variable "CI_BASE_IMAGE_VERSION" {
   default = "ubuntu24.04-py3.14-2"
 }
 
+variable "HAF_APP_TEST_RUNNER_VERSION" {
+  default = "1.0"
+}
+
 variable "PAAS_PSQL_VERSION" {
   default = "11251948d5dd4867552f9b9836a9e02110304df5"
 }
@@ -178,4 +182,9 @@ target "ci-base-image" {
   cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
 }
 
-
+target "haf-app-test-runner" {
+  dockerfile = "Dockerfile.haf-app-test-runner"
+  tags = generate-tags("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
+  cache-from = generate-cache-from("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
+  cache-to = generate-cache-to("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
+}

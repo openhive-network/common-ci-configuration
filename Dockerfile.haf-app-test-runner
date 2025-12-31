@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.4
+# Shared test runner for HAF applications (balance_tracker, reputation_tracker, haf_block_explorer)
+# Provides: Docker-in-Docker, Python 3.12+, JMeter, PostgreSQL client, NFS support
+#
+# This image combines docker-builder (for DinD) with benchmark-test-runner tools (JMeter, m2u)
+# and Python dependencies needed for HAF application testing.
+
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:latest AS base
+
+# Copy JMeter and m2u from benchmark-test-runner
+COPY --from=registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:latest \
+  --link /opt/tools/jmeter /opt/tools/jmeter
+COPY --from=registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:latest \
+  --link /opt/tools/m2u /opt/tools/m2u
+
+USER root
+RUN <<EOF
+  set -e
+
+  # Add Alpine 3.20 repos for Python 3.12
+  echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" >> /etc/apk/repositories
+  echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories
+
+  # Install system dependencies
+  apk add --no-cache \
+    openjdk11-jre \
+    postgresql-client \
+    # For building Python wheels
+    gcc musl-dev python3-dev linux-headers \
+    # glibc compat for pre-built wheels (e.g., hiveio-wax)
+    gcompat libstdc++
+
+  # Python 3.12 with psycopg2
+  apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/v3.20/main python3~3.12 py3-pip
+  apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/v3.20/community py3-psycopg2
+
+  # Create symlinks for JMeter and m2u
+  ln -s /opt/tools/jmeter/bin/jmeter.sh /usr/bin/jmeter
+  ln -s /opt/tools/m2u/m2u /usr/bin/m2u
+EOF
+
+USER hived
+CMD ["/bin/bash"]

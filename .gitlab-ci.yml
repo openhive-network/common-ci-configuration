@@ -232,6 +232,20 @@ build_benchmark_test_runner_image:
       exists:
         - Dockerfile.benchmark-test-runner
 
+build_haf_app_test_runner_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "haf-app-test-runner"
+  needs:
+    - build_docker_dind_image
+    - build_docker_builder_image
+    - build_benchmark_test_runner_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.haf-app-test-runner
+
 build_tox_test_runner_image:
   extends: .build_docker_image
   stage: build
@@ -412,7 +426,7 @@ buildkit_cache_cleanup:
   # Don't use needs: [] - let it wait for build stage to complete
   # Otherwise it runs concurrently with builds and overloads the registry
   variables:
-    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache"
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache"
 
 example_docker_image_builder_job:
   extends: .pure_docker_image_builder_job_template
