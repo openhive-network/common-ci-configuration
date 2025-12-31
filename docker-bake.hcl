@@ -25,7 +25,7 @@ variable "CI_BASE_IMAGE_VERSION" {
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
-  default = "1.0"
+  default = "2.0"
 }
 
 variable "PAAS_PSQL_VERSION" {

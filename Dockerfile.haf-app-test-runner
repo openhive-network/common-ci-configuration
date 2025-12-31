@@ -1,45 +1,38 @@
 # syntax=docker/dockerfile:1.4
 # Shared test runner for HAF applications (balance_tracker, reputation_tracker, haf_block_explorer)
-# Provides: Docker-in-Docker, Python 3.12+, JMeter, PostgreSQL client, NFS support
+# Provides: Python 3.14, Poetry, Docker CLI, JMeter, PostgreSQL client
 #
-# This image combines docker-builder (for DinD) with benchmark-test-runner tools (JMeter, m2u)
-# and Python dependencies needed for HAF application testing.
+# Based on ci-base-image (Ubuntu) for Python 3.14 support.
+# Use with docker-dind service for Docker-in-Docker testing.
 
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:latest AS base
+ARG CI_BASE_IMAGE_VERSION=ubuntu24.04-py3.14-2
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/ci-base-image:${CI_BASE_IMAGE_VERSION}
 
 # Copy JMeter and m2u from benchmark-test-runner
 COPY --from=registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:latest \
-  --link /opt/tools/jmeter /opt/tools/jmeter
+  /opt/tools/jmeter /opt/tools/jmeter
 COPY --from=registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:latest \
-  --link /opt/tools/m2u /opt/tools/m2u
+  /opt/tools/m2u /opt/tools/m2u
 
 USER root
 RUN <<EOF
   set -e
 
-  # Add Alpine 3.20 repos for Python 3.12
-  echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" >> /etc/apk/repositories
-  echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories
-
-  # Install system dependencies:
-  # - openjdk11-jre: for JMeter
-  # - postgresql-client: for psql
-  # - gcc, musl-dev, python3-dev, linux-headers: for building Python wheels
-  # - gcompat, libstdc++: glibc compat for pre-built wheels (e.g., hiveio-wax)
-  apk add --no-cache \
-    openjdk11-jre \
+  # Install additional dependencies
+  apt-get update && apt-get install -y --no-install-recommends \
+    openjdk-11-jre-headless \
     postgresql-client \
-    gcc musl-dev python3-dev linux-headers \
-    gcompat libstdc++
-
-  # Python 3.12 with psycopg2
-  apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/v3.20/main python3~3.12 py3-pip
-  apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/v3.20/community py3-psycopg2
+    docker-compose-v2 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
   # Create symlinks for JMeter and m2u
   ln -s /opt/tools/jmeter/bin/jmeter.sh /usr/bin/jmeter
   ln -s /opt/tools/m2u/m2u /usr/bin/m2u
+
+  # Create hived user for compatibility (ci-base-image has hived_admin)
+  id hived 2>/dev/null || useradd -ms /bin/bash hived
+  echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 EOF
 
-USER hived
+USER hived_admin
 CMD ["/bin/bash"]
