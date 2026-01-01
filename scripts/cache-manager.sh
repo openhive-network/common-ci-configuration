@@ -711,6 +711,14 @@ cmd_cleanup() {
         # Skip if doesn't exist (tar file is the primary format)
         [[ -f "$entry_tar" ]] || continue
 
+        # Skip entries created in the last 5 minutes (protect recently cached data)
+        local min_age_seconds=300
+        local current_time=$(date +%s)
+        if [[ $((current_time - timestamp)) -lt $min_age_seconds ]]; then
+            _log "Skipping $entry - created less than 5 minutes ago"
+            continue
+        fi
+
         # Check if should remove (age or size)
         local should_remove=false
 
@@ -736,9 +744,21 @@ cmd_cleanup() {
             total_size=$((total_size - entry_size))
             removed=$((removed + 1))
 
-            # Remove from LRU index
-            grep -v "|${entry}$" "$lru_index" > "${lru_index}.tmp" 2>/dev/null || true
-            mv "${lru_index}.tmp" "$lru_index"
+            # Remove from LRU index (with locking to prevent race with _update_lru)
+            local global_lock="${CACHE_NFS_PATH}/.global_lock"
+            _touch_lock "$global_lock"
+            _flock_with_timeout 30 -x "$global_lock" -c "
+                if [[ -f '$lru_index' ]]; then
+                    grep -v '|${entry}\$' '$lru_index' > '${lru_index}.tmp' 2>/dev/null || true
+                    # Only mv if tmp file exists and has content (avoid clobbering with empty file)
+                    if [[ -s '${lru_index}.tmp' ]]; then
+                        mv '${lru_index}.tmp' '$lru_index'
+                    elif [[ -f '${lru_index}.tmp' ]]; then
+                        # tmp is empty, meaning we removed the last entry
+                        mv '${lru_index}.tmp' '$lru_index'
+                    fi
+                fi
+            " || _log "WARNING: Failed to update LRU index for removed entry"
         fi
 
         # Stop if under limit
