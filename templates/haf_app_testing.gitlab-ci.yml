@@ -588,6 +588,79 @@ include:
     - when: on_success
 
 # =============================================================================
+# EARLY EXIT TEMPLATES
+# =============================================================================
+# These templates allow jobs to RUN but EXIT EARLY when no work is needed.
+# Use these when you want the job to appear as "passed" rather than "skipped".
+#
+# Difference from .skip_on_* rules:
+#   - .skip_on_* rules: Job never runs (shows as "skipped" in pipeline)
+#   - .early_exit_*: Job runs but exits immediately (shows as "passed")
+#
+# Use early exit when:
+#   - You need the job to exist for dependency chains
+#   - You want explicit "nothing to do" feedback in logs
+#   - The job has artifacts that downstream jobs expect (even if empty)
+
+# Early exit script for docs/tests-only changes
+# Use with !reference in your script section:
+#   script:
+#     - !reference [.haf_app_early_exit_on_skip, script]
+#     - # Your actual work here...
+.haf_app_early_exit_on_skip:
+  script:
+    - |
+      if [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]] || [[ "${AUTO_SKIP_BUILD:-false}" == "true" ]]; then
+        echo "=== Early Exit: No work needed ==="
+        echo "Only documentation, tests, or non-critical files changed."
+        echo "Exiting with success."
+        exit 0
+      fi
+
+# Early exit for QUICK_TEST mode
+.haf_app_early_exit_on_quick_test:
+  script:
+    - |
+      if [[ "${QUICK_TEST:-false}" == "true" ]]; then
+        echo "=== Early Exit: QUICK_TEST mode ==="
+        echo "Using pre-cached data, skipping this job."
+        exit 0
+      fi
+
+# Combined early exit (either condition)
+.haf_app_early_exit_on_cached:
+  script:
+    - |
+      if [[ "${QUICK_TEST:-false}" == "true" ]]; then
+        echo "=== Early Exit: QUICK_TEST mode ==="
+        echo "Using pre-cached data, skipping this job."
+        exit 0
+      fi
+      if [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]] || [[ "${AUTO_SKIP_BUILD:-false}" == "true" ]]; then
+        echo "=== Early Exit: No work needed ==="
+        echo "Only documentation, tests, or non-critical files changed."
+        exit 0
+      fi
+
+# =============================================================================
+# SKIP PATTERN PRESETS
+# =============================================================================
+# Common skip pattern configurations for different app types.
+# Override HAF_APP_SKIP_PATTERNS in your detect_changes job.
+
+# Standard HAF app patterns (tests, docs, markdown, CI config)
+# Use: extends: .haf_app_skip_patterns_standard
+.haf_app_skip_patterns_standard:
+  variables:
+    HAF_APP_SKIP_PATTERNS: '^tests/|^docs/|\.md$|^README|^CHANGELOG|^LICENSE|^CLAUDE|^\.gitlab-ci'
+
+# HAF app with GUI (adds gui/ directory to skip list)
+# Use: extends: .haf_app_skip_patterns_with_gui
+.haf_app_skip_patterns_with_gui:
+  variables:
+    HAF_APP_SKIP_PATTERNS: '^tests/|^docs/|^gui/|\.md$|^README|^CHANGELOG|^LICENSE|^CLAUDE|^\.gitlab-ci'
+
+# =============================================================================
 # SYNC JOB COMPONENTS
 # =============================================================================
 # Composable building blocks for HAF app sync jobs.
