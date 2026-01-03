@@ -177,6 +177,142 @@ cleanup_cache:
     HAF_APP_CACHE_TYPE: "haf_myapp_sync"
 ```
 
+## Lint Templates
+
+### .haf_app_lint_bash
+
+Bash script linting with shellcheck. Generates checkstyle XML reports for GitLab integration.
+
+```yaml
+lint_bash:
+  extends: .haf_app_lint_bash
+  variables:
+    LINT_SCRIPTS_DIR: "scripts"  # Optional, defaults to "scripts"
+```
+
+**Variables:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LINT_SCRIPTS_DIR` | `scripts` | Directory to search for .sh files |
+
+**Artifacts:**
+- `shellcheck.xml` - Checkstyle format report
+- `shellcheck.html` - HTML formatted report
+
+### .haf_app_lint_sql
+
+SQL linting with sqlfluff for PostgreSQL. Outputs YAML format report.
+
+```yaml
+lint_sql:
+  extends: .haf_app_lint_sql
+  variables:
+    SQLFLUFF_CONFIG: ".sqlfluff"  # Optional
+    SQL_PATHS: "db/"              # Optional, defaults to "."
+```
+
+**Variables:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SQLFLUFF_DIALECT` | `postgres` | SQL dialect |
+| `SQLFLUFF_CONFIG` | (empty) | Path to sqlfluff config file |
+| `SQL_PATHS` | `.` | Paths to lint |
+
+**Artifacts:**
+- `sqlfluff.yaml` - YAML format lint report
+
+## Test Helper Templates
+
+These templates provide composable scripts for test job setup. Use with `!reference` to build your before_script:
+
+```yaml
+my_tests:
+  before_script:
+    - !reference [.haf_app_wait_for_postgres, script]
+    - !reference [.haf_app_wait_for_postgrest, script]
+    - # Your additional setup
+```
+
+### .haf_app_wait_for_postgres
+
+Waits for PostgreSQL to be ready. Works with both DinD (docker-compose) and service container patterns.
+
+**Variables:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HAF_SERVICE_TIMEOUT` | `300` | Max wait time in seconds |
+| `HAF_PG_HOST` | (auto-detect) | PostgreSQL host (for service containers) |
+| `HAF_PG_PORT` | `5432` | PostgreSQL port |
+| `HAF_PG_USER` | `haf_admin` | PostgreSQL user |
+
+### .haf_app_wait_for_postgrest
+
+Waits for PostgREST API to be ready.
+
+**Variables:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PGRST_TIMEOUT` | `120` | Max wait time in seconds |
+| `PGRST_HOST` | `http://postgrest:3000` | PostgREST URL |
+
+### .haf_app_wait_for_sync
+
+Waits for HAF to sync to a specific block number. Useful for tests that require data at a specific state.
+
+**Variables:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HAF_TARGET_BLOCK` | `5000000` | Target block number |
+| `HAF_SYNC_WAIT_TIMEOUT` | `1800` | Max wait time (30 min) |
+
+### .haf_app_extract_test_cache
+
+Extracts cached sync data for test jobs. Simplified version of cache extraction.
+
+**Required Variables:**
+| Variable | Description |
+|----------|-------------|
+| `APP_SYNC_CACHE_TYPE` | Cache type (e.g., `haf_btracker_sync`) |
+| `APP_CACHE_KEY` | Cache key |
+| `HAF_DATA_DIRECTORY` | Target extraction directory |
+
+## Service Container Configuration
+
+Reference templates for GitLab CI service container configuration.
+
+**Note:** GitLab CI services cannot use `!reference` directly. Copy these patterns into your services section.
+
+### .haf_service_config
+
+HAF instance service configuration variables:
+
+```yaml
+my_tests:
+  variables:
+    HAF_PG_ACCESS: "host all all 0.0.0.0/0 trust"
+    HAF_STOP_BLOCK: "5000024"
+    HAF_SERVICE_TIMEOUT: "300"
+  services:
+    - name: ${HAF_IMAGE_NAME}
+      alias: haf-instance
+      command: ["--stop-at-block=${HAF_STOP_BLOCK}", "--skip-hived"]
+```
+
+### .postgrest_service_config
+
+PostgREST service configuration variables:
+
+```yaml
+my_tests:
+  variables:
+    PGRST_DB_URI: "postgres://haf_admin@haf-instance:5432/haf_block_log"
+    PGRST_DB_ANON_ROLE: "haf_app_user"
+    PGRST_DB_SCHEMA: "btracker_app"  # Override per-app
+  services:
+    - name: postgrest/postgrest:v12.0.2
+      alias: postgrest
+```
+
 ## Rule Templates
 
 ### .skip_on_quick_test

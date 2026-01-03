@@ -983,3 +983,318 @@ include:
   allow_failure: true
   tags:
     - data-cache-storage
+
+# =============================================================================
+# LINT TEMPLATES
+# =============================================================================
+# Reusable linting job templates for HAF applications.
+# These templates provide consistent linting across all HAF apps.
+#
+# Usage:
+#   lint_bash:
+#     extends: .haf_app_lint_bash
+#     variables:
+#       LINT_SCRIPTS_DIR: "scripts"  # Optional, defaults to "scripts"
+#
+#   lint_sql:
+#     extends: .haf_app_lint_sql
+#     variables:
+#       SQLFLUFF_CONFIG: ".sqlfluff"  # Optional
+
+# Bash script linting with shellcheck
+# Generates checkstyle XML report for GitLab code quality integration
+.haf_app_lint_bash:
+  extends: .job-defaults
+  stage: build
+  image: koalaman/shellcheck-alpine:stable
+  variables:
+    LINT_SCRIPTS_DIR: "scripts"
+    GIT_SUBMODULE_STRATEGY: none
+  before_script:
+    - apk add --no-cache findutils xmlstarlet
+  script:
+    - |
+      echo "=== Linting Bash Scripts in ${LINT_SCRIPTS_DIR}/ ==="
+
+      # Find and lint all shell scripts
+      SCRIPTS=$(find "${LINT_SCRIPTS_DIR}/" -name "*.sh" -type f 2>/dev/null || true)
+
+      if [[ -z "$SCRIPTS" ]]; then
+        echo "No .sh files found in ${LINT_SCRIPTS_DIR}/"
+        exit 0
+      fi
+
+      echo "Found $(echo "$SCRIPTS" | wc -l) script(s) to lint"
+      echo "$SCRIPTS" | head -20
+
+      # Run shellcheck with checkstyle output for CI integration
+      # Use xargs to handle file list properly
+      echo "$SCRIPTS" | xargs shellcheck -f checkstyle 2>&1 | tee shellcheck.xml || true
+
+      # Convert to HTML report if xmlstarlet available
+      if command -v xmlstarlet >/dev/null 2>&1; then
+        xmlstarlet tr /usr/share/checkstyle/checkstyle-noframes.xsl shellcheck.xml > shellcheck.html 2>/dev/null || true
+      fi
+
+      # Check for errors (not just style issues)
+      ERROR_COUNT=$(grep -c 'severity="error"' shellcheck.xml 2>/dev/null || echo "0")
+      if [[ "$ERROR_COUNT" -gt 0 ]]; then
+        echo ""
+        echo "Found $ERROR_COUNT error(s) in shell scripts"
+        exit 1
+      fi
+
+      echo ""
+      echo "Lint passed"
+  artifacts:
+    when: always
+    paths:
+      - shellcheck.xml
+      - shellcheck.html
+    expire_in: 1 week
+  allow_failure: true
+  tags:
+    - public-runner-docker
+
+# SQL linting with sqlfluff
+# Supports PostgreSQL dialect, outputs YAML report
+.haf_app_lint_sql:
+  extends: .job-defaults
+  stage: build
+  image: sqlfluff/sqlfluff:2.1.4
+  variables:
+    SQLFLUFF_DIALECT: "postgres"
+    SQLFLUFF_CONFIG: ""
+    SQL_PATHS: "."
+    GIT_SUBMODULE_STRATEGY: none
+  script:
+    - |
+      echo "=== Linting SQL Files ==="
+
+      # Build config option if provided
+      CONFIG_OPT=""
+      if [[ -n "${SQLFLUFF_CONFIG}" ]] && [[ -f "${SQLFLUFF_CONFIG}" ]]; then
+        CONFIG_OPT="--config ${SQLFLUFF_CONFIG}"
+      fi
+
+      # Run sqlfluff lint
+      sqlfluff lint \
+        --dialect "${SQLFLUFF_DIALECT}" \
+        ${CONFIG_OPT} \
+        --format yaml \
+        ${SQL_PATHS} 2>&1 | tee sqlfluff.yaml || true
+
+      # Check for violations
+      VIOLATION_COUNT=$(grep -c "^-" sqlfluff.yaml 2>/dev/null || echo "0")
+      echo ""
+      echo "Found $VIOLATION_COUNT violation(s)"
+
+      # Fail on errors (L prefix = errors, not warnings)
+      if grep -qE "code: L0[0-9]{2}" sqlfluff.yaml 2>/dev/null; then
+        echo "SQL errors found - see sqlfluff.yaml for details"
+        exit 1
+      fi
+  artifacts:
+    when: always
+    paths:
+      - sqlfluff.yaml
+    expire_in: 1 week
+  allow_failure: true
+  tags:
+    - public-runner-docker
+
+# =============================================================================
+# SERVICE CONTAINER TEMPLATES
+# =============================================================================
+# Parameterized templates for GitLab CI services section.
+# These provide standardized HAF and PostgREST service definitions.
+#
+# Note: GitLab CI services cannot use !reference directly. Instead, copy
+# these definitions into your services section and customize the variables.
+#
+# Usage example:
+#   my_test_job:
+#     services:
+#       - name: ${HAF_IMAGE_NAME}
+#         alias: haf-instance
+#         command: ["--stop-at-block=5000024", "--skip-hived"]
+#         variables:
+#           PG_ACCESS: "host all all 0.0.0.0/0 trust"
+#       - name: postgrest/postgrest:v12.0.2
+#         alias: postgrest
+#         variables:
+#           PGRST_DB_URI: "postgres://haf_admin@haf-instance:5432/haf_block_log"
+#           PGRST_DB_SCHEMA: "btracker_app"
+
+# HAF instance service configuration (for documentation/reference)
+# Copy this pattern into your services section
+.haf_service_config:
+  variables:
+    # PostgreSQL access for HAF container
+    HAF_PG_ACCESS: "host all all 0.0.0.0/0 trust"
+    # Default HAF block limit for tests
+    HAF_STOP_BLOCK: "5000024"
+    # Service wait timeout (seconds)
+    HAF_SERVICE_TIMEOUT: "300"
+
+# PostgREST service configuration (for documentation/reference)
+.postgrest_service_config:
+  variables:
+    # PostgREST connection settings
+    PGRST_DB_URI: "postgres://haf_admin@haf-instance:5432/haf_block_log"
+    PGRST_DB_ANON_ROLE: "haf_app_user"
+    PGRST_DB_POOL: "10"
+    PGRST_SERVER_PORT: "3000"
+    # Override PGRST_DB_SCHEMA per-app
+    PGRST_DB_SCHEMA: ""
+
+# =============================================================================
+# TEST HELPER TEMPLATES
+# =============================================================================
+# Utility scripts for waiting on services, health checks, etc.
+# Use with !reference to compose test job before_script.
+#
+# Usage:
+#   my_test_job:
+#     before_script:
+#       - !reference [.haf_app_wait_for_postgres, script]
+#       - !reference [.haf_app_wait_for_postgrest, script]
+#       - # Your additional setup
+
+# Wait for PostgreSQL to be ready (for DinD with docker-compose)
+# Requires: docker-compose with 'haf' service, or HAF_PG_HOST variable
+.haf_app_wait_for_postgres:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):wait_pg[collapsed=true]\r\e[0KWaiting for PostgreSQL..."
+
+      MAX_WAIT=${HAF_SERVICE_TIMEOUT:-300}
+      WAIT_INTERVAL=5
+      ELAPSED=0
+
+      # Determine connection method
+      if [[ -n "${HAF_PG_HOST:-}" ]]; then
+        # Direct connection (service containers)
+        PG_CMD="pg_isready -h ${HAF_PG_HOST} -p ${HAF_PG_PORT:-5432} -U ${HAF_PG_USER:-haf_admin}"
+      elif command -v docker-compose >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
+        # Docker compose (DinD)
+        PG_CMD="docker compose exec -T haf pg_isready -h localhost -U haf_admin"
+      else
+        echo "ERROR: No PostgreSQL connection method available"
+        exit 1
+      fi
+
+      while [[ $ELAPSED -lt $MAX_WAIT ]]; do
+        if $PG_CMD >/dev/null 2>&1; then
+          echo "PostgreSQL ready after ${ELAPSED}s"
+          break
+        fi
+        echo "Waiting for PostgreSQL... (${ELAPSED}s / ${MAX_WAIT}s)"
+        sleep $WAIT_INTERVAL
+        ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+      done
+
+      if [[ $ELAPSED -ge $MAX_WAIT ]]; then
+        echo "ERROR: PostgreSQL not ready after ${MAX_WAIT}s"
+        exit 1
+      fi
+
+      echo -e "\e[0Ksection_end:$(date +%s):wait_pg\r\e[0K"
+
+# Wait for PostgREST to be ready
+# Requires: PGRST_HOST or docker-compose with 'postgrest' service
+.haf_app_wait_for_postgrest:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):wait_pgrst[collapsed=true]\r\e[0KWaiting for PostgREST..."
+
+      MAX_WAIT=${PGRST_TIMEOUT:-120}
+      WAIT_INTERVAL=3
+      ELAPSED=0
+
+      # Determine connection method
+      PGRST_URL="${PGRST_HOST:-http://postgrest:3000}"
+
+      while [[ $ELAPSED -lt $MAX_WAIT ]]; do
+        if curl -sf "${PGRST_URL}/" >/dev/null 2>&1; then
+          echo "PostgREST ready after ${ELAPSED}s at ${PGRST_URL}"
+          break
+        fi
+        echo "Waiting for PostgREST... (${ELAPSED}s / ${MAX_WAIT}s)"
+        sleep $WAIT_INTERVAL
+        ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+      done
+
+      if [[ $ELAPSED -ge $MAX_WAIT ]]; then
+        echo "ERROR: PostgREST not ready after ${MAX_WAIT}s"
+        exit 1
+      fi
+
+      echo -e "\e[0Ksection_end:$(date +%s):wait_pgrst\r\e[0K"
+
+# Wait for HAF sync to reach expected block
+# Useful for test jobs that need HAF data to be at a specific state
+.haf_app_wait_for_sync:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):wait_sync[collapsed=true]\r\e[0KWaiting for HAF sync..."
+
+      TARGET_BLOCK=${HAF_TARGET_BLOCK:-5000000}
+      MAX_WAIT=${HAF_SYNC_WAIT_TIMEOUT:-1800}  # 30 minutes default
+      WAIT_INTERVAL=10
+      ELAPSED=0
+
+      # Build psql command
+      if [[ -n "${HAF_PG_HOST:-}" ]]; then
+        PSQL_CMD="psql -h ${HAF_PG_HOST} -p ${HAF_PG_PORT:-5432} -U ${HAF_PG_USER:-haf_admin} -d haf_block_log -tAc"
+      else
+        PSQL_CMD="docker compose exec -T haf psql -U haf_admin -d haf_block_log -tAc"
+      fi
+
+      while [[ $ELAPSED -lt $MAX_WAIT ]]; do
+        CURRENT_BLOCK=$($PSQL_CMD "SELECT COALESCE(MAX(num), 0) FROM hive.blocks;" 2>/dev/null || echo "0")
+
+        if [[ "$CURRENT_BLOCK" -ge "$TARGET_BLOCK" ]]; then
+          echo "HAF synced to block $CURRENT_BLOCK (target: $TARGET_BLOCK) after ${ELAPSED}s"
+          break
+        fi
+
+        echo "HAF at block $CURRENT_BLOCK / $TARGET_BLOCK... (${ELAPSED}s / ${MAX_WAIT}s)"
+        sleep $WAIT_INTERVAL
+        ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+      done
+
+      if [[ $ELAPSED -ge $MAX_WAIT ]]; then
+        echo "ERROR: HAF sync timeout - only at block $CURRENT_BLOCK (target: $TARGET_BLOCK)"
+        exit 1
+      fi
+
+      echo -e "\e[0Ksection_end:$(date +%s):wait_sync\r\e[0K"
+
+# Extract test cache for DinD jobs
+# This is a simplified version of the cache extraction for test jobs
+# Requires: APP_SYNC_CACHE_TYPE, APP_CACHE_KEY, HAF_DATA_DIRECTORY
+.haf_app_extract_test_cache:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):extract_cache[collapsed=true]\r\e[0KExtracting test cache..."
+
+      # Fetch cache-manager if needed
+      if [[ ! -x "$CACHE_MANAGER" ]]; then
+        mkdir -p "$(dirname "$CACHE_MANAGER")"
+        curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF:-develop}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+        chmod +x "$CACHE_MANAGER"
+      fi
+
+      # Create target directory
+      mkdir -p "${HAF_DATA_DIRECTORY}"
+
+      # Extract cache
+      echo "Extracting: ${APP_SYNC_CACHE_TYPE}/${APP_CACHE_KEY} -> ${HAF_DATA_DIRECTORY}"
+      if ! CACHE_HANDLING=haf "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${APP_CACHE_KEY}" "${HAF_DATA_DIRECTORY}"; then
+        echo "ERROR: Failed to extract cache"
+        exit 1
+      fi
+
+      ls -la "${HAF_DATA_DIRECTORY}/"
+      echo -e "\e[0Ksection_end:$(date +%s):extract_cache\r\e[0K"
