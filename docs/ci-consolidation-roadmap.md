@@ -51,16 +51,14 @@ Each layer must track specific commit SHAs of the layer above:
 | `.prepare_haf_image` template | HAF | Medium |
 | `.wait-for-haf-postgres` template | HAF | High - duplicated in apps |
 
-## Phase 1: Script Consolidation (Current)
+## Phase 1: Script Consolidation (Completed)
 
 ### Completed
 - [x] Move `prepare_data_and_shm_dir.sh` to common-ci-configuration
 - [x] Add symlink fallback for cross-device hardlinks
 - [x] Move `build_data.sh` to common-ci-configuration
-
-### In Progress
-- [ ] Update hive to fetch `build_data.sh` from common-ci-configuration
-- [ ] Update HAF symlinks to fetch scripts via curl
+- [x] Update hive to fetch `build_data.sh` from common-ci-configuration
+- [x] Update HAF symlinks to fetch scripts via curl
 
 ### Migration Path for Consumers
 
@@ -77,9 +75,18 @@ chmod +x "$PREPARE_SCRIPT"
 "$PREPARE_SCRIPT" --data-base-dir="$DATA_CACHE" ...
 ```
 
-## Phase 2: Flatten Include Hierarchy
+## Phase 2: Flatten Include Hierarchy (Completed)
 
 Move HAF-specific templates to common-ci-configuration so all projects can include directly.
+
+### Completed
+- [x] Create `templates/haf_data_preparation.gitlab-ci.yml` with `.prepare_haf_data_5m` and `.prepare_haf_image`
+- [x] Update HAF to include directly from common-ci-configuration (MR !761)
+- [x] Update balance_tracker to include directly from common-ci-configuration (MR !260)
+- [x] Update reputation_tracker to include directly from common-ci-configuration (MR !142)
+- [x] Fix HAF_COMMIT variable inheritance in `.haf_commit_validation` template (MR !138)
+- [x] Add default HIVE_SCRIPTS_REF to `.prepare_haf_image` template (MR !139)
+- [x] Fix sync save cache to handle symlinks in read-only locations (MR !140)
 
 ### Goal
 
@@ -319,8 +326,8 @@ For each project:
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| Phase 1 | Script Consolidation | In Progress |
-| Phase 2 | Flatten Include Hierarchy | Planning |
+| Phase 1 | Script Consolidation | Completed |
+| Phase 2 | Flatten Include Hierarchy | Completed |
 | Phase 3 | Reusable YAML Blocks | Planning |
 | Phase 4 | HAF App Template Expansion | Planning |
 | Phase 5 | Documentation & Migration Guides | Ongoing |
