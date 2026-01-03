@@ -348,6 +348,73 @@ sync:
     - # Full sync logic
 ```
 
+## Early Exit Templates
+
+Early exit templates let jobs run but exit immediately when no work is needed. Unlike skip rules, these jobs show as "passed" in the pipeline.
+
+### .haf_app_early_exit_on_skip
+
+Exit early when `AUTO_SKIP_SYNC=true` or `AUTO_SKIP_BUILD=true`:
+
+```yaml
+build_something:
+  script:
+    - !reference [.haf_app_early_exit_on_skip, script]
+    - # Actual build logic (only runs if not skipped)
+```
+
+### .haf_app_early_exit_on_quick_test
+
+Exit early when `QUICK_TEST=true`:
+
+```yaml
+prepare_data:
+  script:
+    - !reference [.haf_app_early_exit_on_quick_test, script]
+    - # Data preparation (skipped in quick test mode)
+```
+
+### .haf_app_early_exit_on_cached
+
+Exit early on either condition (QUICK_TEST or AUTO_SKIP):
+
+```yaml
+sync:
+  script:
+    - !reference [.haf_app_early_exit_on_cached, script]
+    - # Sync logic (skipped if using cached data)
+```
+
+## Skip Pattern Presets
+
+Pre-configured skip patterns for common HAF app types.
+
+### .haf_app_skip_patterns_standard
+
+Standard patterns for HAF apps without a GUI:
+
+```yaml
+detect_changes:
+  extends:
+    - .haf_app_detect_changes
+    - .haf_app_skip_patterns_standard
+```
+
+Skips: `tests/`, `docs/`, `*.md`, `README`, `CHANGELOG`, `LICENSE`, `CLAUDE`, `.gitlab-ci`
+
+### .haf_app_skip_patterns_with_gui
+
+For HAF apps with a frontend GUI:
+
+```yaml
+detect_changes:
+  extends:
+    - .haf_app_detect_changes
+    - .haf_app_skip_patterns_with_gui
+```
+
+Skips: All standard patterns plus `gui/`
+
 ## Quick Test Mode
 
 For rapid iteration, set these variables to skip full HAF sync:
