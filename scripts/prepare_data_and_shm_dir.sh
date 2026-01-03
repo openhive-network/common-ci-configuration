@@ -45,26 +45,14 @@ function handle_single_file_of_block_log() {
     echo "creating copy of block log file as mirrornet block log can't be shared between pipelines"
     cp "$FILE_PATH" "$DATA_BASE_DIR/datadir/blockchain/"
   else
-    local BLOCK_LOG_TARGET_DIR="$DATA_BASE_DIR/..$BLOCK_LOG_SOURCE_DIR"
-    echo "using $BLOCK_LOG_TARGET_DIR/$FILE_NAME as hardlink target"
-    mkdir -p "$BLOCK_LOG_TARGET_DIR"
-    # cp -u exits with error if source and target are the same file (e.g., when
-    # BLOCK_LOG_TARGET_DIR resolves to the same path via symlinks). This is fine -
-    # the file is already where we need it for hardlinking.
-    if ! cp -u "$FILE_PATH" "$BLOCK_LOG_TARGET_DIR/$FILE_NAME" 2>/dev/null; then
-      # Check if they're the same file (inode) - that's OK
-      if [ "$(stat -c %i "$FILE_PATH" 2>/dev/null)" = "$(stat -c %i "$BLOCK_LOG_TARGET_DIR/$FILE_NAME" 2>/dev/null)" ]; then
-        echo "Source and target are the same file (via symlink), skipping copy"
-      else
-        echo "ERROR: Failed to copy $FILE_PATH to $BLOCK_LOG_TARGET_DIR/$FILE_NAME"
-        exit 1
-      fi
-    fi
-    echo "creating hardlink of $BLOCK_LOG_TARGET_DIR/$FILE_NAME in $DATA_BASE_DIR/datadir/blockchain/"
-    # Try hardlink first, fall back to symlink if cross-device (different filesystems)
-    if ! ln "$BLOCK_LOG_TARGET_DIR/$FILE_NAME" "$DATA_BASE_DIR/datadir/blockchain/$FILE_NAME" 2>/dev/null; then
+    # Try hardlink first (fastest, works on same filesystem)
+    echo "creating hardlink of $FILE_PATH in $DATA_BASE_DIR/datadir/blockchain/"
+    if ! ln "$FILE_PATH" "$DATA_BASE_DIR/datadir/blockchain/$FILE_NAME" 2>/dev/null; then
+      # Hardlink failed (likely cross-device), create symlink to the source directory.
+      # This symlink uses the absolute path to the source, which must be mounted in
+      # any container that needs to access it.
       echo "Hardlink failed (likely cross-device), creating symlink instead"
-      ln -s "$BLOCK_LOG_TARGET_DIR/$FILE_NAME" "$DATA_BASE_DIR/datadir/blockchain/$FILE_NAME"
+      ln -s "$FILE_PATH" "$DATA_BASE_DIR/datadir/blockchain/$FILE_NAME"
     fi
   fi
 
