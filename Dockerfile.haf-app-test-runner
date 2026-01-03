@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1.4
+# Shared test runner for HAF applications (balance_tracker, reputation_tracker, haf_block_explorer)
+# Provides: Python 3.14, Poetry, Docker CLI, JMeter, PostgreSQL client
+#
+# Based on ci-base-image (Ubuntu) for Python 3.14 support.
+# Use with docker-dind service for Docker-in-Docker testing.
+
+ARG CI_BASE_IMAGE_VERSION=ubuntu24.04-py3.14-2
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/ci-base-image:${CI_BASE_IMAGE_VERSION}
+
+# Copy JMeter and m2u from benchmark-test-runner
+COPY --from=registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:latest \
+  /opt/tools/jmeter /opt/tools/jmeter
+COPY --from=registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:latest \
+  /opt/tools/m2u /opt/tools/m2u
+
+USER root
+RUN <<EOF
+  set -e
+
+  # Install additional dependencies
+  apt-get update && apt-get install -y --no-install-recommends \
+    openjdk-11-jre-headless \
+    postgresql-client \
+    docker-compose-v2 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+  # Create symlinks for JMeter and m2u
+  ln -s /opt/tools/jmeter/bin/jmeter.sh /usr/bin/jmeter
+  ln -s /opt/tools/m2u/m2u /usr/bin/m2u
+
+  # Install Python packages needed by HAF app tests
+  pip3 install --no-cache-dir psycopg2-binary
+
+  # Create hived user for compatibility (ci-base-image has hived_admin)
+  id hived 2>/dev/null || useradd -ms /bin/bash hived
+  echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+EOF
+
+USER hived_admin
+CMD ["/bin/bash"]
