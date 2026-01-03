@@ -103,15 +103,27 @@ lint_bash_scripts:
   before_script:
     - apk add xmlstarlet
   script:
-    - shellcheck -f checkstyle scripts/**/*.sh > shellcheck-checkstyle-result.xml 
+    - shellcheck -f checkstyle scripts/**/*.sh > shellcheck-checkstyle-result.xml
   after_script:
     - xmlstarlet tr misc/checkstyle2junit.xslt shellcheck-checkstyle-result.xml > shellcheck-junit-result.xml
   artifacts:
-    paths: 
+    paths:
      - shellcheck-checkstyle-result.xml
      - shellcheck-junit-result.xml
     reports:
       junit: shellcheck-junit-result.xml
+  rules:
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+      changes:
+        paths:
+          - scripts/**/*.sh
+          - misc/checkstyle2junit.xslt
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        paths:
+          - scripts/**/*.sh
+          - misc/checkstyle2junit.xslt
+        compare_to: 'refs/heads/develop'
 
 lint_ci_templates:
   extends: .validation_job
@@ -123,11 +135,29 @@ lint_ci_templates:
   after_script:
     - yamllint-junit -o yamllint-junit-result.xml yamllint-parsable-result.txt
   artifacts:
-    paths: 
+    paths:
      - yamllint-parsable-result.txt
      - yamllint-junit-result.xml
     reports:
       junit: yamllint-junit-result.xml
+  rules:
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+      changes:
+        paths:
+          - templates/**/*.yml
+          - templates/**/*.yaml
+          - .yamllint
+          - .yamllint.yml
+          - .yamllint.yaml
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        paths:
+          - templates/**/*.yml
+          - templates/**/*.yaml
+          - .yamllint
+          - .yamllint.yml
+          - .yamllint.yaml
+        compare_to: 'refs/heads/develop'
 
 lint_python_scripts:
   extends: .validation_job
@@ -138,10 +168,22 @@ lint_python_scripts:
     - pip install -r scripts/python/requirements.txt
     - pylint --output-format=text,pylint_junit.JUnitReporter:pylint-junit-result.xml scripts/python/*.py
   artifacts:
-    paths: 
+    paths:
      - pylint-junit-result.xml
     reports:
       junit: pylint-junit-result.xml
+  rules:
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+      changes:
+        paths:
+          - scripts/python/**/*.py
+          - scripts/python/requirements.txt
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        paths:
+          - scripts/python/**/*.py
+          - scripts/python/requirements.txt
+        compare_to: 'refs/heads/develop'
 
 # =============================================================================
 # Skip Rules for Script/Doc-Only Changes
@@ -229,9 +271,19 @@ build_docker_dind_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
       exists:
         - Dockerfile.docker-dind
+      changes:
+        paths:
+          - Dockerfile.docker-dind
+    - if: $CI_COMMIT_BRANCH !~ /^main$/
+      exists:
+        - Dockerfile.docker-dind
+      changes:
+        paths:
+          - Dockerfile.docker-dind
+        compare_to: 'refs/heads/develop'
   services:
     - docker:26.1.4-dind
 
@@ -241,13 +293,24 @@ build_docker_builder_image:
   variables:
     BUILD_TARGET: "docker-builder"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
       exists:
         - Dockerfile.docker-builder
+      changes:
+        paths:
+          - Dockerfile.docker-builder
+    - if: $CI_COMMIT_BRANCH !~ /^main$/
+      exists:
+        - Dockerfile.docker-builder
+      changes:
+        paths:
+          - Dockerfile.docker-builder
+        compare_to: 'refs/heads/develop'
 
 build_image_remover_image:
   extends: .build_docker_image
@@ -255,13 +318,26 @@ build_image_remover_image:
   variables:
     BUILD_TARGET: "python-scripts"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
       exists:
         - Dockerfile.python-scripts
+      changes:
+        paths:
+          - Dockerfile.python-scripts
+          - scripts/python/**/*
+    - if: $CI_COMMIT_BRANCH !~ /^main$/
+      exists:
+        - Dockerfile.python-scripts
+      changes:
+        paths:
+          - Dockerfile.python-scripts
+          - scripts/python/**/*
+        compare_to: 'refs/heads/develop'
 
 build_benchmark_test_runner_image:
   extends: .build_docker_image
@@ -269,13 +345,24 @@ build_benchmark_test_runner_image:
   variables:
     BUILD_TARGET: "benchmark-test-runner"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
       exists:
         - Dockerfile.benchmark-test-runner
+      changes:
+        paths:
+          - Dockerfile.benchmark-test-runner
+    - if: $CI_COMMIT_BRANCH !~ /^main$/
+      exists:
+        - Dockerfile.benchmark-test-runner
+      changes:
+        paths:
+          - Dockerfile.benchmark-test-runner
+        compare_to: 'refs/heads/develop'
 
 build_haf_app_test_runner_image:
   extends: .build_docker_image
@@ -283,7 +370,8 @@ build_haf_app_test_runner_image:
   variables:
     BUILD_TARGET: "haf-app-test-runner"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
     - job: build_ci_base_image
       optional: true
     - job: build_benchmark_test_runner_image
@@ -291,9 +379,19 @@ build_haf_app_test_runner_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
       exists:
         - Dockerfile.haf-app-test-runner
+      changes:
+        paths:
+          - Dockerfile.haf-app-test-runner
+    - if: $CI_COMMIT_BRANCH !~ /^main$/
+      exists:
+        - Dockerfile.haf-app-test-runner
+      changes:
+        paths:
+          - Dockerfile.haf-app-test-runner
+        compare_to: 'refs/heads/develop'
 
 build_tox_test_runner_image:
   extends: .build_docker_image
@@ -301,13 +399,24 @@ build_tox_test_runner_image:
   variables:
     BUILD_TARGET: "tox-test-runner"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
       exists:
         - Dockerfile.tox-test-runner
+      changes:
+        paths:
+          - Dockerfile.tox-test-runner
+    - if: $CI_COMMIT_BRANCH !~ /^main$/
+      exists:
+        - Dockerfile.tox-test-runner
+      changes:
+        paths:
+          - Dockerfile.tox-test-runner
+        compare_to: 'refs/heads/develop'
 
 build_nginx_image:
   extends: .build_docker_image
@@ -315,13 +424,24 @@ build_nginx_image:
   variables:
     BUILD_TARGET: "nginx"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
       exists:
         - Dockerfile.nginx
+      changes:
+        paths:
+          - Dockerfile.nginx
+    - if: $CI_COMMIT_BRANCH !~ /^main$/
+      exists:
+        - Dockerfile.nginx
+      changes:
+        paths:
+          - Dockerfile.nginx
+        compare_to: 'refs/heads/develop'
 
 build_postgrest_image:
   extends: .build_docker_image
@@ -329,13 +449,24 @@ build_postgrest_image:
   variables:
     BUILD_TARGET: "postgrest"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
       exists:
         - Dockerfile.postgrest
+      changes:
+        paths:
+          - Dockerfile.postgrest
+    - if: $CI_COMMIT_BRANCH !~ /^main$/
+      exists:
+        - Dockerfile.postgrest
+      changes:
+        paths:
+          - Dockerfile.postgrest
+        compare_to: 'refs/heads/develop'
 
 build_alpine_image:
   extends: .build_docker_image
@@ -343,13 +474,24 @@ build_alpine_image:
   variables:
     BUILD_TARGET: "alpine"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
       exists:
         - Dockerfile.alpine
+      changes:
+        paths:
+          - Dockerfile.alpine
+    - if: $CI_COMMIT_BRANCH !~ /^main$/
+      exists:
+        - Dockerfile.alpine
+      changes:
+        paths:
+          - Dockerfile.alpine
+        compare_to: 'refs/heads/develop'
 
 build_python_image:
   extends: .effective_build_docker_image
@@ -358,7 +500,8 @@ build_python_image:
     BUILD_TARGET: "python"
     DOCKERFILE_PATH: "Dockerfile.python"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
 
 build_python_dev_image:
   extends: .effective_build_docker_image
@@ -367,7 +510,8 @@ build_python_dev_image:
     BUILD_TARGET: "python_development"
     DOCKERFILE_PATH: "Dockerfile.python_runtime"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
 
 build_python_runtime_image:
   extends: .effective_build_docker_image
@@ -376,7 +520,8 @@ build_python_runtime_image:
     BUILD_TARGET: "python_runtime"
     DOCKERFILE_PATH: "Dockerfile.python_runtime"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
 
 build_ci_base_image:
   extends: .effective_build_docker_image
@@ -385,7 +530,8 @@ build_ci_base_image:
     BUILD_TARGET: "ci-base-image"
     DOCKERFILE_PATH: "Dockerfile.ci-base-image"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
 
 build_dockerfile_image:
   extends: .build_docker_image
@@ -393,13 +539,24 @@ build_dockerfile_image:
   variables:
     BUILD_TARGET: "dockerfile"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
       exists:
         - Dockerfile.dockerfile
+      changes:
+        paths:
+          - Dockerfile.dockerfile
+    - if: $CI_COMMIT_BRANCH !~ /^main$/
+      exists:
+        - Dockerfile.dockerfile
+      changes:
+        paths:
+          - Dockerfile.dockerfile
+        compare_to: 'refs/heads/develop'
 
 build_emsdk_image:
   extends: .build_docker_image
@@ -407,7 +564,8 @@ build_emsdk_image:
   variables:
     BUILD_TARGET: "emsdk"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
@@ -437,7 +595,8 @@ build_psql_image:
   variables:
     BUILD_TARGET: "psql"
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
@@ -504,7 +663,8 @@ example_docker_image_builder_job:
         --tag $CI_REGISTRY_IMAGE/alpine-example:latest \
         https://github.com/alpinelinux/docker-alpine.git
   needs:
-    - build_docker_dind_image
+    - job: build_docker_dind_image
+      optional: true
   when: manual
   tags:
     - public-runner-docker
