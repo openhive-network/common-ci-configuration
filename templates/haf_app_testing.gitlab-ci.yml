@@ -1071,7 +1071,9 @@ include:
 .haf_app_lint_sql:
   extends: .job-defaults
   stage: build
-  image: sqlfluff/sqlfluff:2.1.4
+  image:
+    name: sqlfluff/sqlfluff:2.1.4
+    entrypoint: [""]  # Override default entrypoint to allow shell scripts
   variables:
     SQLFLUFF_DIALECT: "postgres"
     SQLFLUFF_CONFIG: ""
