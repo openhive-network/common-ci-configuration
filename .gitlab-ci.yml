@@ -6,6 +6,12 @@ variables:
   TOX_IMAGE_TAG: "$CI_COMMIT_SHA"
   PYTHON_IMAGE_TAG: 3.12.12
   SHELLCHECK_ALPINE_TAG: v0.11.0
+  # =============================================================================
+  # Skip Docker Builds - Set to "true" to skip all Docker image builds
+  # =============================================================================
+  # Useful when only editing scripts/, docs/, or templates/ - no need to rebuild
+  # Docker images. Validation jobs still run.
+  SKIP_DOCKER_BUILDS: "false"
 
   # Git configuration
   # Fetch strategy reuses workspace between jobs, reducing GitLab server load.
@@ -137,6 +143,35 @@ lint_python_scripts:
     reports:
       junit: pylint-junit-result.xml
 
+# =============================================================================
+# Skip Rules for Script/Doc-Only Changes
+# =============================================================================
+# Docker builds are expensive. Skip them when only scripts, docs, or templates
+# change (these don't affect Docker images). Always run on protected branches.
+
+.skip_docker_build_on_non_docker_changes:
+  rules:
+    # Skip if SKIP_DOCKER_BUILDS is set
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    # Always run on protected branches (develop, main)
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+      when: on_success
+    # Skip if only scripts/docs/templates changed (no Docker files)
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        paths:
+          - scripts/**/*
+          - docs/**/*
+          - templates/**/*
+          - "*.md"
+          - misc/**/*
+        compare_to: refs/heads/develop
+      when: never
+    # Otherwise run normally
+    - if: $CI_COMMIT_BRANCH
+      when: on_success
+
 .build_docker_image:
   extends: .pure_docker_image_builder_job_template
   image: docker:26.1.4-cli
@@ -170,6 +205,8 @@ lint_python_scripts:
   variables:
     DOCKERFILE_PATH: ""
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
       exists:
         - ${DOCKERFILE_PATH}
@@ -190,6 +227,8 @@ build_docker_dind_image:
   variables:
     BUILD_TARGET: "docker-dind"
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.docker-dind
@@ -204,6 +243,8 @@ build_docker_builder_image:
   needs:
     - build_docker_dind_image
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.docker-builder
@@ -216,6 +257,8 @@ build_image_remover_image:
   needs:
     - build_docker_dind_image
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.python-scripts
@@ -228,6 +271,8 @@ build_benchmark_test_runner_image:
   needs:
     - build_docker_dind_image
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.benchmark-test-runner
@@ -244,6 +289,8 @@ build_haf_app_test_runner_image:
     - job: build_benchmark_test_runner_image
       optional: true
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.haf-app-test-runner
@@ -256,6 +303,8 @@ build_tox_test_runner_image:
   needs:
     - build_docker_dind_image
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.tox-test-runner
@@ -268,6 +317,8 @@ build_nginx_image:
   needs:
     - build_docker_dind_image
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.nginx
@@ -280,6 +331,8 @@ build_postgrest_image:
   needs:
     - build_docker_dind_image
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.postgrest
@@ -292,6 +345,8 @@ build_alpine_image:
   needs:
     - build_docker_dind_image
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.alpine
@@ -340,6 +395,8 @@ build_dockerfile_image:
   needs:
     - build_docker_dind_image
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH
       exists:
         - Dockerfile.dockerfile
@@ -352,6 +409,8 @@ build_emsdk_image:
   needs:
     - build_docker_dind_image
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
       exists:
         - Dockerfile.emscripten
@@ -380,6 +439,8 @@ build_psql_image:
   needs:
     - build_docker_dind_image
   rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
     - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
       exists:
         - Dockerfile.psql
