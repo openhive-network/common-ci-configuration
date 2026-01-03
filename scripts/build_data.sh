@@ -179,9 +179,20 @@ echo "Preparing datadir and shm_dir in location ${DATA_CACHE}"
 
 echo "Attempting to perform replay using image ${IMG}..."
 
+# Build docker volume arguments
+DOCKER_VOLUMES=(
+    --docker-option=--volume="$DATA_CACHE":"$DATA_CACHE"
+)
+
+# Mount block_log source directory if specified (needed for symlinks to work in container)
+if [[ -n "$BLOCK_LOG_SOURCE_DIR" ]] && [[ -d "$BLOCK_LOG_SOURCE_DIR" ]]; then
+    DOCKER_VOLUMES+=(--docker-option=--volume="$BLOCK_LOG_SOURCE_DIR":"$BLOCK_LOG_SOURCE_DIR":ro)
+    echo "Mounting block_log source directory: $BLOCK_LOG_SOURCE_DIR (read-only)"
+fi
+
 "$RUN_SCRIPT" --name=hived_instance \
     --detach \
-    --docker-option=--volume="$DATA_CACHE":"$DATA_CACHE" \
+    "${DOCKER_VOLUMES[@]}" \
     --data-dir="$DATA_CACHE/datadir" \
     --shared-file-dir="$DATA_CACHE/shm_dir" \
     --docker-option=--env=HIVED_UID="$(id -u)" \
