@@ -367,7 +367,7 @@ _restore_pgdata_permissions() {
 }
 
 # Build tar exclusion arguments for HAF caches to reduce size
-# Excludes: blockchain (use shared block_log)
+# Excludes: blockchain (use shared block_log via _link_shared_block_log)
 # NOTE: We keep ALL WAL files to ensure safe PostgreSQL recovery.
 # Previously we tried to exclude WAL files except the checkpoint WAL to save ~5.8GB,
 # but this caused data corruption when PostgreSQL started crash recovery on extracted data.
@@ -377,16 +377,61 @@ _build_haf_tar_excludes() {
     local source_dir="$1"
     local excludes=""
 
-    # Exclude blockchain directory - tests should use /nfs/ci-cache/hive/block_log_5m
-    # Saves ~1.7GB
+    # Exclude blockchain directory - will be linked via _link_shared_block_log on extraction
+    # Saves ~1.7GB per cache
     if [[ -d "${source_dir}/datadir/blockchain" ]]; then
         excludes="--exclude=./datadir/blockchain"
-        _log "Excluding datadir/blockchain (use shared block_log instead)"
+        _log "Excluding datadir/blockchain (will link shared block_log on extraction)"
     fi
 
     # Keep all pg_wal files - required for safe PostgreSQL recovery
 
     echo "$excludes"
+}
+
+# Link shared block_log into extracted HAF cache
+# Called after extraction when blockchain was excluded from cache
+# Checks local path first (each builder has block_log), then NFS as fallback
+_link_shared_block_log() {
+    local dest_dir="$1"
+    local blockchain_dir="${dest_dir}/datadir/blockchain"
+
+    # If blockchain already exists in extracted data, nothing to do
+    if [[ -d "$blockchain_dir" ]] && [[ -n "$(ls -A "$blockchain_dir" 2>/dev/null)" ]]; then
+        _log "Blockchain directory exists in cache, skipping block_log linking"
+        return 0
+    fi
+
+    # Shared block_log locations - check local first (faster), then NFS
+    local LOCAL_BLOCK_LOG="/blockchain/block_log_5m"
+    local NFS_BLOCK_LOG="/nfs/ci-cache/hive/block_log_5m"
+    local shared_block_log=""
+
+    if [[ -d "$LOCAL_BLOCK_LOG" ]] && [[ -n "$(ls -A "$LOCAL_BLOCK_LOG" 2>/dev/null)" ]]; then
+        shared_block_log="$LOCAL_BLOCK_LOG"
+        _log "Using local shared block_log: $LOCAL_BLOCK_LOG"
+    elif [[ -d "$NFS_BLOCK_LOG" ]] && [[ -n "$(ls -A "$NFS_BLOCK_LOG" 2>/dev/null)" ]]; then
+        shared_block_log="$NFS_BLOCK_LOG"
+        _log "Using NFS shared block_log: $NFS_BLOCK_LOG"
+    else
+        _log "WARNING: No shared block_log found at $LOCAL_BLOCK_LOG or $NFS_BLOCK_LOG"
+        return 0
+    fi
+
+    # Create blockchain directory and symlinks
+    _log "Linking shared block_log into ${blockchain_dir}"
+    mkdir -p "$blockchain_dir"
+
+    for block_file in "${shared_block_log}"/block_log*; do
+        if [[ -f "$block_file" ]]; then
+            local filename
+            filename=$(basename "$block_file")
+            ln -sf "$block_file" "${blockchain_dir}/${filename}"
+            _log "Linked: ${filename}"
+        fi
+    done
+
+    ls -la "$blockchain_dir" 2>/dev/null || true
 }
 
 # GET: Check local tar, then NFS tar, extract to destination
@@ -459,9 +504,11 @@ cmd_get() {
         fi
     fi
 
-    # Restore pgdata permissions for HAF caches
-    if [[ "$cache_type" == "haf" ]]; then
+    # Post-extraction fixes for HAF caches
+    # Covers: haf, haf_sync, haf_pipeline, haf_filtered, haf_hafbe_sync, etc.
+    if [[ "$cache_type" == haf* ]]; then
         _restore_pgdata_permissions "$local_dest"
+        _link_shared_block_log "$local_dest"
     fi
 
     _update_lru "$cache_type" "$cache_key"
