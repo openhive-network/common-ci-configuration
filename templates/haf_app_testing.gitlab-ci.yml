@@ -327,7 +327,8 @@ include:
   stage: build
   image: alpine:latest
   variables:
-    HAF_COMMIT: ""           # Must be set by derived job
+    # HAF_COMMIT should come from global variables or be set in derived job
+    # Do NOT set a default here as it would override global variables
     HAF_INCLUDE_REF: ""      # Should match the 'ref' in your HAF include
     HAF_SUBMODULE_PATH: "haf"  # Path to HAF submodule
   before_script:
