@@ -36,9 +36,9 @@
 #
 # Required variables:
 #   HAF_IMAGE_NAME: Output variable for the built image name
-#   HIVE_SCRIPTS_REF: Git ref for fetching scripts from hive repo
 #
 # Optional variables:
+#   HIVE_SCRIPTS_REF: Git ref for fetching scripts from hive repo (default: develop)
 #   SUBMODULE_DIR: Project directory (default: $CI_PROJECT_DIR)
 #   HIVE_NETWORK_TYPE: Network type - mainnet/testnet/mirrornet (default: mainnet)
 #   REGISTRY_USER: Docker registry username (default: $CI_IMG_BUILDER_USER)
@@ -57,6 +57,7 @@
     REGISTRY_PASS: $CI_IMG_BUILDER_PASSWORD
     BINARY_CACHE_PATH: "$CI_PROJECT_DIR/haf-binaries"
     HIVE_NETWORK_TYPE: mainnet
+    HIVE_SCRIPTS_REF: "develop"  # Git ref for fetching scripts from hive repo
   script:
     - |
       # Fetch required scripts from hive repo (symlinks don't work without submodule checkout)
