@@ -972,6 +972,8 @@ include:
       # Prepare data for caching
       sudo cp -a "${SHM_DIR}" "${DATADIR}/shm_dir"
       mkdir -p "${DATADIR}/blockchain"
+      # Remove any existing symlinks before copying (they may point to read-only locations)
+      sudo rm -f "${DATADIR}/blockchain/block_log" "${DATADIR}/blockchain/block_log.artifacts"
       sudo cp -a "${CI_PROJECT_DIR}/docker/blockchain/block_log" "${DATADIR}/blockchain/block_log"
       sudo cp -a "${CI_PROJECT_DIR}/docker/blockchain/block_log.artifacts" "${DATADIR}/blockchain/block_log.artifacts"
 
