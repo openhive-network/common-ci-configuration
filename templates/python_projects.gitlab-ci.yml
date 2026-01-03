@@ -1,0 +1,233 @@
+include:
+  - local: templates/base.gitlab-ci.yml
+
+
+variables:
+  PACKAGES_TO_CHECK: ""  # required to set when using linter-specific job templates
+  PYPROJECT_CONFIG_PATH: ""  # may be set when using linter-specific job templates
+  # tests:
+  PYTEST_NUMBER_OF_PROCESSES: "auto" # will use nproc to determine number of processes, override on specific project CI/job level
+  PYTEST_LOG_DURATIONS: 0  # do not log test durations by default
+  PYTEST_JUNIT_REPORT: "report.xml"  # junit report location, used by GitLab
+  # Python version - ci-base-image is the single source of truth
+  # To upgrade Python: rebuild ci-base-image in hive/hive, then update PYTHON_IMAGE_TAG SHA here
+  PYTHON_VERSION: "3.14"
+  PYTHON_VERSION_FULL: "3.14.2"
+  # registries:
+  # uses registry.gitlab.syncad.com/hive/hive/ci-base-image:ubuntu24.04-py3.14-1
+  PYTHON_IMAGE_TAG: "@sha256:64bc6a41d7811e6caace5fed8c82ca1ee6c26bfdcae8b29546d830a63bfe1f17"
+  PYTHON_IMAGE: "registry.gitlab.syncad.com/hive/hive/ci-base-image${PYTHON_IMAGE_TAG}"
+  # colors:
+  TXT_GREEN: "\e[1;32m"
+  TXT_BLUE: "\e[1;34m"
+  TXT_CLEAR: "\e[0m"
+
+
+.configuration_template:
+  extends: .job-defaults
+  image: "${PYTHON_IMAGE}"
+  variables:
+    PYPROJECT_DIR: "${CI_PROJECT_DIR}"
+  before_script:
+    - echo "Using Python project directory - ${PYPROJECT_DIR}"
+    - poetry -C "${PYPROJECT_DIR}" env use python3  # create virtualenv if not exists
+    - source $(poetry -C "${PYPROJECT_DIR}" env info --path)/bin/activate  # activate that virtualenv
+    - python3 -V
+    - poetry -C "${PYPROJECT_DIR}" -V
+    - pip list
+
+
+.project_develop_configuration_template:
+  extends: .configuration_template
+  before_script:
+    - !reference [.configuration_template, before_script]
+    - poetry -C "${PYPROJECT_DIR}" install
+    - pip list
+
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| STATIC CODE ANALYSIS |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+.pre_commit_checks_template:
+  extends: .project_develop_configuration_template
+  variables:
+    PRE_COMMIT_CONFIG: "${PYPROJECT_DIR}/.pre-commit-config.yaml"
+  script:
+    - poetry -C "${PYPROJECT_DIR}" -V
+    - echo -e "${TXT_BLUE}Checking all files with pre-commit hooks...${TXT_CLEAR}" &&
+      pre-commit run --config ${PRE_COMMIT_CONFIG} --all-files
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - poetry.lock
+
+.lint_code_with_ruff_template:
+  extends: .project_develop_configuration_template
+  script:
+    - if [ -z "${PYPROJECT_CONFIG_PATH}" ]; then MAYBE_EXPLICIT_CONFIG=""; else MAYBE_EXPLICIT_CONFIG="--config ${PYPROJECT_CONFIG_PATH}"; fi
+    - echo -e "${TXT_BLUE}Linting all sources with Ruff (check)...${TXT_CLEAR}" &&
+      ruff check ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
+    - echo -e "${TXT_BLUE}Linting all sources with Ruff (diff)...${TXT_CLEAR}" &&
+      ruff check --diff ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
+
+.formatting_with_black_check_template:
+  extends: .project_develop_configuration_template
+  script:
+    - if [ -z "${PYPROJECT_CONFIG_PATH}" ]; then MAYBE_EXPLICIT_CONFIG=""; else MAYBE_EXPLICIT_CONFIG="--config ${PYPROJECT_CONFIG_PATH}"; fi
+    - echo -e "${TXT_BLUE}Checking code formatting with Black...${TXT_CLEAR}" &&
+      black --check --diff --color ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
+
+.type_check_with_mypy_template:
+  extends: .project_develop_configuration_template
+  script:
+    - if [ -z "${PYPROJECT_CONFIG_PATH}" ]; then MAYBE_EXPLICIT_CONFIG=""; else MAYBE_EXPLICIT_CONFIG="--config-file ${PYPROJECT_CONFIG_PATH}"; fi
+    - echo -e "${TXT_BLUE}Checking types with mypy...${TXT_CLEAR}" &&
+      mypy ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
+
+# job template useful to match project local poetry.lock file to pyproject.toml specification
+# and avoid differences, which can potentially cause bugs really not reproducible on clean evironment.
+.verify_poetry_lock_sanity_template:
+  extends: .job-defaults
+  variables:
+    PYPROJECT_DIR: "" #should be overrided by inheritted job
+
+  image: "${PYTHON_IMAGE}"
+  script:
+    - cd "${PYPROJECT_DIR}"
+    - poetry check --lock --verbose
+
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| STATIC CODE ANALYSIS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| TESTS |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+.run-pytest:
+  # Usage:
+  # 1. Add - !reference [.run-pytest, script] to your script section.
+  # 2. Set the appropriate values for:
+  #    - PYTEST_TIMEOUT_MINUTES (required, should be set on the job level)
+  #    - PYTEST_NUMBER_OF_PROCESSES (default: defined via global CI variable, could be overridden on the job level)
+  #    - PYTEST_LOG_DURATIONS (default: defined via global CI variable, could be overridden on the job level)
+  #    - PYTEST_ARGS (default: "" - empty, should be set on the job level)
+  #    - PYTEST_JUNIT_REPORT (default: "report.xml")
+  #      Best to export PYTEST_ARGS as array (e.g. `export PYTEST_ARGS=(-m testnet)`). In some cases setting PYTEST_ARGS as string will fail.
+  script:
+    - |
+      PYTEST_FULL_CMD=("pytest")
+
+      if [ -z "${PYTEST_TIMEOUT_MINUTES}" ]; then
+        echo "Required variable PYTEST_TIMEOUT_MINUTES was not set!"
+        exit 22
+      fi
+
+      # add pytest timeout to prevent gitlab CI killing job on timeout without any artifacts and no info about tests
+      PYTEST_FULL_CMD+=("--timeout=$((${PYTEST_TIMEOUT_MINUTES} * 60))")
+
+      # use pytest-xdist only under theses certain conditions, so running with PYTEST_NUMBER_OF_PROCESSES=1 doesnt use xdist
+      if [[ ${PYTEST_NUMBER_OF_PROCESSES} == "auto" || ${PYTEST_NUMBER_OF_PROCESSES} -gt 1 ]]; then
+        PYTEST_FULL_CMD+=("-n=${PYTEST_NUMBER_OF_PROCESSES}")
+      fi
+
+      # durations=0 makes pytest print all tests durations
+      if [ ${PYTEST_LOG_DURATIONS:=0} -ge 1 ]; then
+        PYTEST_FULL_CMD+=("--durations=0")
+      fi
+
+      PYTEST_FULL_CMD+=("--junitxml=${PYTEST_JUNIT_REPORT}")
+
+      PYTEST_FULL_CMD+=("${PYTEST_ARGS[@]}")
+
+      echo "Launching pytest with:
+           - timeout (minutes): ${PYTEST_TIMEOUT_MINUTES}
+           - processes: ${PYTEST_NUMBER_OF_PROCESSES}
+           - log durations: ${PYTEST_LOG_DURATIONS}
+           - additional arguments: ${PYTEST_ARGS[@]}"
+      echo
+      echo "Full pytest command:"
+      echo "${PYTEST_FULL_CMD[@]}"
+
+      # add extra bash timeout
+      timeout $(((${PYTEST_TIMEOUT_MINUTES} + 2) * 60)) "${PYTEST_FULL_CMD[@]}"
+
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| TESTS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| BUILD |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+.build_wheel_template:
+  extends: .configuration_template
+  variables:
+    GIT_STRATEGY: clone
+    GIT_DEPTH: 0  # We need full history to get correct version (dynamic versioning)
+    DIST_DIR: "${PYPROJECT_DIR}/dist"
+  script:
+    - echo -e "${TXT_BLUE}Building python wheel...${TXT_CLEAR}"
+    - ls -al
+    - poetry -C "${PYPROJECT_DIR}" version
+    - poetry -C "${PYPROJECT_DIR}" build --format wheel
+    - if [ ! -d "${DIST_DIR}" ] && [ -d "dist" ]; then cp -r "dist" "${DIST_DIR}"; fi
+    - ls -al ${DIST_DIR}
+  after_script:
+    - WHEEL_BUILD_VERSION=$(poetry -C "${PYPROJECT_DIR}" version -s)
+    - echo "WHEEL_BUILD_VERSION is ${WHEEL_BUILD_VERSION}"
+    - echo "WHEEL_BUILD_VERSION=${WHEEL_BUILD_VERSION}" > build_wheel.env
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - "${DIST_DIR}"
+      - build_wheel.env
+    reports:
+      dotenv: build_wheel.env
+
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| BUILD |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| DEPLOY |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+.deploy_wheel_base:
+  extends: .configuration_template
+  when: manual
+  variables:
+    GIT_STRATEGY: clone
+    GIT_DEPTH: 0  # Required for poetry publish to get correct version
+  before_script:
+    - !reference [.configuration_template, before_script]
+    - rm build_wheel.env  # to keep the git status clean
+  after_script:
+    # Job extending this template will depend on the build_wheel job, so we can use the same variable and pass it further
+    # so jobs depending on deploy_wheel won't have to include build_wheel also just to get the version
+    - echo "WHEEL_BUILD_VERSION is ${WHEEL_BUILD_VERSION}"
+    - echo "WHEEL_BUILD_VERSION=${WHEEL_BUILD_VERSION}" > deploy_wheel.env
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - deploy_wheel.env
+    reports:
+      dotenv: deploy_wheel.env
+
+.deploy_wheel_to_gitlab_template:
+  extends: .deploy_wheel_base
+  script:
+    - echo -e "${TXT_BLUE}Deploying python wheel to the GitLab PyPI registry...${TXT_CLEAR}"
+    - ls -al
+    - poetry -C "${PYPROJECT_DIR}" version
+    - poetry -C "${PYPROJECT_DIR}" config repositories.gitlab "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi"
+    - poetry -C "${PYPROJECT_DIR}" config http-basic.gitlab gitlab-ci-token "${CI_JOB_TOKEN}"
+    - poetry -C "${PYPROJECT_DIR}" publish --skip-existing --repository gitlab
+
+.deploy_wheel_to_pypi_template:
+  extends: .deploy_wheel_base
+  rules:
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED == "true"'
+      when: manual
+      allow_failure: true
+  variables:
+    PYPI_AUTHORIZATION_TOKEN: $PYPI_AUTHORIZATION_TOKEN
+  script:
+    - echo -e "${TXT_BLUE}Deploying python wheel to the official PyPI registry...${TXT_CLEAR}"
+    - ls -al
+    - poetry -C "${PYPROJECT_DIR}" version
+    - poetry -C "${PYPROJECT_DIR}" config pypi-token.pypi "${PYPI_AUTHORIZATION_TOKEN}"
+    - poetry -C "${PYPROJECT_DIR}" publish --skip-existing
+
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| DEPLOY |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<

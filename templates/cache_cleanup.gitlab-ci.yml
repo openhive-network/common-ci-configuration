@@ -1,0 +1,35 @@
+variables:
+  DOCKER_BUILDER_TAG: "latest"
+  DOCKER_DIND_TAG: "latest"
+  IMAGE_REMOVER_TAG: "latest"
+
+  ALPINE_IMAGE_TAG: "3.21.3"
+
+include:
+  - local: templates/base.gitlab-ci.yml
+
+
+.cleanup_cache_manual_template:
+  extends: .job-defaults
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/alpine:${ALPINE_IMAGE_TAG}
+  variables:
+    CLEANUP_PATH_PATTERN: ""
+  needs: []
+  script:
+    - echo "HOSTNAME is ${HOSTNAME} CI_CONCURRENT_ID ${CI_CONCURRENT_ID}"
+    - du -h -d 1 /cache
+    - rm $CLEANUP_PATH_PATTERN -rf
+  when: manual
+
+.cleanup_old_cache_template:
+  extends: .job-defaults
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/alpine:${ALPINE_IMAGE_TAG}
+  variables:
+    CLEANUP_PATH_PATTERN: ""
+    CACHE_DAYS: 7
+  needs: []
+  script:
+    - echo "HOSTNAME is ${HOSTNAME} CI_CONCURRENT_ID ${CI_CONCURRENT_ID}"
+    - du -h -d 1 /cache
+    - find "/cache" -maxdepth 1 -wholename "$CLEANUP_PATH_PATTERN" -mtime "+${CACHE_DAYS}"
+    - find "/cache" -maxdepth 1 -wholename "$CLEANUP_PATH_PATTERN" -mtime "+${CACHE_DAYS}" -exec rm -rf {} \;

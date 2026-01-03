@@ -1,0 +1,32 @@
+# Cache Manager CI Template
+# Provides the cache-manager.sh script for CI jobs
+#
+# Usage in your .gitlab-ci.yml:
+#   include:
+#     - project: 'hive/common-ci-configuration'
+#       ref: develop
+#       file: '/templates/cache-manager.gitlab-ci.yml'
+#
+#   your_job:
+#     extends: .cache_manager_setup
+#     script:
+#       - $CACHE_MANAGER get haf $CACHE_KEY $DATA_DIR
+#       - # ... your job logic
+#       - $CACHE_MANAGER put haf $CACHE_KEY $DATA_DIR
+
+variables:
+  # Path where cache-manager.sh will be available after setup
+  CACHE_MANAGER: "${CI_PROJECT_DIR}/.cache-manager/cache-manager.sh"
+  # Common-ci-configuration ref to use (can be overridden)
+  CACHE_MANAGER_REF: "develop"
+
+# Base template that sets up cache-manager
+# Extend this in your jobs that need cache-manager
+.cache_manager_setup:
+  before_script:
+    - |
+      # Fetch cache-manager.sh from common-ci-configuration
+      mkdir -p "$(dirname "$CACHE_MANAGER")"
+      curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+      chmod +x "$CACHE_MANAGER"
+      echo "Cache manager ready: $CACHE_MANAGER"

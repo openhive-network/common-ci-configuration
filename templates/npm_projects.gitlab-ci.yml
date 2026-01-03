@@ -1,0 +1,321 @@
+include:
+  - local: templates/base.gitlab-ci.yml
+
+variables:
+  # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:4.0.18-1
+  EMSCRIPTEN_IMAGE_TAG: "4.0.18-1@sha256:79edc8ecfe7b13848466d33791daa955eb1762edc329a48c07aa700bc6cfb712"
+  EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG"
+
+.node_based_job_base:
+  extends: .job-defaults
+
+  variables:
+    # allows to override project directory before starting actual processing
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+
+    FF_NETWORK_PER_BUILD: 1
+
+  image: ${EMSCRIPTEN_IMAGE}  # this image contains all required tools and preinstalled set of common npm packages
+
+  before_script:
+    - git config --global --add safe.directory '*'
+    - . "${NVM_DIR}/nvm.sh"  # This loads nvm environment
+    - nvm use "${NODEJS_VERSION}"  # Force usage of preconfigured NodeJS version
+    - cd "${SOURCE_DIR}"  # move to the project directory (where package.json file is located)
+
+.npm_based_job_base:
+  extends: .node_based_job_base
+
+  before_script:
+    - !reference [.node_based_job_base, before_script]
+    - pnpm --recursive install --frozen-lockfile  # install all required dependencies
+
+.filter_out_swagger_json:
+  extends: .node_based_job_base
+  variables:
+    # The directory containing sources to be built - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    DIST_DIR: "${SOURCE_DIR}/build"
+    INPUT_SQL_SWAGGER_FILE: "${SOURCE_DIR}/endpoints/endpoint_schema.sql"
+    JSON_SWAGGER_FILE: "${DIST_DIR}/swagger-doc.json"
+
+    # Target package meta information - they should be overrided by derived job
+    NPM_PACKAGE_SCOPE: "@hiveio"
+    NPM_PACKAGE_NAME: "${CI_PROJECT_NAME}"
+    NPM_REGISTRY_URL: "gitlab.syncad.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/"
+
+  script:
+    - /home/emscripten/scripts/npm_generate_version.sh "${SOURCE_DIR}" "gitlab.syncad.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/" "${NPM_PACKAGE_SCOPE}" "${NPM_PACKAGE_NAME}" "${CI_COMMIT_REF_PROTECTED}" "${CI_COMMIT_TAG}"
+    - source "${SOURCE_DIR}/built_package_version_info.env"
+    - mkdir -vp "${DIST_DIR}"
+    - cat "${INPUT_SQL_SWAGGER_FILE}" | sed -n '/^  openapi json = \$\$/,/^\$\$/ { /^  openapi json = \$\$/d; /^\$\$/d; p }' | jq ".info.version = \"${BUILT_PACKAGE_VERSION}\"" > "${JSON_SWAGGER_FILE}"
+    # Store path relative to CI_PROJECT_DIR so it works across different runner slots.
+    # GitLab CI expands variables in dotenv files at load time.
+    - echo "BUILT_JSON_SWAGGER_FILE=\${CI_PROJECT_DIR}/${JSON_SWAGGER_FILE#${CI_PROJECT_DIR}/}" > "${SOURCE_DIR}/built_swagger_json.env"
+
+  artifacts:
+    reports:
+      dotenv:
+        - "${SOURCE_DIR}/built_swagger_json.env"  # contains path to produced tgz
+    paths:
+      - "${JSON_SWAGGER_FILE}"
+    when: always
+    expire_in: 1 week
+
+.generate_swagger_package:
+  extends: .node_based_job_base
+  variables:
+    # The directory containing sources to be built - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    DIST_DIR: "${SOURCE_DIR}/build"
+    INPUT_JSON_SWAGGER_FILE: "${DIST_DIR}/swagger-doc.json"
+    OUT_DIR: "${DIST_DIR}/generated"
+    WAX_SPEC_GENERATOR_VERSION: "1.7.0"
+    NPM_ALREADY_BUILT: 1
+    # Target package meta information - they should be overrided by derived job
+    NPM_PACKAGE_SCOPE: ""
+    NPM_PACKAGE_NAME: ""
+    NPM_REGISTRY_URL: "gitlab.syncad.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/"
+    # Set the namespace if you want to apply one level of nested object in the generated API structure
+    NAMESPACE: ""
+    # Set this variable to specify the type of API to generate - possible values are: rest, jsonrpc
+    API_TYPE: ""
+
+  script:
+    - mkdir -vp "${DIST_DIR}"
+    - pushd "${DIST_DIR}"
+    - echo @hiveio:registry=https://gitlab.syncad.com/api/v4/groups/136/-/packages/npm/ >> .npmrc
+    # Ignore package version as it will be replaced in the next step - npm generate version script
+    - npx --yes @hiveio/wax-spec-generator@${WAX_SPEC_GENERATOR_VERSION} generate-wax-spec -i "${INPUT_JSON_SWAGGER_FILE}" -o "${OUT_DIR}" -T "${API_TYPE}" ${NAMESPACE:+-N "$NAMESPACE"} -e --npm-name "${NPM_PACKAGE_SCOPE}/${NPM_PACKAGE_NAME}" --npm-version "0.0.0"
+    - popd
+    - /home/emscripten/scripts/npm_pack_package.sh "${OUT_DIR}" "${NPM_REGISTRY_URL}" "${NPM_PACKAGE_SCOPE}" "${NPM_PACKAGE_NAME}" "${DIST_DIR}" "${CI_COMMIT_REF_PROTECTED}" "${CI_COMMIT_TAG}"
+
+  artifacts:
+    reports:
+      dotenv:
+        - "${OUT_DIR}/built_package_info.env"  # contains path to produced tgz
+        - "${OUT_DIR}/built_package_version_info.env"  # contains information related to generated package version and git revision
+
+    paths:
+      - "${OUT_DIR}"  # Built source used for package.json manipulation
+      - "${DIST_DIR}/*.tgz"  # Built package for publishing
+      - "${DIST_DIR}/built_package_info.json"
+
+    when: always
+    expire_in: 1 week
+
+# Base definition for job performing an npm build step. Outputs packaged project in *.tgz form
+# tgz package path can be received by `BUILT_PACKAGE_PATH` .env variable
+.npm_build_template:
+  extends: .npm_based_job_base
+  variables:
+    # The directory containing sources to be built - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    # Output directory where should be stored package - it should be overrided by derived job
+    DIST_DIR: ""
+
+    PROJECT_URL: "${CI_PROJECT_URL}"
+    REPLACE_DOC_URL_ENV: ""
+    REPLACE_FILE_PATH: "${SOURCE_DIR}/README.md"
+
+    # Target package scope - it should be overrided by derived job
+    NPM_PACKAGE_SCOPE: ""
+    # Target package name - it should be overrided by derived job
+    NPM_PACKAGE_NAME: ""
+    NPM_REGISTRY_URL: "gitlab.syncad.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/"
+
+  script:
+    - if [ -n $REPLACE_DOC_URL_ENV ]; then /home/emscripten/scripts/npm_set_doc_url.sh "${SOURCE_DIR}" "${PROJECT_URL}" "${CI_COMMIT_REF_NAME}" "${CI_COMMIT_REF_PROTECTED}" "${REPLACE_DOC_URL_ENV}" "${REPLACE_FILE_PATH}"; fi
+    - /home/emscripten/scripts/npm_build_package.sh "${SOURCE_DIR}" "${NPM_REGISTRY_URL}" "${NPM_PACKAGE_SCOPE}" "${NPM_PACKAGE_NAME}" "${DIST_DIR}" "${CI_COMMIT_REF_PROTECTED}" "${CI_COMMIT_TAG}"
+
+  artifacts:
+    reports:
+      dotenv:
+        - "gen_doc.env"  # contains URL to generated documentation pointed by `GEN_DOC_URL` variable
+        - "${SOURCE_DIR}/built_package_info.env"  # contains path to produced tgz
+        - "${SOURCE_DIR}/built_package_version_info.env"  # contains information related to generated package version and git revision
+
+    paths:
+      - "${REPLACE_FILE_PATH}"
+      - "${DIST_DIR}/*.tgz"  # Built package
+      - "${DIST_DIR}/built_package_info.json"
+
+    when: always
+    expire_in: 1 week
+
+.npm_process_built_package_tarball:
+  extends: .npm_based_job_base
+  variables:
+    # Path pointing the source directory containing a package.json file - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    # Path to the built package tarball - it should be overrided by derived job
+    PACKAGE_TGZ_PATH: ""
+
+  before_script:
+    - !reference [.npm_based_job_base, before_script]
+    - echo -e "\e[0Ksection_start:$(date +%s):package_tgz_unpack[collapsed=true]\r\e[0KAttempting to unpack ${PACKAGE_TGZ_PATH}"
+    - cd "${CI_PROJECT_DIR}"
+    - tar -xf "${PACKAGE_TGZ_PATH}" -C "${SOURCE_DIR}" --strip-components=1
+    - echo -e "\e[0Ksection_end:$(date +%s):package_tgz_unpack\r\e[0K"
+
+.npm_test_template:
+  extends: .npm_process_built_package_tarball
+  variables:
+    # Path pointing the source directory containing a package.json file - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    # Path to the built package tarball - it should be overrided by derived job
+    PACKAGE_TGZ_PATH: ""
+
+  script:
+    - echo -e "\e[0Ksection_start:$(date +%s):testing[collapsed=false]\r\e[0KAttempting to start tests..."
+    - cd "${SOURCE_DIR}"
+    - npm run test
+    - echo -e "\e[0Ksection_end:$(date +%s):testing\r\e[0K"
+
+  artifacts:
+    reports:
+      junit: "${SOURCE_DIR}/results.xml"
+
+    paths:
+      - "${SOURCE_DIR}/results.json"
+
+    when: always
+    expire_in: 1 week
+
+
+# Base definition for NPM package publishing job (to internal GitLab registry).
+# The derived job, should have in its dependencies a final job performing a npm-build (derived from `.npm_build_template`)
+#
+# Skip variables (set to "true" to skip this job):
+#   - QUICK_TEST: Skip during quick test pipelines
+#   - SKIP_DEV_DEPLOY: Skip dev package deployments specifically
+#   - SKIP_NPM_PUBLISH: Skip all npm publishing jobs
+.npm_deploy_package_template:
+  extends: .npm_process_built_package_tarball
+  variables:
+    # The directory containing sources to be built - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    # Path to the built package tarball - it should be overrided by derived job
+    PACKAGE_TGZ_PATH: ""
+    # Target package scope - it should be overrided by derived job
+    NPM_PACKAGE_SCOPE: ""
+    NPM_REGISTRY_URL: "gitlab.syncad.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/"
+    NPM_PUBLISH_TOKEN: "${CI_JOB_TOKEN}"
+
+  script:
+    - echo -e "\e[0Ksection_start:$(date +%s):publishing[collapsed=false]\r\e[0KAttempting to publish a package..."
+    - /home/emscripten/scripts/npm_publish.sh "${SOURCE_DIR}" "${NPM_REGISTRY_URL}" "${NPM_PACKAGE_SCOPE}" "${NPM_PUBLISH_TOKEN}"
+    - echo -e "\e[0Ksection_end:$(date +%s):publishing\r\e[0KDone"
+
+  rules:
+    - if: $QUICK_TEST == "true"
+      when: never
+    - if: $SKIP_DEV_DEPLOY == "true"
+      when: never
+    - if: $SKIP_NPM_PUBLISH == "true"
+      when: never
+    - when: on_success
+
+# Base definition for NPM package publishing job to the registry.npmjs.org (PUBLIC production registry).
+# The derived job, should have in its dependencies a final job performing a npm-build (derived from `.npm_build_template`)
+#
+# IMPORTANT: This template publishes to the PUBLIC npmjs.org registry!
+# By default, only runs on protected tags with manual trigger.
+#
+# Skip variables (set to "true" to skip this job):
+#   - QUICK_TEST: Skip during quick test pipelines
+#   - SKIP_PRODUCTION_DEPLOY: Skip all production deployments
+#   - SKIP_NPM_PUBLISH: Skip all npm publishing jobs
+.registry_npmjs_org_deploy_package_template:
+  extends: .npm_process_built_package_tarball
+  variables:
+    # The directory containing sources to be built - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    # Target package name - it should be overrided by derived job
+    NPM_PACKAGE_NAME: ""
+    # Path to the built package tarball - it should be overrided by derived job
+    PACKAGE_TGZ_PATH: ""
+    # registry.npmjs.org authentication token - it should be overrided by derived job
+    NPM_PUBLISH_TOKEN: ""
+
+  script:
+    # project version info must be regenerated accoring to correct target registry, package scope and name
+    - /home/emscripten/scripts/npm_generate_version.sh "${SOURCE_DIR}" "registry.npmjs.org/" "@hiveio" "${NPM_PACKAGE_NAME}" "${CI_COMMIT_REF_PROTECTED}" "${CI_COMMIT_TAG}"
+    - echo -e "\e[0Ksection_start:$(date +%s):publishing[collapsed=false]\r\e[0KAttempting to publish a package to registry.npmjs.org..."
+    - /home/emscripten/scripts/npm_publish.sh "${SOURCE_DIR}" "registry.npmjs.org/" "@hiveio" "${NPM_PUBLISH_TOKEN}"
+    - echo -e "\e[0Ksection_end:$(date +%s):publishing\r\e[0KDone"
+
+  rules:
+    - if: $QUICK_TEST == "true"
+      when: never
+    - if: $SKIP_PRODUCTION_DEPLOY == "true"
+      when: never
+    - if: $SKIP_NPM_PUBLISH == "true"
+      when: never
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED == "true"'
+      when: manual
+      allow_failure: true
+
+# Allows to store generated documentation files inside a wiki repo specific to given project. Wiki repo must be explicitly created before using this job.
+# Documentation files coming to protected branches are committed into root directory in the wiki repo. All other changes are pushed into non-stable/<branch-name> subdirectory what allows to render them by wiki.
+.npm_push_doc_template:
+  extends: .npm_based_job_base
+  variables:
+    # Must be overrided by derived job
+    WIKI_PUSH_TOKEN: ""
+    DOC_URL: "${GEN_DOC_URL}"
+
+    # The directory containing sources to be built - it can be overrided by derived job
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+    PROJECT_URL: "${CI_PROJECT_URL}"
+    # Output directory where should be stored `docs' subdirectory containing generated documentation files
+    DIST_DIR: "$CI_PROJECT_DIR/dist"
+
+  script:
+    - cd "${CI_PROJECT_DIR}"
+    - /home/emscripten/scripts/npm_push_doc.sh "${SOURCE_DIR}" "${PROJECT_URL}" "${WIKI_PUSH_TOKEN}" "${DIST_DIR}" "${CI_COMMIT_REF_NAME}" "${CI_COMMIT_REF_PROTECTED}" "${DOC_URL}"
+
+.webapp_deploy_template:
+  extends: .job-defaults
+  variables:
+    GIT_SUBMODULE_STRATEGY: none
+    GIT_DEPTH: 1
+
+  before_script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):login[collapsed=true]\r\e[0KLogging to Docker registry..."
+      docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+      echo -e "\e[0Ksection_end:$(date +%s):login\r\e[0K"
+  script:
+    - |
+      # credits of solution for gitlab bug: https://gitlab.com/gitlab-org/gitlab/-/issues/294292#note_1070210709
+      export DEPLOYMENT_ENV_FILE=${!DEPLOYMENT_ENV_FILE}
+      # Make visible all vars in the bash env
+      source "${DEPLOYMENT_ENV_FILE}"
+
+      scripts/run_instance.sh \
+        --image="$IMAGE_NAME" \
+        --name="$CONTAINER_NAME" \
+        --port=$PORT \
+        --env-file="${DEPLOYMENT_ENV_FILE}" \
+        --detach
+  tags:
+    - hs-denser # Runner dedicated to automatic deployments of web-apps
+
+# Stop jobs template
+.webapp_stop_template:
+  extends: .job-defaults
+  variables:
+    CONTAINER_NAME: ""
+    GIT_SUBMODULE_STRATEGY: none
+    GIT_DEPTH: 1
+
+  script:
+    - docker ps -q --filter "name=$CONTAINER_NAME" | grep -q . && docker stop $CONTAINER_NAME
+    - docker container rm --force "$CONTAINER_NAME"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+      allow_failure: true
+  tags:
+    - hs-denser # Runner dedicated to automatic deployments of web-apps

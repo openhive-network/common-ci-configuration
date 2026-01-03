@@ -1,0 +1,985 @@
+# HAF Application Testing Templates
+#
+# Provides reusable CI patterns for HAF-dependent applications.
+# These templates standardize common patterns found across HAfAH,
+# reputation_tracker, balance_tracker, and hivemind.
+#
+# Usage in your .gitlab-ci.yml:
+#   include:
+#     - project: 'hive/common-ci-configuration'
+#       ref: develop
+#       file: '/templates/haf_app_testing.gitlab-ci.yml'
+#
+#   detect_changes:
+#     extends: .haf_app_detect_changes
+#     variables:
+#       HAF_APP_CACHE_TYPE: "haf_myapp_sync"
+#
+#   my_test_job:
+#     extends: .haf_app_dind_test_base
+#     script:
+#       - pytest tests/
+
+variables:
+  # Docker image versions - use specific commit with util-linux for NFS flock support
+  # Override these if you need a different version
+  DOCKER_BUILDER_TAG: "3dd346380da7f28cdaf3ef3955559c905d94bd1c"
+  DOCKER_DIND_TAG: "3dd346380da7f28cdaf3ef3955559c905d94bd1c"
+
+  # Cache manager configuration
+  CACHE_MANAGER: "/tmp/cache-manager.sh"
+  CACHE_MANAGER_REF: "develop"
+
+  # NFS and local cache paths (standard across all builders)
+  DATA_CACHE_NFS_PREFIX: "/nfs/ci-cache"
+  DATA_CACHE_HAF_PREFIX: "/cache/replay_data_haf"
+  DATA_CACHE_LOCAL_PREFIX: "/cache"
+
+  # Common skip patterns for change detection
+  # Files matching these patterns don't require full HAF sync
+  HAF_APP_SKIP_PATTERNS: '^tests/|^docs/|\.md$|^README|^CHANGELOG|^LICENSE|^CLAUDE|^\.gitlab-ci'
+
+  # Default timeouts (can be overridden per job)
+  HAF_SYNC_TIMEOUT: "7200"    # 2 hours for sync jobs
+  HAF_TEST_TIMEOUT: "1800"    # 30 minutes for test jobs
+  HAF_EXTRACT_TIMEOUT: "300"  # 5 minutes for cache extraction
+
+include:
+  - local: templates/base.gitlab-ci.yml
+  - local: templates/docker_image_jobs.gitlab-ci.yml
+
+# =============================================================================
+# FETCH STRATEGY SUPPORT
+# =============================================================================
+# Templates for using GIT_STRATEGY=fetch instead of clone.
+# Fetch strategy reduces GitLab server load by reusing workspace between jobs,
+# but requires manual submodule handling and corruption cleanup.
+#
+# Usage:
+#   # In your .gitlab-ci.yml variables section, add fetch strategy defaults:
+#   variables:
+#     GIT_STRATEGY: fetch
+#     GIT_DEPTH: 0
+#     GIT_SUBMODULE_STRATEGY: none
+#     # ... other fetch settings from .haf_fetch_strategy_variables
+#
+#   # Add corruption cleanup hook at default level:
+#   default:
+#     hooks: !reference [.haf_git_corruption_cleanup, hooks]
+#
+#   # In jobs that need submodules, prepend initialization:
+#   my_job:
+#     before_script:
+#       - !reference [.haf_submodule_init, script]
+#       - # ... rest of your before_script
+
+# Variables for fetch strategy (copy these to your variables section)
+# These are provided as documentation - GitLab doesn't support extending variables
+.haf_fetch_strategy_variables:
+  variables:
+    # Fetch strategy reuses workspace between jobs, reducing GitLab server load.
+    # Full clone (depth 0) enables efficient incremental fetches.
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: 0
+    # Disable automatic submodule fetching - we handle it manually
+    # This is needed because HAF contains nested hive submodule with relative URLs
+    GIT_SUBMODULE_STRATEGY: none
+    GIT_SUBMODULE_FORCE_HTTPS: "true"
+    # Allow file:// protocol for nested submodules (required for test-tools in hive)
+    GIT_CONFIG_COUNT: 1
+    GIT_CONFIG_KEY_0: "protocol.file.allow"
+    GIT_CONFIG_VALUE_0: "always"
+    # Separate clone path prevents clone-strategy jobs from erasing fetch workspaces
+    GIT_CLONE_PATH: $CI_BUILDS_DIR/fetch/$CI_RUNNER_SHORT_TOKEN/$CI_CONCURRENT_ID/$CI_PROJECT_PATH
+
+# Git corruption cleanup hook for fetch strategy
+# Cleans corrupt git state left by cancelled pipelines (see GitLab #296638, #4600)
+# Usage: default: hooks: !reference [.haf_git_corruption_cleanup, hooks]
+.haf_git_corruption_cleanup:
+  hooks:
+    pre_get_sources_script:
+      - |
+        (
+        cd "${CI_PROJECT_DIR:-/builds}" 2>/dev/null || exit 0
+        echo "pre_get_sources: checking $(pwd) for corrupt git state"
+        if [ -d ".git" ]; then
+          # Remove stale lock files that block git operations
+          find .git -name "*.lock" -delete 2>/dev/null || true
+
+          # Check if main repo is corrupt - if so, remove .git to force fresh clone
+          if ! git rev-parse HEAD >/dev/null 2>&1; then
+            echo "pre_get_sources: main repository corrupt, forcing fresh clone"
+            rm -rf .git
+          else
+            # Main repo OK - check and clean corrupt submodules
+            if [ -f ".gitmodules" ]; then
+              git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{print $2}' | while read submod; do
+                needs_clean=false
+                [ -z "$submod" ] && continue
+                # Check if submodule working directory exists but is corrupt
+                if [ -d "$submod" ] && [ -f "$submod/.git" ]; then
+                  if ! git -C "$submod" rev-parse HEAD >/dev/null 2>&1; then
+                    needs_clean=true
+                  fi
+                fi
+                # Check if .git/modules exists but is corrupt (even if working dir is gone)
+                if [ -d ".git/modules/$submod" ]; then
+                  if ! git --git-dir=".git/modules/$submod" rev-parse HEAD >/dev/null 2>&1; then
+                    echo "pre_get_sources: $submod corrupt (rev-parse failed)"
+                    needs_clean=true
+                  fi
+                fi
+                if [ "$needs_clean" = true ]; then
+                  echo "pre_get_sources: cleaning corrupt submodule: $submod"
+                  rm -rf "$submod" ".git/modules/$submod"
+                fi
+              done
+            fi
+            echo "pre_get_sources: existing repo OK"
+          fi
+        else
+          echo "pre_get_sources: no .git directory (fresh workspace)"
+        fi
+        )
+
+# HAF submodule initialization for fetch strategy
+# Manually clones and checks out HAF submodule with nested hive submodules
+# Required because GIT_SUBMODULE_STRATEGY: none disables automatic handling
+# Usage: before_script: - !reference [.haf_submodule_init, script]
+.haf_submodule_init:
+  script:
+    - |
+      if command -v git >/dev/null 2>&1; then
+        echo -e "\e[0Ksection_start:$(date +%s):init_submodules[collapsed=true]\r\e[0KInitializing submodules..."
+        git config --global --add safe.directory '*'
+        # Get the commit we need from the haf submodule
+        HAF_URL="https://gitlab.syncad.com/hive/haf.git"
+        HAF_SUBMOD_COMMIT=$(git ls-tree HEAD haf | awk '{print $3}')
+        echo "Need haf submodule at commit $HAF_SUBMOD_COMMIT"
+        # Remove existing haf directory if it exists (can be stale from GIT_STRATEGY=fetch)
+        sudo rm -rf haf 2>/dev/null || rm -rf haf
+        # Clone and checkout specific commit
+        git clone --no-checkout "$HAF_URL" haf
+        cd haf
+        git fetch origin develop
+        git checkout $HAF_SUBMOD_COMMIT
+        # Initialize nested submodules inside haf (hive and its submodules)
+        git submodule update --init --recursive --jobs 4
+        cd ..
+        echo -e "\e[0Ksection_end:$(date +%s):init_submodules\r\e[0K"
+      fi
+
+# Combined fetch strategy defaults (for reference/documentation)
+# Shows all the pieces needed for fetch strategy in one place
+.haf_fetch_strategy_example:
+  variables:
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: 0
+    GIT_SUBMODULE_STRATEGY: none
+    GIT_SUBMODULE_FORCE_HTTPS: "true"
+    GIT_CONFIG_COUNT: 1
+    GIT_CONFIG_KEY_0: "protocol.file.allow"
+    GIT_CONFIG_VALUE_0: "always"
+    GIT_CLONE_PATH: $CI_BUILDS_DIR/fetch/$CI_RUNNER_SHORT_TOKEN/$CI_CONCURRENT_ID/$CI_PROJECT_PATH
+  hooks: !reference [.haf_git_corruption_cleanup, hooks]
+  before_script:
+    - !reference [.haf_submodule_init, script]
+
+# =============================================================================
+# CACHE MANAGER SETUP
+# =============================================================================
+# Standardized cache-manager.sh fetching that all HAF apps should use.
+# This ensures consistent caching behavior across all applications.
+
+.fetch_cache_manager:
+  before_script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):cache_manager_setup[collapsed=true]\r\e[0KSetting up cache-manager..."
+      mkdir -p "$(dirname "$CACHE_MANAGER")"
+      curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+      chmod +x "$CACHE_MANAGER"
+      echo "Cache manager ready: $CACHE_MANAGER (ref: ${CACHE_MANAGER_REF})"
+      echo -e "\e[0Ksection_end:$(date +%s):cache_manager_setup\r\e[0K"
+
+# =============================================================================
+# CHANGE DETECTION TEMPLATE
+# =============================================================================
+# Simplified detect_changes template - analyzes changed files to determine
+# if full HAF sync/build can be skipped. When only tests/docs change, we can
+# use cached HAF data.
+#
+# Required variables to set in derived job:
+#   HAF_APP_SKIP_PATTERNS: Regex patterns for files that don't need sync
+#   HAF_COMMIT: HAF commit (for cache key lookup)
+#
+# Outputs (via dotenv artifact):
+#   AUTO_SKIP_BUILD: "true" if build/sync can be skipped
+#   AUTO_SKIP_SYNC: alias for AUTO_SKIP_BUILD (compatibility)
+#   CACHE_COMMIT: HAF commit to use for cached data
+#   AUTO_CACHE_HAF_COMMIT: alias for CACHE_COMMIT (compatibility)
+#   AUTO_CACHE_COMMIT: alias for CACHE_COMMIT (compatibility)
+#
+# Note: This template handles the common case. For apps with custom cache
+# discovery logic, you can override the script section.
+
+.haf_app_detect_changes:
+  extends: .job-defaults
+  stage: detect
+  image: alpine:latest
+  variables:
+    GIT_SUBMODULE_STRATEGY: none
+  before_script:
+    - apk add --no-cache git
+  script:
+    - |
+      set -e
+
+      # Initialize defaults
+      CAN_SKIP_BUILD=false
+      CACHE_COMMIT=""
+
+      # Handle manual QUICK_TEST mode
+      if [ "$QUICK_TEST" = "true" ]; then
+        echo "=== Manual QUICK_TEST Mode ==="
+        CAN_SKIP_BUILD=true
+        CACHE_COMMIT="${QUICK_TEST_HAF_COMMIT}"
+        if [ -z "$CACHE_COMMIT" ]; then
+          echo "ERROR: QUICK_TEST_HAF_COMMIT must be set when QUICK_TEST=true"
+          echo ""
+          echo "Find available caches:"
+          echo "  ssh hive-builder-10 'ls -lt /nfs/ci-cache/haf/*.tar | head -5'"
+          exit 1
+        fi
+        echo "Using cached data from: $CACHE_COMMIT"
+      else
+        # Automatic detection mode
+        echo "=== Detecting Changed Files ==="
+
+        # Get changed files based on pipeline type
+        if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+          BASE_SHA="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+          echo "MR pipeline: comparing against target branch"
+        elif [ "${CI_PIPELINE_SOURCE:-}" = "push" ]; then
+          BASE_SHA="HEAD~1"
+          echo "Push pipeline: comparing against previous commit"
+        else
+          BASE_SHA=$(git merge-base HEAD origin/develop 2>/dev/null || echo "HEAD~1")
+          echo "Other pipeline: comparing against develop"
+        fi
+
+        echo "Comparing $BASE_SHA to HEAD"
+        CHANGED_FILES=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null || git show --name-only --pretty=format: HEAD | grep -v '^$' || true)
+
+        # Last resort: require full build
+        if [ -z "$CHANGED_FILES" ]; then
+          echo "WARNING: Could not determine changed files - requiring full build"
+          CHANGED_FILES="unknown-changes"
+        fi
+
+        echo "Changed files:"
+        echo "$CHANGED_FILES" | head -50
+
+        NEEDS_BUILD=$(echo "$CHANGED_FILES" | grep -vE "${HAF_APP_SKIP_PATTERNS}" || true)
+
+        if [ -z "$NEEDS_BUILD" ]; then
+          echo ""
+          echo "=== Can skip data prep (only tests/docs changed) ==="
+          CAN_SKIP_BUILD=true
+          # Use current HAF submodule commit as cache key
+          CACHE_COMMIT="${HAF_COMMIT}"
+        else
+          echo ""
+          echo "=== Files requiring full build: ==="
+          echo "$NEEDS_BUILD"
+        fi
+      fi
+
+      # Write dotenv artifact (output multiple names for compatibility across apps)
+      echo "AUTO_SKIP_BUILD=${CAN_SKIP_BUILD}" > detect_changes.env
+      echo "AUTO_SKIP_SYNC=${CAN_SKIP_BUILD}" >> detect_changes.env
+      echo "CACHE_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
+      echo "AUTO_CACHE_HAF_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
+      echo "AUTO_CACHE_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
+
+      echo ""
+      echo "=== Detection Results ==="
+      echo "AUTO_SKIP_BUILD/SYNC: $CAN_SKIP_BUILD"
+      echo "CACHE_COMMIT: $CACHE_COMMIT"
+
+  artifacts:
+    reports:
+      dotenv: detect_changes.env
+    expire_in: 1 day
+  rules:
+    # Never run for tags (always full build for releases)
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: on_success
+
+# =============================================================================
+# HAF COMMIT VALIDATION TEMPLATE
+# =============================================================================
+# Ensures HAF_COMMIT variable matches include ref and submodule commit.
+# This prevents subtle bugs from version mismatches.
+
+.haf_commit_validation:
+  extends: .job-defaults
+  stage: build
+  image: alpine:latest
+  variables:
+    HAF_COMMIT: ""           # Must be set by derived job
+    HAF_INCLUDE_REF: ""      # Should match the 'ref' in your HAF include
+    HAF_SUBMODULE_PATH: "haf"  # Path to HAF submodule
+  before_script:
+    - apk add --no-cache git
+  script:
+    - |
+      set -euo pipefail
+
+      echo "=== HAF Commit Validation ==="
+      echo "HAF_COMMIT variable: ${HAF_COMMIT}"
+      echo "HAF_INCLUDE_REF: ${HAF_INCLUDE_REF:-not set}"
+      echo "HAF_SUBMODULE_PATH: ${HAF_SUBMODULE_PATH}"
+
+      ERRORS=0
+
+      # Check submodule commit matches
+      if [[ -d "${HAF_SUBMODULE_PATH}/.git" ]] || [[ -f "${HAF_SUBMODULE_PATH}/.git" ]]; then
+        SUBMODULE_COMMIT=$(git -C "${HAF_SUBMODULE_PATH}" rev-parse HEAD 2>/dev/null || echo "")
+        echo "Submodule commit: ${SUBMODULE_COMMIT}"
+
+        if [[ -n "$SUBMODULE_COMMIT" && "$SUBMODULE_COMMIT" != "$HAF_COMMIT" ]]; then
+          echo "ERROR: HAF_COMMIT ($HAF_COMMIT) does not match submodule ($SUBMODULE_COMMIT)"
+          ERRORS=$((ERRORS + 1))
+        fi
+      else
+        echo "WARNING: HAF submodule not found at ${HAF_SUBMODULE_PATH}"
+      fi
+
+      # Check include ref matches (if provided)
+      if [[ -n "${HAF_INCLUDE_REF:-}" && "$HAF_INCLUDE_REF" != "$HAF_COMMIT" ]]; then
+        echo "ERROR: HAF_COMMIT ($HAF_COMMIT) does not match include ref ($HAF_INCLUDE_REF)"
+        ERRORS=$((ERRORS + 1))
+      fi
+
+      if [[ $ERRORS -gt 0 ]]; then
+        echo ""
+        echo "VALIDATION FAILED: $ERRORS errors found"
+        echo "Please ensure HAF_COMMIT, include ref, and submodule are all in sync"
+        exit 1
+      fi
+
+      echo ""
+      echo "VALIDATION PASSED"
+  tags:
+    - public-runner-docker
+
+# =============================================================================
+# DOCKER-IN-DOCKER TEST BASE TEMPLATE
+# =============================================================================
+# Base template for running tests with Docker Compose in a DinD environment.
+# Provides proper cache extraction and service orchestration.
+#
+# Required variables:
+#   HAF_APP_CACHE_TYPE: Cache type to extract
+#   HAF_APP_CACHE_KEY: Cache key (usually from detect_changes or sync job)
+#
+# Optional:
+#   COMPOSE_FILE: Path to docker-compose file (default: docker/docker-compose-test.yml)
+#   COMPOSE_PROJECT_NAME: Docker Compose project name
+#   HAF_DATA_DIRECTORY: Where to extract cache data
+
+.haf_app_dind_test_base:
+  extends: .docker_image_builder_job_template
+  stage: test
+  timeout: 30 minutes
+  variables:
+    FF_NETWORK_PER_BUILD: "true"
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: "tcp://docker:2375"
+
+    # Cache configuration
+    HAF_APP_CACHE_TYPE: ""    # Must be set
+    HAF_APP_CACHE_KEY: ""     # Must be set (from detect_changes or sync)
+    HAF_DATA_DIRECTORY: "${CI_PROJECT_DIR}/.haf-data"
+
+    # Docker Compose configuration
+    COMPOSE_FILE: "docker/docker-compose-test.yml"
+    COMPOSE_PROJECT_NAME: "haf-test-${CI_JOB_ID}"
+
+  before_script:
+    - !reference [.docker_image_builder_job_template, before_script]
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):cache_setup[collapsed=true]\r\e[0KSetting up HAF cache..."
+
+      # Fetch cache-manager
+      mkdir -p "$(dirname "$CACHE_MANAGER")"
+      curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+      chmod +x "$CACHE_MANAGER"
+
+      # Extract cache
+      echo "Extracting cache: ${HAF_APP_CACHE_TYPE}/${HAF_APP_CACHE_KEY}"
+      mkdir -p "${HAF_DATA_DIRECTORY}"
+      "$CACHE_MANAGER" get "${HAF_APP_CACHE_TYPE}" "${HAF_APP_CACHE_KEY}" "${HAF_DATA_DIRECTORY}"
+
+      echo -e "\e[0Ksection_end:$(date +%s):cache_setup\r\e[0K"
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):compose_start[collapsed=true]\r\e[0KStarting Docker Compose services..."
+
+      # Start services
+      if [[ -f "${COMPOSE_FILE}" ]]; then
+        docker compose -f "${COMPOSE_FILE}" -p "${COMPOSE_PROJECT_NAME}" up -d --quiet-pull
+
+        # Wait for services to be healthy
+        echo "Waiting for services to be ready..."
+        WAIT_START=$(date +%s)
+        WAIT_TIMEOUT=${HAF_EXTRACT_TIMEOUT:-300}
+
+        while true; do
+          UNHEALTHY=$(docker compose -f "${COMPOSE_FILE}" -p "${COMPOSE_PROJECT_NAME}" ps --format json 2>/dev/null | jq -r 'select(.Health != "healthy" and .Health != "" and .State == "running") | .Name' | wc -l || echo "0")
+
+          if [[ "$UNHEALTHY" == "0" ]]; then
+            echo "All services healthy"
+            break
+          fi
+
+          ELAPSED=$(($(date +%s) - WAIT_START))
+          if [[ $ELAPSED -ge $WAIT_TIMEOUT ]]; then
+            echo "WARNING: Timeout waiting for services (${WAIT_TIMEOUT}s)"
+            docker compose -f "${COMPOSE_FILE}" -p "${COMPOSE_PROJECT_NAME}" ps
+            break
+          fi
+
+          echo "Waiting for $UNHEALTHY services... (${ELAPSED}s)"
+          sleep 5
+        done
+      else
+        echo "No compose file found at ${COMPOSE_FILE}, skipping service startup"
+      fi
+
+      echo -e "\e[0Ksection_end:$(date +%s):compose_start\r\e[0K"
+
+  after_script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):compose_cleanup\r\e[0KCleaning up Docker Compose..."
+
+      if [[ -f "${COMPOSE_FILE:-docker/docker-compose-test.yml}" ]]; then
+        # Capture logs before cleanup
+        docker compose -f "${COMPOSE_FILE:-docker/docker-compose-test.yml}" -p "${COMPOSE_PROJECT_NAME:-haf-test}" logs --no-color > container-logs.txt 2>&1 || true
+
+        # Cleanup
+        docker compose -f "${COMPOSE_FILE:-docker/docker-compose-test.yml}" -p "${COMPOSE_PROJECT_NAME:-haf-test}" down -v --remove-orphans || true
+      fi
+
+      echo -e "\e[0Ksection_end:$(date +%s):compose_cleanup\r\e[0K"
+
+  artifacts:
+    when: always
+    paths:
+      - container-logs.txt
+    expire_in: 1 week
+
+  tags:
+    - data-cache-storage
+    - fast
+
+# =============================================================================
+# TAVERN TEST HELPERS
+# =============================================================================
+# Composable templates for running Tavern API tests.
+# Apps can mix these with their own DinD/cache setup.
+
+# Variables for tavern tests (set these in your job)
+.tavern_test_variables:
+  variables:
+    PYTEST_WORKERS: "4"
+    TAVERN_VERSION: "2.2.0"
+    TAVERN_DIR: "tests/tavern"
+    JUNIT_REPORT: "tests/tavern/report.xml"
+
+# Script to install tavern dependencies in a venv
+# Use with: !reference [.tavern_install_deps, script]
+.tavern_install_deps:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):tavern_deps[collapsed=true]\r\e[0KInstalling Tavern dependencies..."
+      python3 -m venv venv
+      . venv/bin/activate
+      pip install --quiet \
+        "tavern==${TAVERN_VERSION:-2.2.0}" \
+        "pytest-xdist>=3.2.0" \
+        "pyyaml>=6.0" \
+        "requests>=2.28.0" \
+        "deepdiff>=6.0" \
+        "prettytable>=3.0"
+      echo -e "\e[0Ksection_end:$(date +%s):tavern_deps\r\e[0K"
+
+# Script to run tavern tests with pytest
+# Requires: venv activated, TAVERN_DIR set, JUNIT_REPORT set
+# Use with: !reference [.tavern_run_tests, script]
+.tavern_run_tests:
+  script:
+    - |
+      echo "=== Running Tavern API Tests ==="
+      . venv/bin/activate
+      cd "${TAVERN_DIR}"
+      pytest -n "${PYTEST_WORKERS:-4}" --junitxml "${JUNIT_REPORT}" . || exit $?
+
+# Artifacts configuration for tavern tests
+# Use with: artifacts: !reference [.tavern_test_artifacts, artifacts]
+.tavern_test_artifacts:
+  artifacts:
+    when: always
+    paths:
+      - "**/*.out.json"
+      - docker/container-logs.tar.gz
+      - docker/docker-compose-logs.txt
+    reports:
+      junit: "${JUNIT_REPORT}"
+    expire_in: 1 week
+
+# Combined tavern test job template (for simple cases)
+# Extends .docker_image_builder_job_template, provides test execution
+# Apps must provide their own before_script for cache/compose setup
+.haf_app_tavern_tests:
+  extends:
+    - .docker_image_builder_job_template
+    - .tavern_test_variables
+  stage: test
+  timeout: 30 minutes
+  script:
+    - !reference [.tavern_install_deps, script]
+    - !reference [.tavern_run_tests, script]
+  artifacts: !reference [.tavern_test_artifacts, artifacts]
+
+# =============================================================================
+# QUICK TEST MODE HELPERS
+# =============================================================================
+# Templates for handling QUICK_TEST mode (manual cache selection)
+
+.quick_test_variables:
+  variables:
+    # Set these to use quick test mode
+    QUICK_TEST: ""                    # Set to "true" to enable
+    QUICK_TEST_HAF_COMMIT: ""         # Required if QUICK_TEST=true
+    QUICK_TEST_APP_COMMIT: ""         # Optional, defaults to current commit
+
+# Rule to skip jobs when QUICK_TEST is enabled
+.skip_on_quick_test:
+  rules:
+    - if: $QUICK_TEST == "true"
+      when: never
+    - when: on_success
+
+# Rule to skip jobs when AUTO_SKIP_SYNC is true (from detect_changes)
+.skip_on_auto_skip:
+  rules:
+    - if: $AUTO_SKIP_SYNC == "true"
+      when: never
+    - when: on_success
+
+# Combined rule for both skip conditions
+.skip_on_cached_data:
+  rules:
+    - if: $QUICK_TEST == "true"
+      when: never
+    - if: $AUTO_SKIP_SYNC == "true"
+      when: never
+    - when: on_success
+
+# =============================================================================
+# SYNC JOB COMPONENTS
+# =============================================================================
+# Composable building blocks for HAF app sync jobs.
+# Use !reference to compose your sync job from these components.
+#
+# Typical sync job structure:
+#   extends: .docker_image_builder_job_template
+#   before_script:
+#     - !reference [.haf_app_sync_setup, script]
+#     - !reference [.haf_app_fetch_haf_cache, script]
+#   script:
+#     - # Your app-specific sync logic
+#     - !reference [.haf_app_sync_shutdown, script]
+#     - !reference [.haf_app_sync_save_cache, script]
+#   after_script: !reference [.haf_app_sync_cleanup, after_script]
+#   artifacts: !reference [.haf_app_sync_artifacts, artifacts]
+
+# Common sync job variables
+.haf_app_sync_variables:
+  variables:
+    # Directories (using CI_JOB_ID for isolation)
+    DATADIR: "${CI_PROJECT_DIR}/${CI_JOB_ID}/datadir"
+    SHM_DIR: "${CI_PROJECT_DIR}/${CI_JOB_ID}/shm_dir"
+    HAF_DATA_DIRECTORY: "${DATADIR}"
+    HAF_SHM_DIRECTORY: "${SHM_DIR}"
+    # Docker compose options (override per-app)
+    COMPOSE_OPTIONS_STRING: "--env-file ci.env --file docker-compose.yml --ansi never"
+    # Timeout for graceful PostgreSQL shutdown
+    COMPOSE_DOWN_TIMEOUT: "60"
+    # Postgres user in HAF container (UID:GID)
+    POSTGRES_UID: "105"
+    POSTGRES_GID: "109"
+
+# Docker login and git safe.directory setup
+# Use: !reference [.haf_app_sync_setup, script]
+.haf_app_sync_setup:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):login[collapsed=true]\r\e[0KLogging to Docker registry..."
+      docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+      echo -e "\e[0Ksection_end:$(date +%s):login\r\e[0K"
+      echo -e "\e[0Ksection_start:$(date +%s):git[collapsed=true]\r\e[0KConfiguring Git..."
+      git config --global --add safe.directory "$CI_PROJECT_DIR"
+      git config --global --add safe.directory "$CI_PROJECT_DIR/haf"
+      echo -e "\e[0Ksection_end:$(date +%s):git\r\e[0K"
+
+# Fetch HAF replay data from local cache or NFS (simple version)
+# Requires: HAF_COMMIT, DATA_CACHE_HAF_PREFIX variables
+# Use: !reference [.haf_app_fetch_haf_cache, script]
+.haf_app_fetch_haf_cache:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):haf_cache[collapsed=true]\r\e[0KFetching HAF replay data..."
+      LOCAL_HAF_CACHE="${DATA_CACHE_HAF_PREFIX}_${HAF_COMMIT}"
+      if [[ -d "${LOCAL_HAF_CACHE}/datadir" ]]; then
+        echo "Local HAF cache found at ${LOCAL_HAF_CACHE}"
+      else
+        echo "Local HAF cache not found, fetching from NFS..."
+        # Fetch cache-manager if not already present
+        if [[ ! -x "$CACHE_MANAGER" ]]; then
+          curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF:-develop}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+          chmod +x "$CACHE_MANAGER"
+        fi
+        if "$CACHE_MANAGER" get haf "${HAF_COMMIT}" "${LOCAL_HAF_CACHE}"; then
+          echo "Fetched HAF replay data from NFS cache"
+        else
+          echo "ERROR: Failed to fetch HAF replay data from NFS cache"
+          exit 1
+        fi
+      fi
+      echo -e "\e[0Ksection_end:$(date +%s):haf_cache\r\e[0K"
+
+# Advanced cache lookup with QUICK_TEST and AUTO_SKIP_SYNC support
+# Checks for existing app sync cache first (avoiding re-sync), then falls back to HAF cache.
+# When AUTO_SKIP_SYNC is true, also searches for any compatible app cache with matching HAF commit.
+#
+# Requires variables:
+#   HAF_COMMIT: Current HAF submodule commit
+#   APP_SYNC_CACHE_TYPE: App-specific cache type (e.g., "haf_btracker_sync")
+#   DATA_CACHE_HAF_PREFIX: Local cache directory prefix
+#   DATA_CACHE_NFS_PREFIX: NFS cache directory prefix
+#
+# Optional variables (from detect_changes job):
+#   QUICK_TEST: Set to "true" to use QUICK_TEST_HAF_COMMIT
+#   QUICK_TEST_HAF_COMMIT: HAF commit to use in quick test mode
+#   AUTO_SKIP_SYNC: Set to "true" when only tests/docs changed
+#   AUTO_CACHE_HAF_COMMIT: HAF commit from detect_changes
+#
+# Outputs (written to /tmp for use in script section):
+#   /tmp/cache_hit: "true" if app sync cache was found (skip sync)
+#   /tmp/effective_cache_key: The cache key to use for saving
+#   /tmp/effective_haf_commit: The HAF commit being used
+#
+# Use: !reference [.haf_app_smart_cache_lookup, script]
+.haf_app_smart_cache_lookup:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):cache_lookup[collapsed=true]\r\e[0KSmart cache lookup..."
+
+      # Determine effective HAF commit based on mode
+      EFFECTIVE_HAF_COMMIT="${HAF_COMMIT}"
+      if [[ "${QUICK_TEST:-false}" == "true" ]]; then
+        echo "=== QUICK_TEST Mode (manual) ==="
+        if [[ -z "${QUICK_TEST_HAF_COMMIT}" ]]; then
+          echo "ERROR: QUICK_TEST=true but QUICK_TEST_HAF_COMMIT not set"
+          echo ""
+          echo "Find available caches:"
+          echo "  ssh hive-builder-10 'ls -lt /nfs/ci-cache/haf/*.tar | head -5'"
+          exit 1
+        fi
+        EFFECTIVE_HAF_COMMIT="${QUICK_TEST_HAF_COMMIT}"
+        echo "Using cached HAF data from: ${EFFECTIVE_HAF_COMMIT}"
+      elif [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]] && [[ -n "${AUTO_CACHE_HAF_COMMIT}" ]]; then
+        echo "=== AUTO_SKIP_SYNC Mode (only tests/docs changed) ==="
+        EFFECTIVE_HAF_COMMIT="${AUTO_CACHE_HAF_COMMIT}"
+        echo "Using cached HAF data from: ${EFFECTIVE_HAF_COMMIT}"
+      fi
+
+      # Build cache paths
+      EFFECTIVE_CACHE_KEY="${EFFECTIVE_HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}"
+      LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${EFFECTIVE_CACHE_KEY}"
+      LOCAL_HAF_CACHE="${DATA_CACHE_HAF_PREFIX}_${EFFECTIVE_HAF_COMMIT}"
+
+      # Fetch cache-manager
+      if [[ ! -x "$CACHE_MANAGER" ]]; then
+        curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF:-develop}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+        chmod +x "$CACHE_MANAGER"
+      fi
+
+      CACHE_HIT="false"
+
+      # Check for existing app sync cache (local first, then NFS)
+      if [[ -d "${LOCAL_APP_CACHE}/datadir" ]]; then
+        echo "Local app sync cache found at ${LOCAL_APP_CACHE} - skipping sync"
+        CACHE_HIT="true"
+        export DATA_SOURCE="${LOCAL_APP_CACHE}"
+      else
+        echo "Checking NFS for app sync cache: ${APP_SYNC_CACHE_TYPE}/${EFFECTIVE_CACHE_KEY}"
+        if CACHE_HANDLING=haf "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${EFFECTIVE_CACHE_KEY}" "${LOCAL_APP_CACHE}" 2>/dev/null; then
+          echo "Fetched app sync cache from NFS - skipping sync"
+          CACHE_HIT="true"
+          export DATA_SOURCE="${LOCAL_APP_CACHE}"
+        elif [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]]; then
+          # For docs-only changes, search for ANY app cache with matching HAF commit
+          # since app code hasn't changed
+          echo "Exact cache not found, searching for compatible app cache with HAF commit ${EFFECTIVE_HAF_COMMIT}..."
+          NFS_CACHE_DIR="${DATA_CACHE_NFS_PREFIX}/${APP_SYNC_CACHE_TYPE}"
+          FOUND_CACHE=$(ls -t "${NFS_CACHE_DIR}/${EFFECTIVE_HAF_COMMIT}_"*.tar 2>/dev/null | head -1 || true)
+          if [[ -n "$FOUND_CACHE" ]]; then
+            FOUND_KEY=$(basename "$FOUND_CACHE" .tar)
+            echo "Found compatible app cache: ${FOUND_KEY}"
+            LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${FOUND_KEY}"
+            if CACHE_HANDLING=haf "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${FOUND_KEY}" "${LOCAL_APP_CACHE}" 2>/dev/null; then
+              echo "Fetched compatible app sync cache from NFS - skipping sync"
+              CACHE_HIT="true"
+              export DATA_SOURCE="${LOCAL_APP_CACHE}"
+            fi
+          fi
+          if [[ "$CACHE_HIT" != "true" ]]; then
+            echo "No compatible app cache found, will use HAF-only cache and run sync"
+          fi
+        else
+          echo "App sync cache not found, will use HAF-only cache and run sync"
+        fi
+      fi
+
+      # Fall back to HAF-only cache if no app cache found
+      if [[ "$CACHE_HIT" != "true" ]]; then
+        if [[ -d "${LOCAL_HAF_CACHE}/datadir" ]]; then
+          echo "Local HAF cache found at ${LOCAL_HAF_CACHE}"
+        else
+          echo "Local HAF cache not found, checking NFS..."
+          if "$CACHE_MANAGER" get haf "${EFFECTIVE_HAF_COMMIT}" "${LOCAL_HAF_CACHE}"; then
+            echo "Fetched HAF replay data from NFS cache"
+          else
+            echo "ERROR: Failed to fetch HAF replay data from NFS cache"
+            exit 1
+          fi
+        fi
+      fi
+
+      # Export state for script section
+      echo "$CACHE_HIT" > /tmp/cache_hit
+      echo "$EFFECTIVE_CACHE_KEY" > /tmp/effective_cache_key
+      echo "$EFFECTIVE_HAF_COMMIT" > /tmp/effective_haf_commit
+
+      echo "Cache lookup result: CACHE_HIT=$CACHE_HIT, KEY=$EFFECTIVE_CACHE_KEY"
+      echo -e "\e[0Ksection_end:$(date +%s):cache_lookup\r\e[0K"
+
+# Conditional save cache - only saves if CACHE_HIT is false
+# Use this instead of .haf_app_sync_save_cache when using smart cache lookup
+# Requires: APP_SYNC_CACHE_TYPE, DATADIR, SHM_DIR, /tmp/cache_hit, /tmp/effective_cache_key
+# Use: !reference [.haf_app_sync_save_cache_conditional, script]
+.haf_app_sync_save_cache_conditional:
+  script:
+    - |
+      CACHE_HIT=$(cat /tmp/cache_hit 2>/dev/null || echo "false")
+      EFFECTIVE_CACHE_KEY=$(cat /tmp/effective_cache_key 2>/dev/null || echo "${APP_CACHE_KEY}")
+
+      if [[ "$CACHE_HIT" == "true" ]]; then
+        echo "Cache hit - skipping cache save (data already in cache)"
+      else
+        echo -e "\e[0Ksection_start:$(date +%s):save_cache[collapsed=true]\r\e[0KSaving sync data to cache..."
+
+        # Prepare data for caching
+        sudo cp -a "${SHM_DIR}" "${DATADIR}/shm_dir"
+
+        # Save to local cache
+        LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${EFFECTIVE_CACHE_KEY}"
+        mkdir -p "${LOCAL_APP_CACHE}"
+        sudo cp -a "${DATADIR}" "${LOCAL_APP_CACHE}"
+
+        # Remove empty blockchain dir to trigger symlink on test runners
+        if [[ -d "${LOCAL_APP_CACHE}/datadir/blockchain" ]] && [[ -z "$(ls -A "${LOCAL_APP_CACHE}/datadir/blockchain" 2>/dev/null)" ]]; then
+          echo "Removing empty blockchain directory from local cache"
+          rmdir "${LOCAL_APP_CACHE}/datadir/blockchain" 2>/dev/null || true
+        fi
+
+        ls -lah "${LOCAL_APP_CACHE}"
+        ls -lah "${LOCAL_APP_CACHE}/datadir" || true
+
+        # Push to NFS cache
+        if [[ ! -x "$CACHE_MANAGER" ]]; then
+          curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF:-develop}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+          chmod +x "$CACHE_MANAGER"
+        fi
+
+        echo "Pushing sync data to NFS: ${APP_SYNC_CACHE_TYPE}/${EFFECTIVE_CACHE_KEY}"
+        if CACHE_HANDLING=haf "$CACHE_MANAGER" put "${APP_SYNC_CACHE_TYPE}" "${EFFECTIVE_CACHE_KEY}" "${LOCAL_APP_CACHE}"; then
+          echo "Successfully pushed cache to NFS"
+        else
+          echo "WARNING: Failed to push to NFS cache"
+        fi
+        echo -e "\e[0Ksection_end:$(date +%s):save_cache\r\e[0K"
+      fi
+
+# Copy datadir from HAF cache and fix ownership/permissions
+# Requires: HAF submodule with scripts/copy_datadir.sh, DATADIR, POSTGRES_UID/GID
+# Use: !reference [.haf_app_copy_datadir, script]
+.haf_app_copy_datadir:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):copy_datadir[collapsed=true]\r\e[0KCopying HAF datadir..."
+      "${CI_PROJECT_DIR}/haf/scripts/copy_datadir.sh"
+
+      # Fix pgdata ownership and permissions for HAF container
+      if [[ -d "${DATADIR}/haf_db_store" ]]; then
+        echo "Fixing haf_db_store ownership to UID ${POSTGRES_UID}:${POSTGRES_GID}"
+        sudo chown -R "${POSTGRES_UID}:${POSTGRES_GID}" "${DATADIR}/haf_db_store"
+        sudo chown -R "${POSTGRES_UID}:${POSTGRES_GID}" "${DATADIR}/haf_postgresql_conf.d" 2>/dev/null || true
+        # Fix pgdata permissions - PostgreSQL requires 700 or 750
+        if [[ -d "${DATADIR}/haf_db_store/pgdata" ]]; then
+          echo "Fixing pgdata permissions to 700"
+          sudo chmod 700 "${DATADIR}/haf_db_store/pgdata"
+        fi
+      fi
+      echo -e "\e[0Ksection_end:$(date +%s):copy_datadir\r\e[0K"
+
+# Copy block_log to docker directory
+# Requires: BLOCK_LOG_SOURCE_DIR_5M variable
+# Use: !reference [.haf_app_copy_blockchain, script]
+.haf_app_copy_blockchain:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):blockchain[collapsed=true]\r\e[0KCopying blockchain files..."
+      mkdir -p "${CI_PROJECT_DIR}/docker/blockchain"
+      cp "${BLOCK_LOG_SOURCE_DIR_5M}/block_log" "${CI_PROJECT_DIR}/docker/blockchain/block_log"
+      cp "${BLOCK_LOG_SOURCE_DIR_5M}/block_log.artifacts" "${CI_PROJECT_DIR}/docker/blockchain/block_log.artifacts"
+      chmod a+w docker/blockchain/block_log
+      echo -e "\e[0Ksection_end:$(date +%s):blockchain\r\e[0K"
+
+# Shutdown containers: checkpoint PostgreSQL, collect logs, compose down
+# Requires: COMPOSE_OPTIONS_STRING, COMPOSE_DOWN_TIMEOUT variables
+# Use: !reference [.haf_app_sync_shutdown, script]
+.haf_app_sync_shutdown:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):shutdown[collapsed=true]\r\e[0KStopping containers..."
+      pushd docker
+      IFS=" " read -ra COMPOSE_OPTIONS <<< $COMPOSE_OPTIONS_STRING
+
+      # Force PostgreSQL checkpoint before shutdown to ensure all data is written to disk
+      echo "Forcing PostgreSQL checkpoint..."
+      docker compose "${COMPOSE_OPTIONS[@]}" exec -T haf psql -U haf_admin -d haf_block_log -c "CHECKPOINT;" || true
+
+      # Collect logs before stopping
+      docker compose "${COMPOSE_OPTIONS[@]}" logs haf > haf.log || true
+      docker compose "${COMPOSE_OPTIONS[@]}" logs backend-setup > backend-setup.log || true
+      docker compose "${COMPOSE_OPTIONS[@]}" logs backend-block-processing > backend-block-processing.log || true
+      docker compose "${COMPOSE_OPTIONS[@]}" logs backend-postgrest > backend-postgrest.log || true
+
+      # Use longer timeout for graceful PostgreSQL shutdown
+      docker compose "${COMPOSE_OPTIONS[@]}" down --volumes --timeout "${COMPOSE_DOWN_TIMEOUT:-60}"
+      popd
+
+      # Archive logs
+      tar -czvf docker/container-logs.tar.gz $(pwd)/docker/*.log
+      echo -e "\e[0Ksection_end:$(date +%s):shutdown\r\e[0K"
+
+# Save sync data to local cache and push to NFS
+# Requires: APP_SYNC_CACHE_TYPE, APP_CACHE_KEY, DATADIR, SHM_DIR
+# Use: !reference [.haf_app_sync_save_cache, script]
+.haf_app_sync_save_cache:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):save_cache[collapsed=true]\r\e[0KSaving sync data to cache..."
+
+      # Prepare data for caching
+      sudo cp -a "${SHM_DIR}" "${DATADIR}/shm_dir"
+      mkdir -p "${DATADIR}/blockchain"
+      sudo cp -a "${CI_PROJECT_DIR}/docker/blockchain/block_log" "${DATADIR}/blockchain/block_log"
+      sudo cp -a "${CI_PROJECT_DIR}/docker/blockchain/block_log.artifacts" "${DATADIR}/blockchain/block_log.artifacts"
+
+      # Save to local cache
+      LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${APP_CACHE_KEY}"
+      mkdir -p "${LOCAL_APP_CACHE}"
+      sudo cp -a "${DATADIR}" "${LOCAL_APP_CACHE}"
+
+      ls -lah "${LOCAL_APP_CACHE}"
+      ls -lah "${LOCAL_APP_CACHE}/datadir" || true
+
+      # Push to NFS cache
+      if [[ ! -x "$CACHE_MANAGER" ]]; then
+        curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF:-develop}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+        chmod +x "$CACHE_MANAGER"
+      fi
+
+      echo "Pushing sync data to NFS: ${APP_SYNC_CACHE_TYPE}/${APP_CACHE_KEY}"
+      if CACHE_HANDLING=haf "$CACHE_MANAGER" put "${APP_SYNC_CACHE_TYPE}" "${APP_CACHE_KEY}" "${LOCAL_APP_CACHE}"; then
+        echo "Successfully pushed cache to NFS"
+      else
+        echo "WARNING: Failed to push to NFS cache"
+      fi
+      echo -e "\e[0Ksection_end:$(date +%s):save_cache\r\e[0K"
+
+# Cleanup job directory in after_script
+# Use: after_script: !reference [.haf_app_sync_cleanup, after_script]
+.haf_app_sync_cleanup:
+  after_script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):cleanup[collapsed=true]\r\e[0KCleaning up..."
+      sudo rm -rf ${CI_PROJECT_DIR}/${CI_JOB_ID} 2>/dev/null || true
+      echo -e "\e[0Ksection_end:$(date +%s):cleanup\r\e[0K"
+
+# Standard artifacts for sync jobs
+# Use: artifacts: !reference [.haf_app_sync_artifacts, artifacts]
+.haf_app_sync_artifacts:
+  artifacts:
+    paths:
+      - docker/container-logs.tar.gz
+    expire_in: 1 week
+    when: always
+
+# =============================================================================
+# CLEANUP TEMPLATES
+# =============================================================================
+# Manual cleanup jobs for cache data
+
+.haf_app_cache_cleanup:
+  extends: .job-defaults
+  stage: cleanup
+  image: alpine:latest
+  variables:
+    HAF_APP_CACHE_TYPE: ""    # Must be set
+    CLEANUP_PATTERN: ""       # Optional glob pattern
+  before_script:
+    - apk add --no-cache bash
+  script:
+    - |
+      set -euo pipefail
+
+      echo "=== Cache Cleanup ==="
+      echo "Cache type: ${HAF_APP_CACHE_TYPE}"
+      echo "Local prefix: ${DATA_CACHE_LOCAL_PREFIX}"
+
+      # Build pattern
+      if [[ -n "${CLEANUP_PATTERN}" ]]; then
+        PATTERN="${DATA_CACHE_LOCAL_PREFIX}/${CLEANUP_PATTERN}"
+      else
+        PATTERN="${DATA_CACHE_LOCAL_PREFIX}/${HAF_APP_CACHE_TYPE}_*"
+      fi
+
+      echo "Cleanup pattern: $PATTERN"
+      echo ""
+      echo "Files to remove:"
+      ls -la $PATTERN 2>/dev/null || echo "(none found)"
+
+      echo ""
+      echo "Removing..."
+      rm -rf $PATTERN || true
+      echo "Done"
+  when: manual
+  allow_failure: true
+  tags:
+    - data-cache-storage

@@ -1,0 +1,90 @@
+variables:
+  DOCKER_BUILDER_TAG: "latest"
+  DOCKER_DIND_TAG: "latest"
+  IMAGE_REMOVER_TAG: "latest"
+
+include:
+  - local: templates/base.gitlab-ci.yml
+
+# this version does not call git since it is not present in the pure dind image
+.pure_docker_image_builder_job_template:
+  extends: .job-defaults
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+    FF_NETWORK_PER_BUILD: "true"
+
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:${DOCKER_BUILDER_TAG}
+  before_script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):buildkit_config[collapsed=true]\r\e[0KConfiguring Docker BuildKit..."
+      docker context create builder-context
+      docker buildx create --driver docker-container --name docker-container-builder --use builder-context
+      echo -e "\e[0Ksection_end:$(date +%s):buildkit_config\r\e[0K"
+  services:
+    - name: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-dind:${DOCKER_DIND_TAG}
+      alias: docker
+
+.docker_image_builder_job_template:
+  extends: .pure_docker_image_builder_job_template
+  before_script:
+    - !reference [.pure_docker_image_builder_job_template, before_script]
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):git[collapsed=true]\r\e[0KDisabling Git directory permission check"
+      git config --global --add safe.directory '*'
+      echo -e "\e[0Ksection_end:$(date +%s):git\r\e[0K"
+
+.docker_image_cleanup_job_template:
+  extends: .job-defaults
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/python-scripts:${IMAGE_REMOVER_TAG}
+  variables:
+    REGISTRY: $CI_REGISTRY_IMAGE
+    REGISTRY_PASS: ""
+    IMAGE_PATH: ""
+    IMAGE_TAG: ""
+  script:
+    - echo "Attempting to cleanup an image $IMAGE_PATH using tag $IMAGE_TAG from $REGISTRY"
+    - python /delete-image.py "$REGISTRY_PASS" "$CI_PROJECT_ID" "$IMAGE_PATH" "$IMAGE_TAG"
+  when: always
+
+.buildkit_cleanup_job_template:
+  extends: .job-defaults
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/python-scripts:${IMAGE_REMOVER_TAG}
+  variables:
+    CACHE_REPOSITORIES: ""
+  script:
+    - echo "Attempting to delete old BuildKit cache from the following repositories $CACHE_REPOSITORIES"
+    - python3 /remove-buildkit-cache.py
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH || $CI_COMMIT_TAG
+      when: manual
+      allow_failure: true
+  tags:
+    - public-runner-docker
+
+# Template for publishing Docker images to Docker Hub (PUBLIC production registry).
+#
+# IMPORTANT: This template publishes to the PUBLIC Docker Hub registry!
+# By default, only runs on protected tags.
+#
+# Skip variables (set to "true" to skip this job):
+#   - QUICK_TEST: Skip during quick test pipelines
+#   - SKIP_PRODUCTION_DEPLOY: Skip all production deployments
+#   - SKIP_DOCKER_PUBLISH: Skip all Docker Hub publishing jobs
+.publish_docker_image_template:
+  extends: .docker_image_builder_job_template
+  needs: []
+  variables:
+    DOCKER_HUB_USER: $DOCKER_HUB_USER
+    DOCKER_HUB_PASSWORD: $DOCKER_HUB_PASSWORD
+  rules:
+    - if: $QUICK_TEST == "true"
+      when: never
+    - if: $SKIP_PRODUCTION_DEPLOY == "true"
+      when: never
+    - if: $SKIP_DOCKER_PUBLISH == "true"
+      when: never
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED == "true"'
+      when: on_success
+    - when: never

@@ -1,0 +1,14 @@
+.git/
+misc/
+templates/
+tmp/
+
+.dockerignore
+.gitattributes
+.gitignore
+.gitlab-ci.yml
+.pylintrc
+.yamllint
+Dockerfile.*
+README.md
+tmp/

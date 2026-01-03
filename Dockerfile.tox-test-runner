@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1.4
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/python-3.11.0-alpine3.17
+
+RUN <<-EOF 
+  # Install system dependencies
+  apk add --no-cache bash git curl gcc musl-dev
+
+  # Install Python dependencies
+  pip3 install tox
+EOF
+
+CMD ["/bin/bash"]

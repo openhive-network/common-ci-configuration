@@ -1,0 +1,173 @@
+# syntax=docker/dockerfile:1.5
+
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/emscripten-emsdk-4.0.18 AS pure_emscripten_sdk
+
+FROM pure_emscripten_sdk AS supplemented_emscripten_sdk
+
+ARG PNPM_VERSION=10.0.0
+ENV PNPM_VERSION=${PNPM_VERSION}
+
+USER root
+
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noniteractive apt-get install -y \
+    apt-transport-https ca-certificates \
+    git \
+    jq \
+    ninja-build \
+    autoconf \
+    libtool \
+    protobuf-compiler \
+    zopfli \
+    && \
+    apt-get clean && rm -r /var/lib/apt/lists/*
+
+FROM supplemented_emscripten_sdk AS supplemented_node_sdk
+
+ARG NODEJS_VERSION=v22.21.1
+ENV NODEJS_VERSION=${NODEJS_VERSION}
+
+USER emscripten
+WORKDIR /home/emscripten
+
+ENV LANG=en_US.UTF-8
+SHELL ["/bin/bash", "-c"]
+ENV SHELL=/bin/bash
+ENV HOME=/home/emscripten
+
+# Preinstall large deps (rare changed) to eliminate pulling them from web each time
+ENV PNPM_HOME="/home/emscripten/.local/share/pnpm"
+ENV NVM_DIR="${HOME}/.nvm"
+ENV PATH="${PNPM_HOME}:${NVM_DIR}:${PATH}"
+ENV PLAYWRIGHT_BROWSERS_PATH="${HOME}/pw-browsers"
+
+RUN source "${EMSDK}/emsdk_env.sh" && \
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash && \
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
+    nvm install "${NODEJS_VERSION}" && \
+    nvm use "${NODEJS_VERSION}" && \
+    corepack enable pnpm && \
+    corepack install -g pnpm@${PNPM_VERSION} && \
+    pnpm config set store-dir ${PNPM_HOME}/preinstalled-store --global && \
+    pnpm config set global-dir ${PNPM_HOME}/preinstalled-store-g --global && \
+    pnpm env use --global "${NODEJS_VERSION}" && \
+    pnpm add -g \
+      playwright@1.56.1 \
+      @playwright/test@1.56.1 \
+      ts-proto@1.172.0 \
+      tslib@~2.8.1 \
+      typescript@~5.9.3 \
+      rollup@4.24.0 \
+      rollup/plugin-node-resolve@15.3.1 \
+      rollup/plugin-commonjs@27.0.0 \
+      rollup-plugin-typescript2@~0.36.0 \
+      @rollup/plugin-replace@6.0.2 \
+      types/node@~24.9.2 \
+      typedoc@~0.27.6 \
+      typedoc-plugin-markdown@~4.4.1 \
+      protobufjs@~7.2.5 && \
+    pnpm dlx playwright install chromium && \
+    git config --global advice.detachedHead false && \
+    git config --global --add safe.directory '*' && \
+    chmod -c o+x "${HOME}" && \
+    chmod -Rc o+r "${HOME}" && \
+    chmod -c o+r "${HOME}/.bashrc"
+
+USER root
+WORKDIR /home/emscripten
+ENV PNPM_HOME="/home/emscripten/.local/share/pnpm"
+ENV PLAYWRIGHT_BROWSERS_PATH="${HOME}/pw-browsers"
+ENV PATH="${PNPM_HOME}:${PATH}"
+
+RUN [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
+  nvm use "${NODEJS_VERSION}" && \
+  pnpm dlx playwright install-deps && apt-get clean && rm -r /var/lib/apt/lists/*
+
+USER emscripten
+WORKDIR /home/emscripten
+
+FROM supplemented_emscripten_sdk AS lib_source
+
+ARG BOOST_VERSION_TAG=boost-1.82.0
+ENV BOOST_VERSION_TAG=${BOOST_VERSION_TAG}
+
+ARG OPENSSL_VERSION_TAG=openssl-3.1.1
+ENV OPENSSL_VERSION_TAG=${OPENSSL_VERSION_TAG}
+
+USER emscripten
+WORKDIR /home/emscripten
+
+RUN <<-EOF
+  set -e
+
+  mkdir -vp tmp_src
+  cd tmp_src
+
+  git clone https://github.com/boostorg/boost.git
+
+  cd boost
+  git checkout tags/${BOOST_VERSION_TAG}
+  git submodule update --init --recursive
+
+  cd ..
+  git clone https://github.com/openssl/openssl.git
+
+  cd openssl
+  git checkout tags/${OPENSSL_VERSION_TAG}
+  git submodule update --init --recursive
+  
+  cd ..
+  git clone https://github.com/ElementsProject/secp256k1-zkp.git
+EOF
+
+FROM lib_source as emscripten_lib_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+ENV TMP_SRC=/home/emscripten/tmp_src
+
+ADD --chown=emscripten ./scripts/bash/emscripten /home/emscripten/scripts
+RUN mkdir -vp "${TMP_SRC}"
+
+FROM emscripten_lib_builder AS emscripten_boost_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+RUN /home/emscripten/scripts/prepare_boost.sh "${TMP_SRC}" "/emsdk/upstream/emscripten/cache/sysroot/"
+
+FROM emscripten_lib_builder AS emscripten_openssl_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+RUN /home/emscripten/scripts/prepare_openssl.sh "${TMP_SRC}" "/emsdk/upstream/emscripten/cache/sysroot/"
+
+FROM emscripten_lib_builder AS emscripten_secp256k1_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+RUN /home/emscripten/scripts/prepare_secp256k1-zkp.sh "${TMP_SRC}" "/emsdk/upstream/emscripten/cache/sysroot/"
+
+FROM supplemented_node_sdk AS emscripten_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+COPY --chown=emscripten --from=emscripten_secp256k1_builder /emsdk/upstream/emscripten/cache/sysroot/ /emsdk/upstream/emscripten/cache/sysroot/
+COPY --chown=emscripten --from=emscripten_boost_builder /emsdk/upstream/emscripten/cache/sysroot/ /emsdk/upstream/emscripten/cache/sysroot/
+COPY --chown=emscripten --from=emscripten_openssl_builder /emsdk/upstream/emscripten/cache/sysroot/ /emsdk/upstream/emscripten/cache/sysroot/
+
+COPY --chown=emscripten --from=emscripten_openssl_builder /emsdk/upstream/emscripten/cache/sysroot/libx32/ /emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/
+COPY --chown=emscripten --from=emscripten_openssl_builder /emsdk/upstream/emscripten/cache/sysroot/libx32/pkgconfig/* /emsdk/upstream/emscripten/cache/sysroot/lib/pkgconfig/
+
+FROM emscripten_builder AS supplemented_emscripten_builder
+
+USER emscripten
+WORKDIR /home/emscripten
+
+ADD --chown=emscripten ./scripts/bash/npm-helpers /home/emscripten/scripts/
+
+RUN /home/emscripten/scripts/npm_download_browser_extensions.sh /home/emscripten/preinstalled_browser_extensions

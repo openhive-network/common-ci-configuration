@@ -1,0 +1,15 @@
+# To workaround a gitlab healthcheck bug, expose just single port.
+# See https://gitlab.com/gitlab-org/gitlab-runner/-/issues/29130#note_1028331564 and
+# https://gitlab.com/search?search=Service+docker+dind+probably+didn%27t+start+properly&nav_source=navbar&project_id=250833&group_id=9970&scope=issues&sort=updated_desc
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-26.1.4-dind
+
+# Add util-linux for proper flock support with NFS
+# BusyBox flock returns "Bad file descriptor" when locking NFS files,
+# which breaks cache-manager.sh in DinD environments
+RUN apk add --no-cache util-linux
+
+VOLUME /var/lib/docker
+EXPOSE 2376/tcp
+
+ENTRYPOINT ["dockerd-entrypoint.sh"]
+CMD []

@@ -1,0 +1,497 @@
+variables:
+  BENCHMARK_IMAGE_TAG: "$CI_COMMIT_SHA"
+  DOCKER_BUILDER_TAG: "$CI_COMMIT_SHA"
+  DOCKER_DIND_TAG: "$CI_COMMIT_SHA"
+  IMAGE_REMOVER_TAG: "$CI_COMMIT_SHA"
+  TOX_IMAGE_TAG: "$CI_COMMIT_SHA"
+  PYTHON_IMAGE_TAG: 3.12.12
+  SHELLCHECK_ALPINE_TAG: v0.11.0
+
+  # Git configuration
+  # Fetch strategy reuses workspace between jobs, reducing GitLab server load.
+  # Full clone (depth 0) enables efficient incremental fetches - shallow clones
+  # don't reduce server CPU and make fetch less effective.
+  GIT_STRATEGY: fetch
+  GIT_DEPTH: 0
+  # Temporary: separate clone path prevents clone-strategy jobs from erasing
+  # fetch workspaces during transition. Remove once all projects use fetch.
+  GIT_CLONE_PATH: $CI_BUILDS_DIR/fetch/$CI_RUNNER_SHORT_TOKEN/$CI_CONCURRENT_ID/$CI_PROJECT_PATH
+
+stages:
+  - validation
+  - pre-build
+  - build
+  - test
+  - cleanup
+  - example-build
+  - example-test
+  - example-cleanup
+
+include:
+  - template: Workflows/Branch-Pipelines.gitlab-ci.yml
+  - local: templates/docker_image_jobs.gitlab-ci.yml
+  - local: templates/test_jobs.gitlab-ci.yml
+
+default:
+  hooks:
+    pre_get_sources_script:
+      # Clean corrupt git state left by cancelled pipelines (see GitLab #296638, #4600)
+      # Wrapped in subshell to avoid changing working directory for subsequent git operations
+      - |
+        (
+        cd "${CI_PROJECT_DIR:-/builds}" 2>/dev/null || exit 0
+        echo "pre_get_sources: checking $(pwd) for corrupt git state"
+        if [ -d ".git" ]; then
+          # Remove stale lock files that block git operations
+          find .git -name "*.lock" -delete 2>/dev/null || true
+
+          # Check if main repo is corrupt - if so, remove .git to force fresh clone
+          if ! git rev-parse HEAD >/dev/null 2>&1; then
+            echo "pre_get_sources: main repository corrupt, forcing fresh clone"
+            rm -rf .git
+          else
+            # Main repo OK - check and clean corrupt submodules
+            # Check both the working dir and .git/modules/ since either can be corrupt
+            if [ -f ".gitmodules" ]; then
+              git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{print $2}' | while read submod; do
+                needs_clean=false
+                [ -z "$submod" ] && continue
+                # Check if submodule working directory exists but is corrupt
+                if [ -d "$submod" ] && [ -f "$submod/.git" ]; then
+                  if ! git -C "$submod" rev-parse HEAD >/dev/null 2>&1; then
+                    needs_clean=true
+                  fi
+                fi
+                # Check if .git/modules exists but is corrupt (even if working dir is gone)
+                if [ -d ".git/modules/$submod" ]; then
+                  if ! git --git-dir=".git/modules/$submod" rev-parse HEAD >/dev/null 2>&1; then
+                    echo "pre_get_sources: $submod corrupt (rev-parse failed)"
+                    needs_clean=true
+                  fi
+                fi
+                if [ "$needs_clean" = true ]; then
+                  echo "pre_get_sources: cleaning corrupt submodule: $submod"
+                  rm -rf "$submod" ".git/modules/$submod"
+                fi
+              done
+            fi
+            echo "pre_get_sources: existing repo OK"
+          fi
+        else
+          echo "pre_get_sources: no .git directory (fresh workspace)"
+        fi
+        )
+
+.validation_job:
+  extends: .job-defaults
+  stage: validation
+  artifacts:
+    name: validation-results
+    when: always
+  tags:
+    - public-runner-docker
+
+lint_bash_scripts:
+  extends: .validation_job
+  image: koalaman/shellcheck-alpine:${SHELLCHECK_ALPINE_TAG}
+  before_script:
+    - apk add xmlstarlet
+  script:
+    - shellcheck -f checkstyle scripts/**/*.sh > shellcheck-checkstyle-result.xml 
+  after_script:
+    - xmlstarlet tr misc/checkstyle2junit.xslt shellcheck-checkstyle-result.xml > shellcheck-junit-result.xml
+  artifacts:
+    paths: 
+     - shellcheck-checkstyle-result.xml
+     - shellcheck-junit-result.xml
+    reports:
+      junit: shellcheck-junit-result.xml
+
+lint_ci_templates:
+  extends: .validation_job
+  image: python:${PYTHON_IMAGE_TAG}
+  before_script:
+    - pip install yamllint-junit
+  script:
+    - yamllint --format parsable templates/ > yamllint-parsable-result.txt
+  after_script:
+    - yamllint-junit -o yamllint-junit-result.xml yamllint-parsable-result.txt
+  artifacts:
+    paths: 
+     - yamllint-parsable-result.txt
+     - yamllint-junit-result.xml
+    reports:
+      junit: yamllint-junit-result.xml
+
+lint_python_scripts:
+  extends: .validation_job
+  image: python:${PYTHON_IMAGE_TAG}
+  before_script:
+    - pip install pylint==2.17.7 pylint_junit==0.3.2
+  script:
+    - pip install -r scripts/python/requirements.txt
+    - pylint --output-format=text,pylint_junit.JUnitReporter:pylint-junit-result.xml scripts/python/*.py
+  artifacts:
+    paths: 
+     - pylint-junit-result.xml
+    reports:
+      junit: pylint-junit-result.xml
+
+.build_docker_image:
+  extends: .pure_docker_image_builder_job_template
+  image: docker:26.1.4-cli
+  variables:
+    BUILD_TARGET: ""
+  before_script:
+    - !reference [.pure_docker_image_builder_job_template, before_script]
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):login[collapsed=true]\r\e[0KLogging to Docker registry..."
+      docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+      echo -e "\e[0Ksection_end:$(date +%s):login\r\e[0K"
+  script: 
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):tag[collapsed=true]\r\e[0KDetermining tag for the new image..."
+      if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]]; then
+        echo "Running on default branch '$CI_DEFAULT_BRANCH': tag = 'latest'"
+        export tag="latest"
+      else
+        echo "Running on branch '$CI_COMMIT_BRANCH': tag = $CI_COMMIT_REF_SLUG"
+        export tag="$CI_COMMIT_REF_SLUG" 
+      fi
+      echo -e "\e[0Ksection_end:$(date +%s):tag\r\e[0K"
+      echo -e "\e[0Ksection_start:$(date +%s):build[collapsed=true]\r\e[0KBaking image "$CI_REGISTRY_IMAGE/$BUILD_TARGET:${tag}"..."
+      docker buildx bake --progress=plain --provenance=false --push "$BUILD_TARGET"
+      echo -e "\e[0Ksection_end:$(date +%s):build\r\e[0K"
+  tags:
+    - public-runner-docker
+
+.effective_build_docker_image:
+  extends: .build_docker_image
+  variables:
+    DOCKERFILE_PATH: ""
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
+      exists:
+        - ${DOCKERFILE_PATH}
+      changes:
+        paths:
+          - ${DOCKERFILE_PATH}
+    - if: $CI_COMMIT_BRANCH !~ /^main$/ # for other branches compare to develop and run if there are differences
+      exists:
+        - ${DOCKERFILE_PATH}
+      changes:
+        paths:
+          - ${DOCKERFILE_PATH}
+        compare_to: 'refs/heads/develop'
+
+build_docker_dind_image:
+  extends: .build_docker_image
+  stage: pre-build
+  variables:
+    BUILD_TARGET: "docker-dind"
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.docker-dind
+  services:
+    - docker:26.1.4-dind
+
+build_docker_builder_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "docker-builder"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.docker-builder
+
+build_image_remover_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python-scripts"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.python-scripts
+
+build_benchmark_test_runner_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "benchmark-test-runner"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.benchmark-test-runner
+
+build_haf_app_test_runner_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "haf-app-test-runner"
+  needs:
+    - build_docker_dind_image
+    - job: build_ci_base_image
+      optional: true
+    - job: build_benchmark_test_runner_image
+      optional: true
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.haf-app-test-runner
+
+build_tox_test_runner_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "tox-test-runner"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.tox-test-runner
+
+build_nginx_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "nginx"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.nginx
+
+build_postgrest_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "postgrest"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.postgrest
+
+build_alpine_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "alpine"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.alpine
+
+build_python_image:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python"
+    DOCKERFILE_PATH: "Dockerfile.python"
+  needs:
+    - build_docker_dind_image
+
+build_python_dev_image:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python_development"
+    DOCKERFILE_PATH: "Dockerfile.python_runtime"
+  needs:
+    - build_docker_dind_image
+
+build_python_runtime_image:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python_runtime"
+    DOCKERFILE_PATH: "Dockerfile.python_runtime"
+  needs:
+    - build_docker_dind_image
+
+build_ci_base_image:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "ci-base-image"
+    DOCKERFILE_PATH: "Dockerfile.ci-base-image"
+  needs:
+    - build_docker_dind_image
+
+build_dockerfile_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "dockerfile"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile.dockerfile
+
+build_emsdk_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "emsdk"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
+      exists:
+        - Dockerfile.emscripten
+      changes:
+        paths:
+          - Dockerfile.emscripten
+          - scripts/bash/npm-helpers/*
+          - scripts/bash/emscripten/*
+          - scripts/bash/emscripten/**/*
+    - if: $CI_COMMIT_BRANCH !~ /^main$/ # for other branches compare to develop and run if there are differences
+      exists:
+        - Dockerfile.emscripten
+      changes:
+        paths:
+          - Dockerfile.emscripten
+          - scripts/bash/npm-helpers/*
+          - scripts/bash/emscripten/*
+          - scripts/bash/emscripten/**/*
+        compare_to: 'refs/heads/develop'
+
+build_psql_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "psql"
+  needs:
+    - build_docker_dind_image
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
+      exists:
+        - Dockerfile.psql
+      changes:
+        paths:
+          - Dockerfile.psql
+    - if: $CI_COMMIT_BRANCH !~ /^main$/ # for other branches compare to develop and run if there are diffrences
+      exists:
+        - Dockerfile.psql
+      changes:
+        paths:
+          - Dockerfile.psql
+        compare_to: 'refs/heads/develop'
+
+psql_image_test:
+  stage: test
+  image: 
+    name: registry.gitlab.syncad.com/hive/common-ci-configuration/psql:14-1
+    entrypoint: [""]
+  services:
+    - postgres:14
+  variables:
+    POSTGRES_DB: haf
+    POSTGRES_USER: haf_admin
+    POSTGRES_PASSWORD: password
+    POSTGRES_HOST_AUTH_METHOD: trust
+    PGHOST: postgres
+    PGPORT: 5432
+    PGDATABASE: $POSTGRES_DB
+    PGUSER: $POSTGRES_USER
+    PGPASSWORD: $POSTGRES_PASSWORD
+    CI_DEBUG_SERVICES: "false"
+  script:
+    - |
+      set -e
+
+      psql --command="\conninfo"
+      psql --list
+      psql --command="\set"
+  tags:
+    - public-runner-docker    
+
+buildkit_cache_cleanup:
+  stage: cleanup
+  extends: .buildkit_cleanup_job_template
+  # Don't use needs: [] - let it wait for build stage to complete
+  # Otherwise it runs concurrently with builds and overloads the registry
+  variables:
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache"
+
+example_docker_image_builder_job:
+  extends: .pure_docker_image_builder_job_template
+  stage: example-build
+  before_script:
+    - !reference [.build_docker_image, before_script]
+  script:
+    - |
+      docker buildx build --progress=plain --push \
+        --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/alpine-example:latest-cache \
+        --cache-to type=registry,mode=max,ref=$CI_REGISTRY_IMAGE/alpine-example:latest-cache \
+        --tag $CI_REGISTRY_IMAGE/alpine-example:latest \
+        https://github.com/alpinelinux/docker-alpine.git
+  needs:
+    - build_docker_dind_image
+  when: manual
+  tags:
+    - public-runner-docker
+
+example_jmeter_benchmark_job:
+  extends: .jmeter_benchmark_job
+  stage: example-test
+  script:
+    - |
+      jmeter -n -t misc/example-jmeter-test.jmx -l jmeter_report.jtl -e -o web_jmeter_report
+      m2u --input jmeter_report.xml --output jmeter_junit_report.xml
+  artifacts:
+    paths:
+      - web_jmeter_report/**/*
+      - jmeter.log
+      - jmeter_report.jtl
+      - jmeter_report.xml
+    reports:
+      junit: jmeter_junit_report.xml
+  when: manual
+  tags:
+    - public-runner-docker
+
+example_tox_test_job:
+  extends: .tox_test_job
+  stage: example-test
+  script:
+    - |
+      git clone https://github.com/pypa/sampleproject.git
+      cd sampleproject
+      sed -i s/py\{37,38,39,310\}/py311/ tox.ini
+      tox --result-json tox-result.json
+  artifacts:
+    paths:
+      - sampleproject/tox-result.json
+  when: manual
+  tags:
+    - public-runner-docker
+
+example_image_cleanup_job:
+  extends: .docker_image_cleanup_job_template
+  stage: example-cleanup
+  variables:
+    REGISTRY_PASS: "$REGISTRY_PASS"
+    IMAGE_PATH: $CI_REGISTRY_IMAGE/alpine-example
+    IMAGE_TAG: latest
+  needs:
+    - example_docker_image_builder_job
+  when: manual
+  tags:
+    - public-runner-docker

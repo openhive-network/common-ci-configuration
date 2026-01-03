@@ -1,0 +1,198 @@
+variables:
+  BENCHMARK_IMAGE_TAG: "latest"
+  TOX_IMAGE_TAG: "latest"
+  APP_PORT: 0
+
+include:
+  - local: templates/base.gitlab-ci.yml
+
+.pytest_based_template:
+  extends: .job-defaults
+  variables:
+    FF_NETWORK_PER_BUILD: 1
+    JUNIT_REPORT: "report.xml"  # should be ovverided by derived jobs
+    PYTEST_BASED_IMAGE_NAME: ""  # "$CI_REGISTRY_IMAGE/ci-base-image$TEST_IMAGE_TAG"
+    POETRY_INSTALL_ROOT_DIR: ""  # $CI_PROJECT_DIR/tests/hive-local-tools
+  image: "${PYTEST_BASED_IMAGE_NAME}"
+
+  before_script:
+    - python3 -m venv venv/
+    - . venv/bin/activate
+    - echo "Entering ${POETRY_INSTALL_ROOT_DIR}"
+    - cd "${POETRY_INSTALL_ROOT_DIR}"
+    - poetry install
+
+  artifacts:
+    reports:
+      junit: $JUNIT_REPORT
+
+    name: "$CI_JOB_NAME-$CI_COMMIT_REF_NAME"
+    paths:
+      - "**/generated_during_*"
+      - "**/generated_by_package_fixtures"
+    when: always
+    expire_in: 1 week
+
+.pattern_test_executor:
+  extends: .pytest_based_template
+  variables:
+    TESTED_ENDPOINT: ""    # To be overrided in derived job
+    TEST_SUITE: ""         # To be overrided in derived job
+    PATTERN_TESTS_DIR: ""  # To be overrided in derived job
+    DIRECT_CALLS: 0        # To be overrided in derived job
+
+  script:
+    # run pattern tests
+    - cd "${PATTERN_TESTS_DIR}"
+    - ./run_tests.sh ${TESTED_ENDPOINT} `git rev-parse --show-toplevel` "${TEST_SUITE}" ${DIRECT_CALLS}
+
+
+# Special version of pattern tests to be executed against Hived API node instance
+# Defined here, to be shared between .comparison_tests_template and finally reused at Hived CI to verify AH node
+.hived_pattern_tests_template:
+  extends: .pattern_test_executor
+  variables:
+    HIVED_IMAGE_NAME: ""  # Must be overrided at derived job
+    TESTED_ENDPOINT: hived-instance:8091
+    HIVED_COMMIT: $HIVED_COMMIT
+    FF_NETWORK_PER_BUILD: 1
+  services:
+    - name: $HIVED_IMAGE_NAME
+      alias: hived-instance
+      variables:
+        DATA_SOURCE: "${DATA_CACHE_HIVE_PREFIX}_${HIVED_COMMIT}"
+        LOG_FILE: $CI_JOB_NAME.log
+      command: ["--stop-at-block=5000000"]
+
+
+.haf_app_pattern_tests_template:
+  extends: .pattern_test_executor
+  variables:
+    HAF_IMAGE_NAME: "" # Must be overrided at derived job
+    HAF_APP_IMAGE: ""  # Image path name to be used at app testing. App will be instantiated as a service.
+    HAF_APP_PORT: ""   # To be specified by derived job
+    HAF_APP_USER: ""   # a HAF db role to be used for regular app processing connection. To be specified by derived job
+    TESTED_ENDPOINT: app:${HAF_APP_PORT}
+    HAF_COMMIT: $HAF_COMMIT
+    FF_NETWORK_PER_BUILD: 1
+
+  services:
+    - name: ${HAF_IMAGE_NAME}
+      alias: haf-instance
+      variables:
+        PG_ACCESS: "${HAF_DB_ACCESS}"
+        DATA_SOURCE: "${DATA_CACHE_HAF_PREFIX}_${HAF_COMMIT}"
+        LOG_FILE: $CI_JOB_NAME.log
+      command: ["--stop-at-block=5000000"]
+
+    - name: ${HAF_APP_IMAGE}
+      alias: app-setup
+      variables:
+        # intentionally use setup way chosed in haf_api_node compose scripts
+        POSTGRES_URL: "postgresql://haf_admin@haf-instance/haf_block_log"
+      command: ["install_app"]
+      entrypoint:
+        - '/bin/bash'
+        - '-c'
+        - |
+          set -xeuo pipefail
+          echo "Attempting to perform application setup..."
+          # pass control to the default image entrypoint
+          "./docker_entrypoint.sh" "$@"
+          echo "Application setup completed, starting to listed app port to satisfy Gitlab health checker..."
+          # Once setup completed, just listen on container/app port to satisfy GitlabCI HealthChecker
+          nc -v -l -p $(echo "${HAF_APP_PORT}")
+        # arg $0 should be explicitly passed when using 'bash -c' entrypoints
+        - '/bin/bash'
+
+    - name: ${HAF_APP_IMAGE}
+      alias: app
+      # intentionally use arg-parser way to verify if it works correctly
+      command: ["--postgres-url=postgresql://${HAF_APP_USER}@haf-instance/haf_block_log"]
+      entrypoint:
+        - '/bin/bash'
+        - '-c'
+        - |
+          set -xeuo pipefail
+          # since Gitlab services startup order is undefined, we need to wait for app setup completion
+          [ -s "./app/scripts/wait_for_setup_completed.sh" ] && "./app/scripts/wait_for_setup_completed.sh" "$@"
+          echo "Application setup finished - continue app-service spawn..."
+          # pass control to the default image entrypoint
+          "./docker_entrypoint.sh" "$@"
+        # arg $0 should be explicitly passed when using 'bash -c' entrypoints
+        - '/bin/bash'
+
+.jmeter_benchmark_job:
+  extends: .job-defaults
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:${BENCHMARK_IMAGE_TAG}
+
+.jmeter_benchmark_with_haf_job:
+  extends: .jmeter_benchmark_job
+  variables:
+    HAF_COMMIT: $HAF_COMMIT # dotenv artifacts can be passed to service as long as they appear in section variables
+    FF_NETWORK_PER_BUILD: 1
+    # Maximum time to wait for service to be ready (seconds)
+    SERVICE_WAIT_TIMEOUT: 120
+  services:
+    - !reference [.haf_app_pattern_tests_template, services]
+  before_script:
+    # Wait for the app service to be ready before running tests
+    # This eliminates race conditions where DNS or the service isn't ready yet
+    - |
+      echo "Waiting for app service on port ${HAF_APP_PORT}..."
+      start_time=$(date +%s)
+      while ! nc -z app ${HAF_APP_PORT} 2>/dev/null; do
+        current_time=$(date +%s)
+        elapsed=$((current_time - start_time))
+        if [ $elapsed -ge ${SERVICE_WAIT_TIMEOUT} ]; then
+          echo "ERROR: Timeout waiting for app:${HAF_APP_PORT} after ${SERVICE_WAIT_TIMEOUT}s"
+          exit 1
+        fi
+        echo "Waiting for app:${HAF_APP_PORT}... (${elapsed}s elapsed)"
+        sleep 2
+      done
+      echo "Service app:${HAF_APP_PORT} is ready"
+
+.tox_test_job:
+  extends: .job-defaults
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/tox-test-runner:${TOX_IMAGE_TAG}
+
+.pattern_tests_template:
+  extends: .tox_test_job
+  variables:
+    ENDPOINT: app:$APP_PORT
+    HIVED_COMMIT: $HIVED_COMMIT
+  services:
+    - name: $HAF_IMAGE_NAME
+      alias: haf-instance
+      variables:
+        # Allow access from any network to eliminate CI IP addressing problems
+        PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
+        DATA_SOURCE: "${DATA_CACHE_HIVE_PREFIX}_${HIVED_COMMIT}"
+        LOG_FILE: $CI_JOB_NAME.log
+      command: ["--stop-at-block=5000000"]
+    - name: $APP_IMAGE
+      alias: app
+
+.comparison_tests_template:
+  extends: .haf_app_pattern_tests_template
+  variables:
+    COMPARISON_TESTS_DIR: ""  # Must be specified by derived job
+
+    HIVED_ENDPOINT: hived-instance:8091
+    JUNIT_REPORT: "comparsion_tests.xml"
+    HIVED_COMMIT: $HIVED_COMMIT # define HIVED_COMMIT here so its available in services
+
+  services:
+    - !reference [.hived_pattern_tests_template, services]
+    - !reference [.haf_app_pattern_tests_template, services]
+  script:
+    - cd "${COMPARISON_TESTS_DIR}"
+    - pytest -n 8 --junitxml="${JUNIT_REPORT}" --ref http://$HIVED_ENDPOINT --test http://$TESTED_ENDPOINT --start 4900000 --stop 4915000
+
+  artifacts:
+    paths:
+      - "$CI_JOB_NAME"
+      - "**/from_node.log"
+      - "**/ah.log"
+      - "**/*.out.json"

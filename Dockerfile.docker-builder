@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1.4
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-26.1.4-cli AS docker-builder
+
+# util-linux provides proper flock support for NFS (BusyBox flock fails on NFS)
+RUN apk add --no-cache bash git coreutils ca-certificates curl sudo util-linux
+RUN <<EOF
+    set -e
+    adduser -D hived
+    echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+EOF
+USER hived
+WORKDIR /home/hived
