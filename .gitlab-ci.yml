@@ -648,6 +648,8 @@ buildkit_cache_cleanup:
   # Don't use needs: [] - let it wait for build stage to complete
   # Otherwise it runs concurrently with builds and overloads the registry
   variables:
+    # Use latest tag since the image may not be built in this pipeline (change detection)
+    IMAGE_REMOVER_TAG: latest
     CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache"
 
 example_docker_image_builder_job:
