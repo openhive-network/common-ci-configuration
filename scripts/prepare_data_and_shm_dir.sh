@@ -61,7 +61,11 @@ function handle_single_file_of_block_log() {
       fi
     fi
     echo "creating hardlink of $BLOCK_LOG_TARGET_DIR/$FILE_NAME in $DATA_BASE_DIR/datadir/blockchain/"
-    ln "$BLOCK_LOG_TARGET_DIR/$FILE_NAME" "$DATA_BASE_DIR/datadir/blockchain/$FILE_NAME"
+    # Try hardlink first, fall back to symlink if cross-device (different filesystems)
+    if ! ln "$BLOCK_LOG_TARGET_DIR/$FILE_NAME" "$DATA_BASE_DIR/datadir/blockchain/$FILE_NAME" 2>/dev/null; then
+      echo "Hardlink failed (likely cross-device), creating symlink instead"
+      ln -s "$BLOCK_LOG_TARGET_DIR/$FILE_NAME" "$DATA_BASE_DIR/datadir/blockchain/$FILE_NAME"
+    fi
   fi
 
   if [ -e $FILE_PATH.artifacts ];
