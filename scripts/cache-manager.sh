@@ -434,6 +434,38 @@ _link_shared_block_log() {
     ls -la "$blockchain_dir" 2>/dev/null || true
 }
 
+# Clean up stale extraction directory if it exists with permission issues
+# After extraction, _restore_pgdata_permissions changes ownership to postgres (UID 105)
+# with mode 700. On the next run, tar can't overwrite because the runner runs as a
+# different user (e.g., UID 2000). This function detects and removes such stale directories.
+_cleanup_stale_extraction() {
+    local dest_dir="$1"
+
+    # If directory doesn't exist, nothing to clean
+    [[ -d "$dest_dir" ]] || return 0
+
+    # Test if we can write to the directory
+    if touch "${dest_dir}/.write_test" 2>/dev/null; then
+        rm -f "${dest_dir}/.write_test"
+        return 0  # Directory is writable, no cleanup needed
+    fi
+
+    # Directory exists but we can't write to it - stale extraction with wrong permissions
+    _log "Stale extraction detected with permission issues, cleaning up: $dest_dir"
+
+    # Try to remove with sudo first (for files owned by postgres UID 105), fall back to regular rm
+    if sudo rm -rf "$dest_dir" 2>/dev/null; then
+        _log "Cleaned up stale extraction (with sudo)"
+    elif rm -rf "$dest_dir" 2>/dev/null; then
+        _log "Cleaned up stale extraction"
+    else
+        _error "Failed to clean up stale extraction directory: $dest_dir"
+        return 1
+    fi
+
+    return 0
+}
+
 # GET: Check local tar, then NFS tar, extract to destination
 # Local cache is immutable (tar file) - extracted fresh each time for safety
 cmd_get() {
@@ -468,7 +500,10 @@ cmd_get() {
         return 1
     fi
 
-    # 2. Extract tar to destination (always extract fresh for safety)
+    # 2. Clean up stale extraction and extract tar to destination
+    # Previous runs may have left directories with postgres ownership (UID 105, mode 700)
+    # that the current user can't write to - clean those up first
+    _cleanup_stale_extraction "$local_dest"
     mkdir -p "$local_dest"
 
     local tar_lock="${source_tar}.lock"
