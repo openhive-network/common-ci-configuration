@@ -4,6 +4,31 @@ This document outlines the plan for consolidating common CI patterns into `commo
 
 ## Current State
 
+### Include Hierarchy Problem
+
+Currently, CI templates have a 4-level deep include chain:
+
+```
+HAF apps (balance_tracker, reputation_tracker)
+    ↓ includes (pinned HAF commit)
+HAF/scripts/ci-helpers/prepare_data_image_job.yml
+    ↓ includes (pinned hive commit)
+hive/scripts/ci-helpers/prepare_data_image_job.yml
+    ↓ includes (pinned common-ci-configuration commit)
+common-ci-configuration/templates/*.yml
+```
+
+Each layer must track specific commit SHAs of the layer above:
+- balance_tracker pins HAF: `ref: 1ac5d12...`
+- HAF pins hive: `ref: 8d24f31...`
+- hive pins common-ci-configuration: `ref: 7cc2791...`
+
+**Problems:**
+- Bug fixes require cascading MRs through each layer
+- Version drift between projects
+- Complex dependency tracking
+- Slow propagation of improvements
+
 ### Already in common-ci-configuration
 
 | Script/Template | Description | Used By |
@@ -22,6 +47,9 @@ This document outlines the plan for consolidating common CI patterns into `commo
 | Cache-manager fetch pattern | HAF, HAF apps | High - 5+ line block repeated |
 | Stale cache cleanup | HAF | Medium - similar patterns |
 | Service health checks | HAF apps | Medium |
+| `.prepare_haf_data_5m` template | HAF | High - needed by HAF apps |
+| `.prepare_haf_image` template | HAF | Medium |
+| `.wait-for-haf-postgres` template | HAF | High - duplicated in apps |
 
 ## Phase 1: Script Consolidation (Current)
 
@@ -49,7 +77,87 @@ chmod +x "$PREPARE_SCRIPT"
 "$PREPARE_SCRIPT" --data-base-dir="$DATA_CACHE" ...
 ```
 
-## Phase 2: Reusable YAML Blocks
+## Phase 2: Flatten Include Hierarchy
+
+Move HAF-specific templates to common-ci-configuration so all projects can include directly.
+
+### Goal
+
+Flatten the 4-level hierarchy to a single level:
+
+```
+CURRENT:                              PROPOSED:
+HAF apps → HAF → hive → common-ci    HAF apps → common-ci-configuration
+                                      HAF → common-ci-configuration
+                                      hive → common-ci-configuration
+```
+
+### Templates to Move
+
+| Template | Currently In | Move To | Notes |
+|----------|-------------|---------|-------|
+| `.prepare_haf_data_5m` | HAF | `templates/haf_data_preparation.gitlab-ci.yml` | Core data prep job |
+| `.prepare_haf_image` | HAF | `templates/haf_data_preparation.gitlab-ci.yml` | Image building |
+| `.wait-for-haf-postgres` | HAF | `templates/haf_app_testing.gitlab-ci.yml` | Already have similar |
+| `.wait-for-haf-postgres-with-nfs-extraction` | HAF | `templates/haf_app_testing.gitlab-ci.yml` | NFS fallback variant |
+| `.docker_image_builder_job` | hive | Already in common-ci | ✓ Done |
+
+### Migration Steps
+
+1. **Create `templates/haf_data_preparation.gitlab-ci.yml`**
+   - Move `.prepare_haf_data_5m` with all cache logic
+   - Move `.prepare_haf_image`
+   - Parameterize image registry URLs
+
+2. **Update HAF to include from common-ci-configuration**
+   ```yaml
+   # Before (HAF .gitlab-ci.yml)
+   include:
+     - project: 'hive/hive'
+       ref: 8d24f312...
+       file: '/scripts/ci-helpers/prepare_data_image_job.yml'
+
+   # After
+   include:
+     - project: 'hive/common-ci-configuration'
+       ref: develop
+       file: '/templates/haf_data_preparation.gitlab-ci.yml'
+   ```
+
+3. **Update HAF apps to include directly from common-ci-configuration**
+   ```yaml
+   # Before (balance_tracker .gitlab-ci.yml)
+   include:
+     - project: 'hive/haf'
+       ref: 1ac5d12...
+       file: '/scripts/ci-helpers/prepare_data_image_job.yml'
+
+   # After
+   include:
+     - project: 'hive/common-ci-configuration'
+       ref: develop
+       file: '/templates/haf_data_preparation.gitlab-ci.yml'
+       file: '/templates/haf_app_testing.gitlab-ci.yml'
+   ```
+
+4. **Remove deprecated includes from hive and HAF**
+
+### Benefits
+
+- **Single version to track**: All projects pin one common-ci-configuration ref
+- **Faster bug fixes**: Fix once in common-ci, all projects get it
+- **No cascading MRs**: Updates don't require touching intermediate repos
+- **Cleaner dependencies**: HAF apps don't need to know about hive internals
+
+### What Remains Project-Specific
+
+| Project | Project-Specific Config |
+|---------|------------------------|
+| hive | `run_hived_img.sh`, block_log sources, config.ini |
+| HAF | PostgreSQL access rules, HAF-specific test scripts |
+| HAF apps | App schema names, sync scripts, test configurations |
+
+## Phase 3: Reusable YAML Blocks
 
 Create `!reference`-able script blocks for common patterns.
 
@@ -119,7 +227,7 @@ my-test-job:
       fi
 ```
 
-## Phase 3: HAF App Template Expansion
+## Phase 4: HAF App Template Expansion
 
 Extend `templates/haf_app_testing.gitlab-ci.yml` with more building blocks.
 
@@ -158,7 +266,7 @@ Complete Tavern test job template:
     - pytest -n ${PYTEST_WORKERS} tests/
 ```
 
-## Phase 4: Documentation and Migration Guides
+## Phase 5: Documentation and Migration Guides
 
 ### Per-Project Migration Guides
 
@@ -209,9 +317,10 @@ For each project:
 
 ## Timeline
 
-| Phase | Target | Status |
-|-------|--------|--------|
-| Phase 1: Script Consolidation | Q1 2026 | In Progress |
-| Phase 2: Reusable YAML Blocks | Q1 2026 | Planning |
-| Phase 3: HAF App Templates | Q2 2026 | Planning |
-| Phase 4: Documentation | Ongoing | - |
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1 | Script Consolidation | In Progress |
+| Phase 2 | Flatten Include Hierarchy | Planning |
+| Phase 3 | Reusable YAML Blocks | Planning |
+| Phase 4 | HAF App Template Expansion | Planning |
+| Phase 5 | Documentation & Migration Guides | Ongoing |
