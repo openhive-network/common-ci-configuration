@@ -1009,6 +1009,8 @@ include:
   image: koalaman/shellcheck-alpine:stable
   variables:
     LINT_SCRIPTS_DIR: "scripts"
+    # Space-separated list of paths to exclude (e.g., "haf .git vendor")
+    LINT_EXCLUDE_PATHS: ""
     GIT_SUBMODULE_STRATEGY: none
   before_script:
     - apk add --no-cache findutils xmlstarlet
@@ -1016,8 +1018,16 @@ include:
     - |
       echo "=== Linting Bash Scripts in ${LINT_SCRIPTS_DIR}/ ==="
 
-      # Find and lint all shell scripts
-      SCRIPTS=$(find "${LINT_SCRIPTS_DIR}/" -name "*.sh" -type f 2>/dev/null || true)
+      # Build find exclusion arguments
+      FIND_EXCLUDES=""
+      for EXCLUDE in ${LINT_EXCLUDE_PATHS}; do
+        FIND_EXCLUDES="${FIND_EXCLUDES} -path ./${EXCLUDE} -prune -o"
+      done
+      # Always exclude .git
+      FIND_EXCLUDES="-path ./.git -prune -o ${FIND_EXCLUDES}"
+
+      # Find and lint all shell scripts (excluding specified paths)
+      SCRIPTS=$(eval "find ${LINT_SCRIPTS_DIR}/ ${FIND_EXCLUDES} -name '*.sh' -type f -print" 2>/dev/null || true)
 
       if [[ -z "$SCRIPTS" ]]; then
         echo "No .sh files found in ${LINT_SCRIPTS_DIR}/"
