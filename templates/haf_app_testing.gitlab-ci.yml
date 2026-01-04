@@ -1399,3 +1399,266 @@ include:
 
       ls -la "${HAF_DATA_DIRECTORY}/"
       echo -e "\e[0Ksection_end:$(date +%s):extract_cache\r\e[0K"
+
+# =============================================================================
+# DOCKER COMPOSE TEST ENVIRONMENT TEMPLATES (Phase 4)
+# =============================================================================
+# Composable templates for setting up and tearing down Docker Compose test
+# environments. These handle the common patterns found across HAF app test jobs:
+# - Cache extraction with blockchain handling
+# - ci.env file creation for docker-compose
+# - Service startup and health checks
+# - Log collection and cleanup
+#
+# Usage:
+#   my-test-job:
+#     extends: .docker_image_builder_job_template
+#     before_script:
+#       - !reference [.docker_image_builder_job_template, before_script]
+#       - !reference [.haf_app_dind_extract_cache, script]
+#       - !reference [.haf_app_dind_compose_startup, script]
+#       - !reference [.haf_app_dind_wait_for_services, script]
+#     script:
+#       - # Run your tests
+#     after_script:
+#       - !reference [.haf_app_dind_compose_teardown, after_script]
+
+# Variables for DinD test jobs
+.haf_app_dind_test_variables:
+  variables:
+    # Job-specific directories (isolated by CI_JOB_ID)
+    HAF_DATA_DIRECTORY: "${CI_PROJECT_DIR}/${CI_JOB_ID}/datadir"
+    HAF_SHM_DIRECTORY: "${CI_PROJECT_DIR}/${CI_JOB_ID}/shm_dir"
+    # Docker Compose configuration
+    COMPOSE_FILE: "docker-compose-test.yml"
+    COMPOSE_OPTIONS_STRING: "--file ${COMPOSE_FILE} --ansi never"
+    # Service configuration
+    HAF_DB_NAME: "haf_block_log"
+    HAF_DB_USER: "haf_admin"
+    POSTGREST_PORT: "3000"
+    # Timeouts
+    SERVICE_WAIT_TIMEOUT: "300"
+
+# Extract cache and prepare blockchain for DinD test jobs
+# Handles shm_dir relocation and blockchain symlink/copy logic
+# Requires: APP_SYNC_CACHE_TYPE, APP_CACHE_KEY, HAF_DATA_DIRECTORY, HAF_SHM_DIRECTORY
+# Use: !reference [.haf_app_dind_extract_cache, script]
+.haf_app_dind_extract_cache:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):extract[collapsed=true]\r\e[0KExtracting cache for DinD test..."
+
+      JOB_DIR="${CI_PROJECT_DIR}/${CI_JOB_ID}"
+
+      # Fetch cache-manager
+      if [[ ! -x "$CACHE_MANAGER" ]]; then
+        mkdir -p "$(dirname "$CACHE_MANAGER")"
+        curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF:-develop}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+        chmod +x "$CACHE_MANAGER"
+      fi
+
+      echo "Extracting: ${APP_SYNC_CACHE_TYPE}/${APP_CACHE_KEY}"
+      mkdir -p "${JOB_DIR}"
+      if ! CACHE_HANDLING=haf "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${APP_CACHE_KEY}" "${JOB_DIR}"; then
+        echo "ERROR: Failed to get cache via cache-manager"
+        exit 1
+      fi
+
+      # Relocate shm_dir from inside datadir to be a sibling (for old cache formats)
+      if [[ -d "${HAF_DATA_DIRECTORY}/shm_dir" ]] && [[ ! -d "${HAF_SHM_DIRECTORY}" ]]; then
+        echo "Relocating shm_dir to parallel location..."
+        mv "${HAF_DATA_DIRECTORY}/shm_dir" "${HAF_SHM_DIRECTORY}"
+      fi
+
+      # Handle blockchain - copy/symlink to docker directory
+      mkdir -p "${CI_PROJECT_DIR}/docker/blockchain"
+      if [[ -d "${HAF_DATA_DIRECTORY}/blockchain" ]] && [[ -n "$(ls -A "${HAF_DATA_DIRECTORY}/blockchain" 2>/dev/null)" ]]; then
+        echo "Copying blockchain from cache to docker directory..."
+        sudo cp -aL "${HAF_DATA_DIRECTORY}/blockchain"/* "${CI_PROJECT_DIR}/docker/blockchain/"
+        sudo rm -rf "${HAF_DATA_DIRECTORY}/blockchain"
+      elif [[ -n "${BLOCK_LOG_SOURCE_DIR_5M:-}" ]] && [[ -d "${BLOCK_LOG_SOURCE_DIR_5M}" ]]; then
+        echo "Symlinking blockchain from BLOCK_LOG_SOURCE_DIR_5M..."
+        ln -sf "${BLOCK_LOG_SOURCE_DIR_5M}/block_log" "${CI_PROJECT_DIR}/docker/blockchain/block_log"
+        ln -sf "${BLOCK_LOG_SOURCE_DIR_5M}/block_log.artifacts" "${CI_PROJECT_DIR}/docker/blockchain/block_log.artifacts"
+      fi
+
+      ls -la "${HAF_DATA_DIRECTORY}/"
+      ls -la "${HAF_SHM_DIRECTORY}/" 2>/dev/null || true
+      ls -la "${CI_PROJECT_DIR}/docker/blockchain/" 2>/dev/null || true
+
+      echo -e "\e[0Ksection_end:$(date +%s):extract\r\e[0K"
+
+# Create ci.env and start Docker Compose services
+# Requires: HAF_IMAGE_NAME, HAF_DATA_DIRECTORY, HAF_SHM_DIRECTORY, COMPOSE_OPTIONS_STRING
+# Optional: POSTGREST_IMAGE (default: registry.gitlab.syncad.com/hive/haf_api_node/postgrest:latest)
+# Use: !reference [.haf_app_dind_compose_startup, script]
+.haf_app_dind_compose_startup:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):compose[collapsed=true]\r\e[0KStarting Docker Compose services..."
+
+      cd "${CI_PROJECT_DIR}/docker"
+
+      # Create ci.env for docker-compose variable substitution
+      cat <<-EOF | tee ci.env
+      HAF_IMAGE_NAME=${HAF_IMAGE_NAME}
+      HAF_DATA_DIRECTORY=${HAF_DATA_DIRECTORY}
+      HAF_SHM_DIRECTORY=${HAF_SHM_DIRECTORY}
+      HIVED_UID=$(id -u)
+      POSTGREST_IMAGE=${POSTGREST_IMAGE:-registry.gitlab.syncad.com/hive/haf_api_node/postgrest:latest}
+      EOF
+
+      # Parse compose options
+      IFS=" " read -ra COMPOSE_OPTIONS <<< "${COMPOSE_OPTIONS_STRING}"
+
+      # Validate and start services
+      docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" config
+      docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" up --detach --quiet-pull
+
+      echo -e "\e[0Ksection_end:$(date +%s):compose\r\e[0K"
+
+# Wait for PostgreSQL and PostgREST services to be ready
+# Includes DNS resolution fix for DinD environments
+# Requires: COMPOSE_OPTIONS_STRING, HAF_DB_USER, HAF_DB_NAME, SERVICE_WAIT_TIMEOUT
+# Optional: HAF_APP_SCHEMA (to verify schema exists)
+# Use: !reference [.haf_app_dind_wait_for_services, script]
+.haf_app_dind_wait_for_services:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):wait[collapsed=true]\r\e[0KWaiting for services..."
+
+      cd "${CI_PROJECT_DIR}/docker"
+      IFS=" " read -ra COMPOSE_OPTIONS <<< "${COMPOSE_OPTIONS_STRING}"
+      MAX_WAIT="${SERVICE_WAIT_TIMEOUT:-300}"
+      WAITED=0
+
+      # Wait for PostgreSQL via docker compose exec
+      until docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" exec -T haf pg_isready -U "${HAF_DB_USER:-haf_admin}" -d "${HAF_DB_NAME:-haf_block_log}" 2>/dev/null; do
+        echo "Waiting for PostgreSQL... ($WAITED/$MAX_WAIT seconds)"
+        sleep 5
+        WAITED=$((WAITED + 5))
+        if [[ $WAITED -ge $MAX_WAIT ]]; then
+          echo "ERROR: PostgreSQL did not become ready in time"
+          docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" logs haf | tail -50
+          exit 1
+        fi
+      done
+      echo "PostgreSQL ready (took ${WAITED}s)"
+
+      # Verify app schema if specified
+      if [[ -n "${HAF_APP_SCHEMA:-}" ]]; then
+        if ! docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" exec -T haf psql -U "${HAF_DB_USER:-haf_admin}" -d "${HAF_DB_NAME:-haf_block_log}" -t -c "SELECT 1 FROM information_schema.schemata WHERE schema_name = '${HAF_APP_SCHEMA}'" | grep -q 1; then
+          echo "ERROR: ${HAF_APP_SCHEMA} schema not found"
+          exit 1
+        fi
+        echo "${HAF_APP_SCHEMA} schema verified"
+      fi
+
+      # Wait for PostgREST with DNS resolution fix
+      # In DinD, curl may resolve 'docker' to wrong IP - use getent for reliable resolution
+      DOCKER_IP=$(getent hosts docker 2>/dev/null | awk '{print $1}' | head -1)
+      if [[ -z "$DOCKER_IP" ]]; then
+        DOCKER_IP="${DOCKER_HOST:-docker}"
+        DOCKER_IP="${DOCKER_IP#tcp://}"
+        DOCKER_IP="${DOCKER_IP%%:*}"
+      fi
+      echo "Using Docker host IP: $DOCKER_IP for PostgREST"
+
+      WAITED=0
+      until curl -sf --max-time 5 "http://${DOCKER_IP}:${POSTGREST_PORT:-3000}/" >/dev/null 2>&1; do
+        echo "Waiting for PostgREST at ${DOCKER_IP}:${POSTGREST_PORT:-3000}... ($WAITED/$MAX_WAIT seconds)"
+        sleep 5
+        WAITED=$((WAITED + 5))
+        if [[ $WAITED -ge $MAX_WAIT ]]; then
+          echo "ERROR: PostgREST did not become ready in time"
+          docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" logs postgrest 2>/dev/null | tail -50 || true
+          exit 1
+        fi
+      done
+      echo "PostgREST ready at ${DOCKER_IP}:${POSTGREST_PORT:-3000}"
+
+      # Export for test scripts
+      export POSTGREST_HOST="${DOCKER_IP}"
+
+      echo -e "\e[0Ksection_end:$(date +%s):wait\r\e[0K"
+
+# Teardown Docker Compose and collect logs
+# Use in after_script: !reference [.haf_app_dind_compose_teardown, after_script]
+.haf_app_dind_compose_teardown:
+  after_script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):cleanup[collapsed=true]\r\e[0KCleaning up Docker Compose..."
+
+      cd "${CI_PROJECT_DIR}/docker" 2>/dev/null || exit 0
+
+      # Parse compose options (use default if variable not set)
+      IFS=" " read -ra COMPOSE_OPTIONS <<< "${COMPOSE_OPTIONS_STRING:---file docker-compose-test.yml --ansi never}"
+
+      # Collect logs before teardown
+      docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" logs haf > haf.log 2>&1 || true
+      docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" logs postgrest > postgrest.log 2>&1 || true
+
+      # Stop and remove containers
+      docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" down --volumes --remove-orphans || true
+
+      # Archive logs
+      tar -czvf container-logs.tar.gz *.log 2>/dev/null || true
+
+      # Clean up job-specific data directory
+      sudo rm -rf "${CI_PROJECT_DIR}/${CI_JOB_ID}" 2>/dev/null || rm -rf "${CI_PROJECT_DIR}/${CI_JOB_ID}" 2>/dev/null || true
+
+      echo -e "\e[0Ksection_end:$(date +%s):cleanup\r\e[0K"
+
+# =============================================================================
+# COMPLETE DIND TEST JOB TEMPLATE (Phase 4)
+# =============================================================================
+# A complete, ready-to-use test job template that combines all DinD components.
+# Apps only need to provide their test script.
+#
+# Required variables (set in your job):
+#   APP_SYNC_CACHE_TYPE: Cache type (e.g., "haf_btracker_sync")
+#   APP_CACHE_KEY: Cache key (e.g., "${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}")
+#   HAF_IMAGE_NAME: HAF Docker image (from prepare_haf_image job)
+#
+# Optional variables:
+#   HAF_APP_SCHEMA: Schema to verify exists (e.g., "btracker_app")
+#   COMPOSE_FILE: Docker Compose file (default: docker-compose-test.yml)
+#   POSTGREST_IMAGE: PostgREST image (default: registry.gitlab.syncad.com/hive/haf_api_node/postgrest:latest)
+#
+# Usage:
+#   my-test:
+#     extends: .haf_app_dind_complete_test
+#     needs:
+#       - sync
+#       - prepare_haf_image
+#     variables:
+#       APP_SYNC_CACHE_TYPE: "haf_myapp_sync"
+#       APP_CACHE_KEY: "${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}"
+#       HAF_APP_SCHEMA: "myapp"
+#     script:
+#       - ./run-my-tests.sh --host=docker
+#
+.haf_app_dind_complete_test:
+  extends:
+    - .docker_image_builder_job_template
+    - .haf_app_dind_test_variables
+  stage: test
+  timeout: 30 minutes
+  before_script:
+    - !reference [.docker_image_builder_job_template, before_script]
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):login[collapsed=true]\r\e[0KLogging to Docker registry..."
+      docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+      echo -e "\e[0Ksection_end:$(date +%s):login\r\e[0K"
+    - !reference [.haf_app_dind_extract_cache, script]
+    - !reference [.haf_app_dind_compose_startup, script]
+    - !reference [.haf_app_dind_wait_for_services, script]
+  after_script: !reference [.haf_app_dind_compose_teardown, after_script]
+  artifacts:
+    when: always
+    paths:
+      - docker/container-logs.tar.gz
+    expire_in: 1 week
+  tags:
+    - data-cache-storage
+    - fast
