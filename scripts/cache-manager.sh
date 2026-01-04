@@ -20,12 +20,14 @@
 # Cache types: hive, haf, balance_tracker, hivemind, etc.
 #
 # Environment variables:
-#   CACHE_NFS_PATH      - NFS mount point (default: /nfs/ci-cache)
-#   CACHE_LOCAL_PATH    - Local cache directory (default: /cache)
-#   CACHE_MAX_SIZE_GB   - Max total NFS cache size (default: 2000)
-#   CACHE_MAX_AGE_DAYS  - Max cache age (default: 30)
-#   CACHE_LOCK_TIMEOUT  - Lock timeout in seconds (default: 3600)
-#   CACHE_QUIET         - Suppress verbose output (default: false)
+#   CACHE_NFS_PATH        - NFS mount point (default: /nfs/ci-cache)
+#   CACHE_LOCAL_PATH      - Local cache directory (default: /cache)
+#   CACHE_MAX_SIZE_GB     - Max total NFS cache size (default: 2000)
+#   CACHE_MAX_AGE_DAYS    - Max cache age (default: 30)
+#   CACHE_LOCK_TIMEOUT    - Lock timeout in seconds (default: 3600)
+#   CACHE_QUIET           - Suppress verbose output (default: false)
+#   SHARED_BLOCK_LOG_LOCAL - Local block_log path (default: /blockchain/block_log_5m)
+#   SHARED_BLOCK_LOG_NFS   - NFS block_log path (default: /nfs/ci-cache/hive/blockchain/block_log_5m)
 
 set -euo pipefail
 
@@ -61,6 +63,10 @@ CACHE_MAX_AGE_DAYS="${CACHE_MAX_AGE_DAYS:-30}"
 CACHE_LOCK_TIMEOUT="${CACHE_LOCK_TIMEOUT:-120}"  # 2 minutes (NFS writes take ~10s, 12x margin)
 CACHE_STALE_LOCK_MINUTES="${CACHE_STALE_LOCK_MINUTES:-10}"  # Break locks older than this (writes take ~10s)
 CACHE_QUIET="${CACHE_QUIET:-false}"
+
+# Shared block_log locations (used when blockchain excluded from cache)
+SHARED_BLOCK_LOG_LOCAL="${SHARED_BLOCK_LOG_LOCAL:-/blockchain/block_log_5m}"
+SHARED_BLOCK_LOG_NFS="${SHARED_BLOCK_LOG_NFS:-/nfs/ci-cache/hive/blockchain/block_log_5m}"
 
 # Logging
 _log() {
@@ -403,18 +409,17 @@ _link_shared_block_log() {
     fi
 
     # Shared block_log locations - check local first (faster), then NFS
-    local LOCAL_BLOCK_LOG="/blockchain/block_log_5m"
-    local NFS_BLOCK_LOG="/nfs/ci-cache/hive/block_log_5m"
+    # Paths are configurable via SHARED_BLOCK_LOG_LOCAL and SHARED_BLOCK_LOG_NFS env vars
     local shared_block_log=""
 
-    if [[ -d "$LOCAL_BLOCK_LOG" ]] && [[ -n "$(ls -A "$LOCAL_BLOCK_LOG" 2>/dev/null)" ]]; then
-        shared_block_log="$LOCAL_BLOCK_LOG"
-        _log "Using local shared block_log: $LOCAL_BLOCK_LOG"
-    elif [[ -d "$NFS_BLOCK_LOG" ]] && [[ -n "$(ls -A "$NFS_BLOCK_LOG" 2>/dev/null)" ]]; then
-        shared_block_log="$NFS_BLOCK_LOG"
-        _log "Using NFS shared block_log: $NFS_BLOCK_LOG"
+    if [[ -d "$SHARED_BLOCK_LOG_LOCAL" ]] && [[ -n "$(ls -A "$SHARED_BLOCK_LOG_LOCAL" 2>/dev/null)" ]]; then
+        shared_block_log="$SHARED_BLOCK_LOG_LOCAL"
+        _log "Using local shared block_log: $SHARED_BLOCK_LOG_LOCAL"
+    elif [[ -d "$SHARED_BLOCK_LOG_NFS" ]] && [[ -n "$(ls -A "$SHARED_BLOCK_LOG_NFS" 2>/dev/null)" ]]; then
+        shared_block_log="$SHARED_BLOCK_LOG_NFS"
+        _log "Using NFS shared block_log: $SHARED_BLOCK_LOG_NFS"
     else
-        _log "WARNING: No shared block_log found at $LOCAL_BLOCK_LOG or $NFS_BLOCK_LOG"
+        _log "WARNING: No shared block_log found at $SHARED_BLOCK_LOG_LOCAL or $SHARED_BLOCK_LOG_NFS"
         return 0
     fi
 

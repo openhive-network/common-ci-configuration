@@ -793,53 +793,43 @@ include:
 
       CACHE_HIT="false"
 
-      # Check for existing app sync cache (local first, then NFS)
-      if [[ -d "${LOCAL_APP_CACHE}/datadir" ]]; then
-        echo "Local app sync cache found at ${LOCAL_APP_CACHE} - skipping sync"
+      # Check for existing app sync cache (always use cache-manager for consistent extraction)
+      echo "Checking for app sync cache: ${APP_SYNC_CACHE_TYPE}/${EFFECTIVE_CACHE_KEY}"
+      if "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${EFFECTIVE_CACHE_KEY}" "${LOCAL_APP_CACHE}" 2>/dev/null; then
+        echo "App sync cache found - skipping sync"
         CACHE_HIT="true"
         export DATA_SOURCE="${LOCAL_APP_CACHE}"
-      else
-        echo "Checking NFS for app sync cache: ${APP_SYNC_CACHE_TYPE}/${EFFECTIVE_CACHE_KEY}"
-        if CACHE_HANDLING=haf "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${EFFECTIVE_CACHE_KEY}" "${LOCAL_APP_CACHE}" 2>/dev/null; then
-          echo "Fetched app sync cache from NFS - skipping sync"
-          CACHE_HIT="true"
-          export DATA_SOURCE="${LOCAL_APP_CACHE}"
-        elif [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]]; then
-          # For docs-only changes, search for ANY app cache with matching HAF commit
-          # since app code hasn't changed
-          echo "Exact cache not found, searching for compatible app cache with HAF commit ${EFFECTIVE_HAF_COMMIT}..."
-          NFS_CACHE_DIR="${DATA_CACHE_NFS_PREFIX}/${APP_SYNC_CACHE_TYPE}"
-          FOUND_CACHE=$(ls -t "${NFS_CACHE_DIR}/${EFFECTIVE_HAF_COMMIT}_"*.tar 2>/dev/null | head -1 || true)
-          if [[ -n "$FOUND_CACHE" ]]; then
-            FOUND_KEY=$(basename "$FOUND_CACHE" .tar)
-            echo "Found compatible app cache: ${FOUND_KEY}"
-            LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${FOUND_KEY}"
-            if CACHE_HANDLING=haf "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${FOUND_KEY}" "${LOCAL_APP_CACHE}" 2>/dev/null; then
-              echo "Fetched compatible app sync cache from NFS - skipping sync"
-              CACHE_HIT="true"
-              export DATA_SOURCE="${LOCAL_APP_CACHE}"
-            fi
+      elif [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]]; then
+        # For docs-only changes, search for ANY app cache with matching HAF commit
+        # since app code hasn't changed
+        echo "Exact cache not found, searching for compatible app cache with HAF commit ${EFFECTIVE_HAF_COMMIT}..."
+        NFS_CACHE_DIR="${DATA_CACHE_NFS_PREFIX}/${APP_SYNC_CACHE_TYPE}"
+        FOUND_CACHE=$(ls -t "${NFS_CACHE_DIR}/${EFFECTIVE_HAF_COMMIT}_"*.tar 2>/dev/null | head -1 || true)
+        if [[ -n "$FOUND_CACHE" ]]; then
+          FOUND_KEY=$(basename "$FOUND_CACHE" .tar)
+          echo "Found compatible app cache: ${FOUND_KEY}"
+          LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${FOUND_KEY}"
+          if "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${FOUND_KEY}" "${LOCAL_APP_CACHE}" 2>/dev/null; then
+            echo "Fetched compatible app sync cache - skipping sync"
+            CACHE_HIT="true"
+            export DATA_SOURCE="${LOCAL_APP_CACHE}"
           fi
-          if [[ "$CACHE_HIT" != "true" ]]; then
-            echo "No compatible app cache found, will use HAF-only cache and run sync"
-          fi
-        else
-          echo "App sync cache not found, will use HAF-only cache and run sync"
         fi
+        if [[ "$CACHE_HIT" != "true" ]]; then
+          echo "No compatible app cache found, will use HAF-only cache and run sync"
+        fi
+      else
+        echo "App sync cache not found, will use HAF-only cache and run sync"
       fi
 
       # Fall back to HAF-only cache if no app cache found
       if [[ "$CACHE_HIT" != "true" ]]; then
-        if [[ -d "${LOCAL_HAF_CACHE}/datadir" ]]; then
-          echo "Local HAF cache found at ${LOCAL_HAF_CACHE}"
+        echo "Fetching HAF cache..."
+        if "$CACHE_MANAGER" get haf "${EFFECTIVE_HAF_COMMIT}" "${LOCAL_HAF_CACHE}"; then
+          echo "HAF replay data ready"
         else
-          echo "Local HAF cache not found, checking NFS..."
-          if "$CACHE_MANAGER" get haf "${EFFECTIVE_HAF_COMMIT}" "${LOCAL_HAF_CACHE}"; then
-            echo "Fetched HAF replay data from NFS cache"
-          else
-            echo "ERROR: Failed to fetch HAF replay data from NFS cache"
-            exit 1
-          fi
+          echo "ERROR: Failed to fetch HAF replay data"
+          exit 1
         fi
       fi
 
