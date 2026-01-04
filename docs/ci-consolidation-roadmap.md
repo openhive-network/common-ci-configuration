@@ -287,23 +287,36 @@ These templates already exist from earlier phases:
 
 ### Migration Status
 
-| Project | DinD Templates | Status |
-|---------|----------------|--------|
-| balance_tracker | Can migrate regression-test, pattern-test | Pending |
-| reputation_tracker | Can migrate .test-with-docker-compose | Pending |
+| Project | DinD Templates | Status | MR |
+|---------|----------------|--------|-----|
+| reputation_tracker | `.test-with-docker-compose` migrated | ✅ Completed | !143 |
+| balance_tracker | `regression-test`, `pattern-test`, `pattern-test-with-mock-data` migrated | ✅ Completed | !261 |
+
+### Migration Results
+
+**reputation_tracker (MR !143):**
+- Replaced 168 lines of inline `.test-with-docker-compose` with 8 lines extending templates
+- Added variable aliases: `APP_SYNC_CACHE_TYPE`, `APP_CACHE_KEY`, `HAF_APP_SCHEMA`
+
+**balance_tracker (MR !261):**
+- Created project-specific `.btracker-dind-test` template consolidating DinD patterns
+- `regression-test`: 130 lines → 22 lines
+- `pattern-test`: 156 lines → 32 lines
+- `pattern-test-with-mock-data`: 159 lines → 37 lines
+- Total: 432 deletions, 216 insertions (net -216 lines)
 
 ## Phase 5: Documentation and Migration Guides
 
 ### Per-Project Migration Guides
 
-| Project | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| balance_tracker | High | Low | Already uses `.haf_app_*` templates |
-| reputation_tracker | High | Low | Already uses `.haf_app_*` templates |
-| hafah | Medium | Medium | Different test patterns |
-| haf_block_explorer | Medium | Medium | Custom sync process |
-| hivemind | Low | High | Complex, multiple test types |
-| nft_tracker | Low | Low | Simpler patterns |
+| Project | Priority | Complexity | Status | Notes |
+|---------|----------|------------|--------|-------|
+| balance_tracker | High | Low | ✅ Done | Phase 4 DinD templates (MR !261) |
+| reputation_tracker | High | Low | ✅ Done | Phase 4 DinD templates (MR !143) |
+| hafah | Medium | Medium | Pending | Different test patterns |
+| haf_block_explorer | Medium | Medium | Pending | Custom sync process |
+| hivemind | Low | High | Pending | Complex, multiple test types |
+| nft_tracker | Low | Low | Pending | Simpler patterns |
 
 ### Migration Checklist
 
@@ -348,5 +361,5 @@ For each project:
 | Phase 1 | Script Consolidation | Completed |
 | Phase 2 | Flatten Include Hierarchy | Completed |
 | Phase 3 | Reusable YAML Blocks | Completed |
-| Phase 4 | HAF App Template Expansion | In Progress |
+| Phase 4 | HAF App Template Expansion | Completed (high-priority apps) |
 | Phase 5 | Documentation & Migration Guides | Ongoing |
