@@ -839,6 +839,13 @@ include:
       # DATA_SOURCE points to where data was extracted (for compatibility)
       export DATA_SOURCE="${JOB_DATA_DIR}"
 
+      # Relocate shm_dir from inside datadir to be a sibling (for old caches)
+      # New caches store them as siblings, but old caches had shm_dir inside datadir
+      if [[ -d "${JOB_DATA_DIR}/datadir/shm_dir" && ! -d "${JOB_DATA_DIR}/shm_dir" ]]; then
+        echo "Moving shm_dir from datadir/ to be a sibling..."
+        sudo mv "${JOB_DATA_DIR}/datadir/shm_dir" "${JOB_DATA_DIR}/shm_dir"
+      fi
+
       # Export state for script section
       echo "$CACHE_HIT" > /tmp/cache_hit
       echo "$EFFECTIVE_CACHE_KEY" > /tmp/effective_cache_key
@@ -862,13 +869,11 @@ include:
       else
         echo -e "\e[0Ksection_start:$(date +%s):save_cache[collapsed=true]\r\e[0KSaving sync data to cache..."
 
-        # Prepare data for caching
-        sudo cp -a "${SHM_DIR}" "${DATADIR}/shm_dir"
-
-        # Save to local cache
+        # Save to local cache - keep datadir and shm_dir as siblings (matching HAF cache structure)
         LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${EFFECTIVE_CACHE_KEY}"
         mkdir -p "${LOCAL_APP_CACHE}"
-        sudo cp -a "${DATADIR}" "${LOCAL_APP_CACHE}"
+        sudo cp -a "${DATADIR}" "${LOCAL_APP_CACHE}/datadir"
+        sudo cp -a "${SHM_DIR}" "${LOCAL_APP_CACHE}/shm_dir"
 
         # Remove empty blockchain dir to trigger symlink on test runners
         if [[ -d "${LOCAL_APP_CACHE}/datadir/blockchain" ]] && [[ -z "$(ls -A "${LOCAL_APP_CACHE}/datadir/blockchain" 2>/dev/null)" ]]; then
@@ -965,18 +970,18 @@ include:
     - |
       echo -e "\e[0Ksection_start:$(date +%s):save_cache[collapsed=true]\r\e[0KSaving sync data to cache..."
 
-      # Prepare data for caching
-      sudo cp -a "${SHM_DIR}" "${DATADIR}/shm_dir"
-      mkdir -p "${DATADIR}/blockchain"
-      # Remove any existing symlinks before copying (they may point to read-only locations)
-      sudo rm -f "${DATADIR}/blockchain/block_log" "${DATADIR}/blockchain/block_log.artifacts"
-      sudo cp -a "${CI_PROJECT_DIR}/docker/blockchain/block_log" "${DATADIR}/blockchain/block_log"
-      sudo cp -a "${CI_PROJECT_DIR}/docker/blockchain/block_log.artifacts" "${DATADIR}/blockchain/block_log.artifacts"
-
-      # Save to local cache
+      # Save to local cache - keep datadir and shm_dir as siblings (matching HAF cache structure)
       LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${APP_CACHE_KEY}"
       mkdir -p "${LOCAL_APP_CACHE}"
-      sudo cp -a "${DATADIR}" "${LOCAL_APP_CACHE}"
+      sudo cp -a "${DATADIR}" "${LOCAL_APP_CACHE}/datadir"
+      sudo cp -a "${SHM_DIR}" "${LOCAL_APP_CACHE}/shm_dir"
+
+      # Copy blockchain files to cache
+      mkdir -p "${LOCAL_APP_CACHE}/datadir/blockchain"
+      # Remove any existing symlinks before copying (they may point to read-only locations)
+      sudo rm -f "${LOCAL_APP_CACHE}/datadir/blockchain/block_log" "${LOCAL_APP_CACHE}/datadir/blockchain/block_log.artifacts"
+      sudo cp -a "${CI_PROJECT_DIR}/docker/blockchain/block_log" "${LOCAL_APP_CACHE}/datadir/blockchain/block_log"
+      sudo cp -a "${CI_PROJECT_DIR}/docker/blockchain/block_log.artifacts" "${LOCAL_APP_CACHE}/datadir/blockchain/block_log.artifacts"
 
       ls -lah "${LOCAL_APP_CACHE}"
       ls -lah "${LOCAL_APP_CACHE}/datadir" || true
