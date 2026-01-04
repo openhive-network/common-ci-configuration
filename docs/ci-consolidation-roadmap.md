@@ -245,44 +245,52 @@ my-test-job:
       fi
 ```
 
-## Phase 4: HAF App Template Expansion
+## Phase 4: HAF App Template Expansion (In Progress)
 
 Extend `templates/haf_app_testing.gitlab-ci.yml` with more building blocks.
 
-### Current Templates
+### Completed Templates (MR !150)
+
+| Template | Description |
+|----------|-------------|
+| `.haf_app_dind_test_variables` | Standard variables for DinD test jobs |
+| `.haf_app_dind_extract_cache` | Extract sync cache with blockchain handling |
+| `.haf_app_dind_compose_startup` | Create ci.env and start docker-compose |
+| `.haf_app_dind_wait_for_services` | Wait for PostgreSQL/PostgREST with DNS fix |
+| `.haf_app_dind_compose_teardown` | Log collection and cleanup |
+| `.haf_app_dind_complete_test` | Complete ready-to-use test template |
+
+### Example Usage
+
+```yaml
+my-test:
+  extends: .haf_app_dind_complete_test
+  needs:
+    - sync
+    - prepare_haf_image
+  variables:
+    APP_SYNC_CACHE_TYPE: "haf_myapp_sync"
+    APP_CACHE_KEY: "${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}"
+    HAF_APP_SCHEMA: "myapp"
+  script:
+    - ./run-my-tests.sh --host=docker
+```
+
+### Existing Templates
+
+These templates already exist from earlier phases:
 - `.haf_app_detect_changes` - Skip sync if only tests changed
 - `.haf_app_sync_*` - Sync job components
 - `.haf_app_smart_cache_lookup` - QUICK_TEST support
+- `.tavern_*` - Tavern test components
+- `.haf_service_config` / `.postgrest_service_config` - Service variable references
 
-### Proposed Additions
+### Migration Status
 
-#### `.haf_app_service_container`
-Standard HAF service container configuration:
-```yaml
-.haf_app_service_container:
-  services:
-    - name: ${HAF_IMAGE_NAME}
-      alias: haf-instance
-      variables:
-        PG_ACCESS: "${HAF_DB_ACCESS}"
-        DATA_SOURCE: "${HAF_DATA_CACHE_LOCAL}"
-      command: ["--execute-maintenance-script=${HAF_SOURCE_DIR}/scripts/maintenance-scripts/sleep_infinity.sh"]
-```
-
-#### `.haf_app_tavern_test`
-Complete Tavern test job template:
-```yaml
-.haf_app_tavern_test:
-  extends:
-    - .haf_app_service_container
-    - .wait-for-postgres
-  variables:
-    TAVERN_VERSION: "2.0.0"
-    PYTEST_WORKERS: "4"
-  script:
-    - pip install tavern==${TAVERN_VERSION}
-    - pytest -n ${PYTEST_WORKERS} tests/
-```
+| Project | DinD Templates | Status |
+|---------|----------------|--------|
+| balance_tracker | Can migrate regression-test, pattern-test | Pending |
+| reputation_tracker | Can migrate .test-with-docker-compose | Pending |
 
 ## Phase 5: Documentation and Migration Guides
 
@@ -340,5 +348,5 @@ For each project:
 | Phase 1 | Script Consolidation | Completed |
 | Phase 2 | Flatten Include Hierarchy | Completed |
 | Phase 3 | Reusable YAML Blocks | Completed |
-| Phase 4 | HAF App Template Expansion | Planning |
+| Phase 4 | HAF App Template Expansion | In Progress |
 | Phase 5 | Documentation & Migration Guides | Ongoing |
