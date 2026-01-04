@@ -483,13 +483,10 @@ cmd_get() {
     local is_nfs_host=false
     _is_nfs_host && is_nfs_host=true
 
-    # Determine which tar file to use (local cache or NFS)
-    local source_tar=""
-
-    # 1. Check local tar cache first (on NFS host, this IS the NFS tar)
+    # 1. Ensure we have a local tar file (copy from NFS if needed)
+    # Always extract from local for faster I/O
     if [[ -f "$LOCAL_TAR_FILE" ]]; then
         _log "Local cache hit: $LOCAL_TAR_FILE"
-        source_tar="$LOCAL_TAR_FILE"
     elif [[ "$is_nfs_host" == "true" ]]; then
         # On NFS host, local and NFS are the same - if local miss, it's a miss
         _log "NFS host cache miss: $NFS_TAR_FILE"
@@ -498,20 +495,32 @@ cmd_get() {
         _log "NFS not available, cache miss"
         return 1
     elif [[ -f "$NFS_TAR_FILE" ]]; then
-        _log "NFS cache hit: $NFS_TAR_FILE"
-        source_tar="$NFS_TAR_FILE"
+        # Copy NFS tar to local FIRST, then extract from local (faster)
+        _log "NFS cache hit: $NFS_TAR_FILE - copying to local cache"
+        mkdir -p "$(dirname "$LOCAL_TAR_FILE")"
+        local copy_start=$(date +%s.%N)
+        if cp "$NFS_TAR_FILE" "$LOCAL_TAR_FILE"; then
+            local copy_end=$(date +%s.%N)
+            local copy_duration=$(echo "$copy_end - $copy_start" | bc)
+            local tar_size=$(stat -c %s "$LOCAL_TAR_FILE" 2>/dev/null || echo 0)
+            local throughput=$(echo "scale=2; $tar_size / 1024 / 1024 / $copy_duration" | bc 2>/dev/null || echo '?')
+            _log "Copied to local cache in ${copy_duration}s (${throughput} MB/s)"
+        else
+            _error "Failed to copy NFS tar to local cache"
+            return 1
+        fi
     else
         _log "Cache miss: $NFS_TAR_FILE"
         return 1
     fi
 
-    # 2. Clean up stale extraction and extract tar to destination
+    # 2. Clean up stale extraction and extract from LOCAL tar
     # Previous runs may have left directories with postgres ownership (UID 105, mode 700)
     # that the current user can't write to - clean those up first
     _cleanup_stale_extraction "$local_dest"
     mkdir -p "$local_dest"
 
-    local tar_lock="${source_tar}.lock"
+    local tar_lock="${LOCAL_TAR_FILE}.lock"
     _touch_lock "$tar_lock"
 
     local get_start_time=$(date +%s.%N)
@@ -519,12 +528,12 @@ cmd_get() {
         lock_acquired=\$(date +%s.%N)
         echo \"[cache-manager] Shared lock acquired in \$(echo \"\$lock_acquired - $get_start_time\" | bc)s\" >&2
 
-        tar_size=\$(stat -c %s '$source_tar' 2>/dev/null || echo 0)
+        tar_size=\$(stat -c %s '$LOCAL_TAR_FILE' 2>/dev/null || echo 0)
         tar_size_gb=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / 1024\" | bc)
         echo \"[cache-manager] Extracting (\${tar_size_gb}GB) to: $local_dest\" >&2
 
         extract_start=\$(date +%s.%N)
-        tar xf '$source_tar' -C '$local_dest'
+        tar xf '$LOCAL_TAR_FILE' -C '$local_dest'
         extract_end=\$(date +%s.%N)
         extract_duration=\$(echo \"\$extract_end - \$extract_start\" | bc)
         throughput=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / \$extract_duration\" | bc 2>/dev/null || echo '?')
@@ -534,14 +543,6 @@ cmd_get() {
     else
         _error "Failed to extract tar archive"
         return 1
-    fi
-
-    # 3. Copy NFS tar to local cache for future use (skip if already local or on NFS host)
-    if [[ "$source_tar" == "$NFS_TAR_FILE" && "$LOCAL_TAR_FILE" != "$NFS_TAR_FILE" && ! -f "$LOCAL_TAR_FILE" ]]; then
-        mkdir -p "$(dirname "$LOCAL_TAR_FILE")"
-        if cp "$NFS_TAR_FILE" "$LOCAL_TAR_FILE" 2>/dev/null; then
-            _log "Cached locally: $LOCAL_TAR_FILE"
-        fi
     fi
 
     # Post-extraction fixes for HAF caches
