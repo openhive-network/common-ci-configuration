@@ -317,6 +317,9 @@ build_image_remover_image:
   stage: build
   variables:
     BUILD_TARGET: "python-scripts"
+    # Use latest docker images - python-scripts doesn't depend on fresh docker builds
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
