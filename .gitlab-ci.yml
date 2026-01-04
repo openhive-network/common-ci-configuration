@@ -249,13 +249,13 @@ lint_python_scripts:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
         - ${DOCKERFILE_PATH}
       changes:
         paths:
           - ${DOCKERFILE_PATH}
-    - if: $CI_COMMIT_BRANCH !~ /^main$/ # for other branches compare to develop and run if there are differences
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - ${DOCKERFILE_PATH}
       changes:
@@ -271,13 +271,13 @@ build_docker_dind_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.docker-dind
       changes:
         paths:
           - Dockerfile.docker-dind
-    - if: $CI_COMMIT_BRANCH !~ /^main$/
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.docker-dind
       changes:
@@ -298,13 +298,13 @@ build_docker_builder_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.docker-builder
       changes:
         paths:
           - Dockerfile.docker-builder
-    - if: $CI_COMMIT_BRANCH !~ /^main$/
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.docker-builder
       changes:
@@ -326,14 +326,14 @@ build_image_remover_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.python-scripts
       changes:
         paths:
           - Dockerfile.python-scripts
           - scripts/python/**/*
-    - if: $CI_COMMIT_BRANCH !~ /^main$/
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.python-scripts
       changes:
@@ -353,13 +353,13 @@ build_benchmark_test_runner_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.benchmark-test-runner
       changes:
         paths:
           - Dockerfile.benchmark-test-runner
-    - if: $CI_COMMIT_BRANCH !~ /^main$/
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.benchmark-test-runner
       changes:
@@ -382,13 +382,13 @@ build_haf_app_test_runner_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.haf-app-test-runner
       changes:
         paths:
           - Dockerfile.haf-app-test-runner
-    - if: $CI_COMMIT_BRANCH !~ /^main$/
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.haf-app-test-runner
       changes:
@@ -407,13 +407,13 @@ build_tox_test_runner_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.tox-test-runner
       changes:
         paths:
           - Dockerfile.tox-test-runner
-    - if: $CI_COMMIT_BRANCH !~ /^main$/
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.tox-test-runner
       changes:
@@ -432,13 +432,13 @@ build_nginx_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.nginx
       changes:
         paths:
           - Dockerfile.nginx
-    - if: $CI_COMMIT_BRANCH !~ /^main$/
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.nginx
       changes:
@@ -457,13 +457,13 @@ build_postgrest_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.postgrest
       changes:
         paths:
           - Dockerfile.postgrest
-    - if: $CI_COMMIT_BRANCH !~ /^main$/
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.postgrest
       changes:
@@ -482,13 +482,13 @@ build_alpine_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.alpine
       changes:
         paths:
           - Dockerfile.alpine
-    - if: $CI_COMMIT_BRANCH !~ /^main$/
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.alpine
       changes:
@@ -547,13 +547,13 @@ build_dockerfile_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.dockerfile
       changes:
         paths:
           - Dockerfile.dockerfile
-    - if: $CI_COMMIT_BRANCH !~ /^main$/
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.dockerfile
       changes:
@@ -572,7 +572,7 @@ build_emsdk_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH # for branch main run if there were changes on the branch
       exists:
         - Dockerfile.emscripten
       changes:
@@ -581,7 +581,7 @@ build_emsdk_image:
           - scripts/bash/npm-helpers/*
           - scripts/bash/emscripten/*
           - scripts/bash/emscripten/**/*
-    - if: $CI_COMMIT_BRANCH !~ /^main$/ # for other branches compare to develop and run if there are differences
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH # for other branches compare to develop and run if there are differences
       exists:
         - Dockerfile.emscripten
       changes:
@@ -603,13 +603,13 @@ build_psql_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == "main" # for branch main run if there were changes on the branch
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH # for branch main run if there were changes on the branch
       exists:
         - Dockerfile.psql
       changes:
         paths:
           - Dockerfile.psql
-    - if: $CI_COMMIT_BRANCH !~ /^main$/ # for other branches compare to develop and run if there are diffrences
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH # for other branches compare to develop and run if there are diffrences
       exists:
         - Dockerfile.psql
       changes:
@@ -648,6 +648,7 @@ psql_image_test:
 buildkit_cache_cleanup:
   stage: cleanup
   extends: .buildkit_cleanup_job_template
+  allow_failure: true
   # Don't use needs: [] - let it wait for build stage to complete
   # Otherwise it runs concurrently with builds and overloads the registry
   variables:
