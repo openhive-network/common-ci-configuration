@@ -1,0 +1,4 @@
+# Requirements for process_openapi.py
+deepmerge>=1.1.0
+jsonpointer>=2.3
+pyyaml>=6.0
