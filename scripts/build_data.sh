@@ -134,8 +134,22 @@ if [[ -z "$RUN_SCRIPT" ]]; then
     done
 
     if [[ -z "$RUN_SCRIPT" ]]; then
-        echo "ERROR: Could not find run_hived_img.sh. Specify --run-script=PATH"
-        exit 1
+        # Fallback: fetch run_hived_img.sh and common.sh from hive repo
+        echo "run_hived_img.sh not found locally, fetching from hive repo..."
+        HIVE_SCRIPTS_REF="${HIVE_SCRIPTS_REF:-develop}"
+        HIVE_RAW_URL="https://gitlab.syncad.com/hive/hive/-/raw/${HIVE_SCRIPTS_REF}/scripts"
+        HIVE_SCRIPTS_DIR="/tmp/hive-scripts"
+        mkdir -p "$HIVE_SCRIPTS_DIR"
+
+        # Fetch run_hived_img.sh and its dependency common.sh
+        for script in run_hived_img.sh common.sh; do
+            echo "Fetching $script from hive@${HIVE_SCRIPTS_REF}..."
+            curl -fsSL "${HIVE_RAW_URL}/${script}" -o "$HIVE_SCRIPTS_DIR/$script"
+            chmod +x "$HIVE_SCRIPTS_DIR/$script"
+        done
+
+        RUN_SCRIPT="$HIVE_SCRIPTS_DIR/run_hived_img.sh"
+        echo "Using fetched run_hived_img.sh from: $RUN_SCRIPT"
     fi
 fi
 
