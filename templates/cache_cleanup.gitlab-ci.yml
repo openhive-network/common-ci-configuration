@@ -33,3 +33,41 @@ include:
     - du -h -d 1 /cache
     - find "/cache" -maxdepth 1 -wholename "$CLEANUP_PATH_PATTERN" -mtime "+${CACHE_DAYS}"
     - find "/cache" -maxdepth 1 -wholename "$CLEANUP_PATH_PATTERN" -mtime "+${CACHE_DAYS}" -exec rm -rf {} \;
+
+# =============================================================================
+# Stale Cache Cleanup Template
+# =============================================================================
+# Checks for and removes stale cache directories with permission issues.
+# Use this before operations that need write access to cache directories.
+#
+# Required variables:
+#   CACHE_DIR: Path to cache directory to check (default: /cache/data)
+#
+# Usage:
+#   before_script:
+#     - !reference [.cleanup_stale_cache, script]
+# =============================================================================
+.cleanup_stale_cache:
+  script:
+    - |
+      CACHE_PATH="${CACHE_DIR:-/cache/data}"
+      if [[ -d "$CACHE_PATH" ]]; then
+        # Test if we can write to the cache directory
+        if ! touch "$CACHE_PATH/.write_test" 2>/dev/null; then
+          echo "Stale cache detected at $CACHE_PATH (permission issues)"
+          echo "Attempting cleanup..."
+          # Try with sudo first, then without
+          if sudo rm -rf "$CACHE_PATH" 2>/dev/null; then
+            echo "Cleaned up stale cache with sudo"
+          elif rm -rf "$CACHE_PATH" 2>/dev/null; then
+            echo "Cleaned up stale cache"
+          else
+            echo "WARNING: Could not remove stale cache at $CACHE_PATH"
+          fi
+        else
+          rm -f "$CACHE_PATH/.write_test"
+          echo "Cache directory $CACHE_PATH is writable"
+        fi
+      else
+        echo "Cache directory $CACHE_PATH does not exist (will be created as needed)"
+      fi

@@ -1287,6 +1287,8 @@ include:
 
 # Wait for PostgREST to be ready
 # Requires: PGRST_HOST or docker-compose with 'postgrest' service
+# Note: In DinD, curl may resolve hostnames differently than other tools.
+#       This template handles DNS inconsistencies by using getent for resolution.
 .haf_app_wait_for_postgrest:
   script:
     - |
@@ -1296,11 +1298,24 @@ include:
       WAIT_INTERVAL=3
       ELAPSED=0
 
-      # Determine connection method
-      PGRST_URL="${PGRST_HOST:-http://postgrest:3000}"
+      # Determine connection URL
+      if [[ -n "${PGRST_HOST:-}" ]]; then
+        PGRST_URL="${PGRST_HOST}"
+      else
+        # In DinD, curl may resolve 'docker' hostname to wrong IP.
+        # Use getent to get the correct IP for reliable connections.
+        DOCKER_IP=$(getent hosts docker 2>/dev/null | awk '{print $1}' | head -1)
+        if [[ -n "$DOCKER_IP" ]]; then
+          PGRST_URL="http://${DOCKER_IP}:3000"
+          echo "Using resolved Docker IP: $DOCKER_IP"
+        else
+          PGRST_URL="http://docker:3000"
+        fi
+      fi
+      echo "PostgREST URL: $PGRST_URL"
 
       while [[ $ELAPSED -lt $MAX_WAIT ]]; do
-        if curl -sf "${PGRST_URL}/" >/dev/null 2>&1; then
+        if curl -sf --max-time 5 "${PGRST_URL}/" >/dev/null 2>&1; then
           echo "PostgREST ready after ${ELAPSED}s at ${PGRST_URL}"
           break
         fi
@@ -1311,6 +1326,8 @@ include:
 
       if [[ $ELAPSED -ge $MAX_WAIT ]]; then
         echo "ERROR: PostgREST not ready after ${MAX_WAIT}s"
+        echo "Last curl attempt:"
+        curl -v --max-time 5 "${PGRST_URL}/" 2>&1 || true
         exit 1
       fi
 
