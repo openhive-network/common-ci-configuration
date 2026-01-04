@@ -164,11 +164,22 @@ HAF apps → HAF → hive → common-ci    HAF apps → common-ci-configuration
 | HAF | PostgreSQL access rules, HAF-specific test scripts |
 | HAF apps | App schema names, sync scripts, test configurations |
 
-## Phase 3: Reusable YAML Blocks
+## Phase 3: Reusable YAML Blocks (Completed)
 
 Create `!reference`-able script blocks for common patterns.
 
-### Proposed Templates
+### Completed Templates
+
+| Template | Location | Description |
+|----------|----------|-------------|
+| `.fetch_cache_manager` | `haf_app_testing.gitlab-ci.yml` | Fetch cache-manager.sh script |
+| `.haf_app_wait_for_postgres` | `haf_app_testing.gitlab-ci.yml` | Wait for PostgreSQL (DinD compatible) |
+| `.haf_app_wait_for_postgrest` | `haf_app_testing.gitlab-ci.yml` | Wait for PostgREST with DNS fix (MR !146) |
+| `.cleanup_stale_cache` | `cache_cleanup.gitlab-ci.yml` | Clean stale cache with permission issues (MR !146) |
+| `.cleanup_cache_manual_template` | `cache_cleanup.gitlab-ci.yml` | Manual cache cleanup job |
+| `.cleanup_old_cache_template` | `cache_cleanup.gitlab-ci.yml` | Age-based cache cleanup |
+
+### Example Usage
 
 #### `.fetch-cache-manager`
 ```yaml
@@ -328,6 +339,6 @@ For each project:
 |-------|-------------|--------|
 | Phase 1 | Script Consolidation | Completed |
 | Phase 2 | Flatten Include Hierarchy | Completed |
-| Phase 3 | Reusable YAML Blocks | Planning |
+| Phase 3 | Reusable YAML Blocks | Completed |
 | Phase 4 | HAF App Template Expansion | Planning |
 | Phase 5 | Documentation & Migration Guides | Ongoing |
