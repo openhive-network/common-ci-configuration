@@ -285,8 +285,8 @@ include:
           echo ""
           echo "=== Can skip data prep (only tests/docs changed) ==="
           CAN_SKIP_BUILD=true
-          # Use current HAF submodule commit as cache key
-          CACHE_COMMIT="${HAF_COMMIT}"
+          # Don't set CACHE_COMMIT here - smart_cache_lookup will find an available cache
+          # The app's AUTO_CACHE_HAF_COMMIT variable (if set) will be used
         else
           echo ""
           echo "=== Files requiring full build: ==="
@@ -294,12 +294,17 @@ include:
         fi
       fi
 
-      # Write dotenv artifact (output multiple names for compatibility across apps)
+      # Write dotenv artifact
+      # AUTO_SKIP_SYNC tells downstream jobs they can use cached data
+      # AUTO_CACHE_HAF_COMMIT is only set for QUICK_TEST mode (explicit cache selection)
+      # For auto-skip mode, smart_cache_lookup will find an available cache
       echo "AUTO_SKIP_BUILD=${CAN_SKIP_BUILD}" > detect_changes.env
       echo "AUTO_SKIP_SYNC=${CAN_SKIP_BUILD}" >> detect_changes.env
-      echo "CACHE_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
-      echo "AUTO_CACHE_HAF_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
-      echo "AUTO_CACHE_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
+      if [ -n "$CACHE_COMMIT" ]; then
+        echo "CACHE_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
+        echo "AUTO_CACHE_HAF_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
+        echo "AUTO_CACHE_COMMIT=${CACHE_COMMIT}" >> detect_changes.env
+      fi
 
       echo ""
       echo "=== Detection Results ==="
