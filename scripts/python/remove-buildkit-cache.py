@@ -4,7 +4,7 @@ This script deletes old BuildKit cache from GitLab registry.
 It's meant to be run by CI as it uses the job token.
 
 Requires CI_API_V4_URL, CI_PROJECT_ID and CI_JOB_TOKEN to be set.
-Requires CACHE_REPOSITORIES to contains comma-separated list of cache repositories.
+Requires CACHE_REPOSITORIES to contain comma-separated list of cache repositories.
 '''
 import os
 import requests
