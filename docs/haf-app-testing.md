@@ -443,6 +443,88 @@ This allows:
 
 ## Migration Guide
 
+### Step 1: Add Variable Aliases
+
+Add these global variables for template compatibility:
+
+```yaml
+variables:
+  # Aliases for common-ci templates
+  APP_SYNC_CACHE_TYPE: "${MY_APP_SYNC_CACHE_TYPE}"
+  APP_CACHE_KEY: "${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}"
+  HAF_APP_SCHEMA: "myapp"
+```
+
+### Step 2: Migrate DinD Test Jobs
+
+**Before (reputation_tracker, 168 lines):**
+```yaml
+.test-with-docker-compose:
+  extends: .docker_image_builder_job_template
+  before_script:
+    - !reference [.docker_image_builder_job_template, before_script]
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+    - |
+      # 60+ lines of cache extraction
+      CACHE_MANAGER="/tmp/cache-manager.sh"
+      curl -fsSL "..." -o "$CACHE_MANAGER"
+      chmod +x "$CACHE_MANAGER"
+      "$CACHE_MANAGER" get "${CACHE_TYPE}" "${CACHE_KEY}" "${JOB_DIR}"
+      # ... blockchain handling, compose startup, service wait
+  after_script:
+    - # 30+ lines of cleanup
+```
+
+**After (8 lines):**
+```yaml
+.test-with-docker-compose:
+  extends: .haf_app_dind_complete_test
+  image: registry.gitlab.syncad.com/hive/reputation_tracker/ci-runner:docker-24.0.1-8
+  variables:
+    COMPOSE_OPTIONS_STRING: "--file docker-compose-test.yml --ansi never"
+```
+
+### Step 3: For Apps with Multiple DinD Jobs
+
+If your app has several DinD test jobs (like balance_tracker), create a project-specific template:
+
+```yaml
+# Project-specific template consolidating common patterns
+.myapp-dind-test:
+  extends: .docker_image_builder_job_template
+  stage: test
+  image: my-ci-runner-image
+  variables:
+    HAF_DATA_DIRECTORY: ${CI_PROJECT_DIR}/${CI_JOB_ID}/datadir
+    MYAPP_TEST_CACHE_TYPE: "${MYAPP_SYNC_CACHE_TYPE}"
+  before_script:
+    - !reference [.docker_image_builder_job_template, before_script]
+    - !reference [.haf_app_extract_test_cache, script]
+    # ... compose startup, service wait
+  after_script:
+    # ... cleanup
+
+# Simplified jobs
+regression-test:
+  extends: .myapp-dind-test
+  script:
+    - ./run-tests.sh
+
+pattern-test:
+  extends: .myapp-dind-test
+  variables:
+    WAIT_FOR_POSTGREST: "true"
+  script:
+    - pytest tests/
+```
+
+### Real Migration Examples
+
+| Project | MR | Before | After | Reduction |
+|---------|-----|--------|-------|-----------|
+| reputation_tracker | !143 | 168 lines | 8 lines | -160 lines |
+| balance_tracker | !261 | 445 lines (3 jobs) | 91 lines | -354 lines |
+
 ### From inline cache-manager fetch
 
 **Before:**
