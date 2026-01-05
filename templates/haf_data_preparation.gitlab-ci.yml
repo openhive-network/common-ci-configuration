@@ -1,7 +1,7 @@
 # =============================================================================
 # HAF Data Preparation Templates
 # =============================================================================
-# Templates for building HAF images and preparing replay data.
+# Templates for building HAF/hived images and preparing replay data.
 # These templates allow HAF and HAF apps to include directly from
 # common-ci-configuration instead of chaining through hive → HAF.
 #
@@ -14,9 +14,26 @@
 # Templates provided:
 #   .haf_docker_image_builder_job - Base job for HAF Docker operations
 #   .prepare_haf_image - Build HAF Docker image
-#   .prepare_haf_data_5m - Prepare 5M block replay data with caching
+#   .prepare_haf_data_5m - Prepare 5M block HAF replay data with caching
+#   .prepare_hived_data_5m - Prepare 5M block hived replay data with caching
 #   .wait-for-haf-postgres - Wait for HAF PostgreSQL service
 #   .wait-for-haf-postgres-with-nfs-extraction - Wait with NFS cache extraction
+#
+# Pre-built Images:
+#   Instead of building images from submodules, HAF apps can use pre-built
+#   images from the GitLab registries:
+#     - HAF: registry.gitlab.syncad.com/hive/haf:<commit-short-sha>
+#     - hived: registry.gitlab.syncad.com/hive/hive:<commit-short-sha>
+#
+#   Example:
+#     variables:
+#       HAF_COMMIT: "1edae265e18b96245a3a77e3d937186996dbf8b5"
+#       HIVE_COMMIT: "1179c5456dbb6be65c73178eb53d2e02223de3a2"
+#       HAF_IMAGE_NAME: "registry.gitlab.syncad.com/hive/haf:${HAF_COMMIT:0:8}"
+#       HIVED_IMAGE_NAME: "registry.gitlab.syncad.com/hive/hive:${HIVE_COMMIT:0:8}"
+#
+#   To find which hive commit corresponds to a HAF commit:
+#     git -C /path/to/haf ls-tree <haf-commit> hive
 # =============================================================================
 
 # Base job for HAF Docker operations
@@ -225,6 +242,155 @@
           echo "Skipping main HAF cache push (job uses FILTERED_CACHE_KEY)"
         fi
       fi
+    - cp "${DATA_CACHE_DIR}/datadir/hived_uid.env" "$CI_PROJECT_DIR/hived_uid.env"
+    - cp "${DATA_CACHE_DIR}/datadir/docker_entrypoint.log" "${CI_PROJECT_DIR}/docker_entrypoint.log" 2>/dev/null || true
+    - ls -la "${DATA_CACHE_DIR}/datadir/"
+  after_script:
+    - rm "${DATA_CACHE_DIR}/replay_running" -f
+  artifacts:
+    reports:
+      dotenv:
+        - docker_image_name.env
+        - hived_uid.env
+    paths:
+      - "${CI_PROJECT_DIR}/docker_entrypoint.log"
+
+# =============================================================================
+# .prepare_hived_data_5m - Prepare 5M block hived replay data with caching
+# =============================================================================
+# Prepares standalone hived replay data using a two-tier cache (local + NFS).
+# Uses pre-built hived image from registry - no submodule required.
+# Runs replay only on cache miss.
+#
+# Required variables:
+#   HIVED_IMAGE_NAME: hived Docker image (e.g., registry.gitlab.syncad.com/hive/hive:<short-sha>)
+#   HIVE_COMMIT: hive commit SHA (used as cache key)
+#   DATA_CACHE_HIVE_PREFIX: Prefix for data cache directory (e.g., /cache/replay_data_hive)
+#   BLOCK_LOG_SOURCE_DIR: Directory containing block_log (e.g., /blockchain/block_log_5m)
+#   CONFIG_INI_SOURCE: Path to config.ini file
+#
+# Optional variables:
+#   HIVE_SCRIPTS_REF: Git ref for fetching scripts from hive (default: develop)
+#   COMMON_CI_REF: Git ref for common-ci-configuration scripts (default: develop)
+#
+# Cache behavior:
+#   1. Check local cache at DATA_CACHE_DIR
+#   2. If miss, check NFS cache via cache-manager
+#   3. If miss, run replay and push to NFS
+#
+# Artifacts:
+#   - docker_image_name.env (with HIVED_IMAGE_NAME)
+#   - hived_uid.env
+#   - docker_entrypoint.log
+#
+# Example usage with pre-built image:
+#   prepare_hived_data:
+#     extends: .prepare_hived_data_5m
+#     variables:
+#       HIVE_COMMIT: "1179c5456dbb6be65c73178eb53d2e02223de3a2"
+#       HIVED_IMAGE_NAME: "registry.gitlab.syncad.com/hive/hive:1179c545"
+#       BLOCK_LOG_SOURCE_DIR: /blockchain/block_log_5m
+#       CONFIG_INI_SOURCE: /tmp/haf-app-tools/hived_config_5M.ini
+#     before_script:
+#       - !reference [.haf_docker_image_builder_job, before_script]
+#       - curl -fsSL "${COMMON_CI_URL}/haf-app-tools/config/hived_config_5M.ini" -o /tmp/haf-app-tools/hived_config_5M.ini
+# =============================================================================
+.prepare_hived_data_5m:
+  extends: .haf_docker_image_builder_job
+  variables:
+    BLOCK_LOG_SOURCE_DIR: ""
+    CONFIG_INI_SOURCE: ""
+    DATA_CACHE_DIR: "${DATA_CACHE_HIVE_PREFIX}_${HIVE_COMMIT}"
+    COMMON_CI_REF: "develop"
+    HIVE_SCRIPTS_REF: "develop"
+    # NFS cache configuration
+    CACHE_NFS_PATH: "/nfs/ci-cache"
+    CACHE_LOCAL_PATH: "/cache"
+  script:
+    - |
+      # Fetch build_data.sh from common-ci-configuration
+      COMMON_CI_URL="https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${COMMON_CI_REF}/scripts"
+      BUILD_DATA_SCRIPT="/tmp/build_data.sh"
+      echo "Fetching build_data.sh from common-ci-configuration@${COMMON_CI_REF}..."
+      curl -fsSL "${COMMON_CI_URL}/build_data.sh" -o "$BUILD_DATA_SCRIPT"
+      chmod +x "$BUILD_DATA_SCRIPT"
+    - |
+      # Fetch cache-manager from common-ci-configuration
+      CACHE_MANAGER="/tmp/cache-manager.sh"
+      if [[ ! -x "$CACHE_MANAGER" ]]; then
+        curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${COMMON_CI_REF}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
+        chmod +x "$CACHE_MANAGER"
+      fi
+      CACHE_KEY="${HIVE_COMMIT}"
+      LOCAL_CACHE_HIT=false
+      NFS_CACHE_HIT=false
+
+      # 1. Check if local cache already exists at the expected path
+      if [[ -d "${DATA_CACHE_DIR}/datadir" && -f "${DATA_CACHE_DIR}/datadir/status" ]]; then
+        LOCAL_STATUS=$(cat "${DATA_CACHE_DIR}/datadir/status" 2>/dev/null || echo "1")
+        if [[ "$LOCAL_STATUS" == "0" ]]; then
+          echo "Local cache hit for HIVE commit $CACHE_KEY at ${DATA_CACHE_DIR}"
+          LOCAL_CACHE_HIT=true
+        fi
+      fi
+
+      # 2. If no local cache, try to get from NFS via cache-manager
+      if [[ "$LOCAL_CACHE_HIT" != "true" ]] && [[ -x "$CACHE_MANAGER" ]]; then
+        if "$CACHE_MANAGER" get hive "$CACHE_KEY" "${DATA_CACHE_DIR}"; then
+          echo "NFS cache hit for HIVE commit $CACHE_KEY"
+          NFS_CACHE_HIT=true
+        fi
+      fi
+
+      if [[ "$LOCAL_CACHE_HIT" == "true" ]] || [[ "$NFS_CACHE_HIT" == "true" ]]; then
+        echo "Cache hit for HIVE commit $CACHE_KEY"
+        # Ensure hived_uid.env exists
+        if [[ ! -f "${DATA_CACHE_DIR}/datadir/hived_uid.env" ]]; then
+          echo "HIVED_UID=$(id -u)" > "${DATA_CACHE_DIR}/datadir/hived_uid.env"
+        fi
+
+        # If we got local cache but NFS doesn't have it, push to NFS for cross-builder jobs
+        if [[ "$LOCAL_CACHE_HIT" == "true" ]] && [[ "$NFS_CACHE_HIT" != "true" ]]; then
+          NFS_TAR="${CACHE_NFS_PATH}/hive/${CACHE_KEY}.tar"
+          if [[ -x "$CACHE_MANAGER" ]] && [[ ! -f "$NFS_TAR" ]]; then
+            echo "Local cache exists but NFS cache missing - pushing to NFS for cross-builder jobs"
+            "$CACHE_MANAGER" put hive "$CACHE_KEY" "${DATA_CACHE_DIR}" || echo "Warning: Failed to push to NFS cache"
+          fi
+        fi
+      else
+        echo "Cache miss for HIVE commit $CACHE_KEY - performing replay"
+        mkdir "${DATA_CACHE_DIR}/datadir" -pv
+
+        # Fetch run_hived_img.sh from hive repo
+        HIVE_RAW_URL="https://gitlab.syncad.com/hive/hive/-/raw/${HIVE_SCRIPTS_REF}/scripts"
+        HIVE_SCRIPTS_DIR="/tmp/hive-scripts"
+        mkdir -p "$HIVE_SCRIPTS_DIR"
+
+        for script in run_hived_img.sh common.sh; do
+          echo "Fetching $script from hive@${HIVE_SCRIPTS_REF}..."
+          curl -fsSL "${HIVE_RAW_URL}/${script}" -o "$HIVE_SCRIPTS_DIR/$script"
+          chmod +x "$HIVE_SCRIPTS_DIR/$script"
+        done
+
+        RUN_SCRIPT="$HIVE_SCRIPTS_DIR/run_hived_img.sh"
+        echo "Using fetched run_hived_img.sh from: $RUN_SCRIPT"
+
+        # Run replay using build_data.sh from common-ci-configuration
+        (flock "${DATA_CACHE_DIR}/datadir" "$BUILD_DATA_SCRIPT" "$HIVED_IMAGE_NAME" \
+          --data-cache="${DATA_CACHE_DIR}" \
+          --block-log-source-dir="$BLOCK_LOG_SOURCE_DIR" \
+          --config-ini-source="$CONFIG_INI_SOURCE" \
+          --run-script="$RUN_SCRIPT")
+
+        # Push to NFS cache for future use
+        if [[ -x "$CACHE_MANAGER" ]]; then
+          "$CACHE_MANAGER" put hive "$CACHE_KEY" "${DATA_CACHE_DIR}" || echo "Warning: Failed to push to NFS cache"
+        fi
+      fi
+    - |
+      # Create dotenv with image name for downstream jobs
+      echo "HIVED_IMAGE_NAME=$HIVED_IMAGE_NAME" > docker_image_name.env
+      echo "HIVED_COMMIT=$HIVE_COMMIT" >> docker_image_name.env
     - cp "${DATA_CACHE_DIR}/datadir/hived_uid.env" "$CI_PROJECT_DIR/hived_uid.env"
     - cp "${DATA_CACHE_DIR}/datadir/docker_entrypoint.log" "${CI_PROJECT_DIR}/docker_entrypoint.log" 2>/dev/null || true
     - ls -la "${DATA_CACHE_DIR}/datadir/"
