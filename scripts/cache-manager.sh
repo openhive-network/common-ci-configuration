@@ -377,18 +377,46 @@ _restore_pgdata_permissions() {
 # NOTE: We keep ALL WAL files to ensure safe PostgreSQL recovery.
 # Previously we tried to exclude WAL files except the checkpoint WAL to save ~5.8GB,
 # but this caused data corruption when PostgreSQL started crash recovery on extracted data.
+# Build tar exclusions for block_log files only (not entire blockchain directory)
+# This preserves RocksDB directories (account-history-rocksdb-storage, comments-rocksdb-storage)
+# which contain unique replay data, while excluding block_log files that are shared.
+_build_blockchain_tar_excludes() {
+    local source_dir="$1"
+    local blockchain_dir="${source_dir}/datadir/blockchain"
+    local excludes=""
+
+    if [[ ! -d "$blockchain_dir" ]]; then
+        echo ""
+        return 0
+    fi
+
+    # Exclude only block_log files - these are large (~1.7GB) and shared via symlinks
+    # Keep RocksDB directories which contain unique replay state data
+    excludes="--exclude=./datadir/blockchain/block_log"
+    excludes+=" --exclude=./datadir/blockchain/block_log.artifacts"
+
+    # Exclude all block_log_part.* files and their artifacts
+    for part_file in "${blockchain_dir}"/block_log_part.*; do
+        if [[ -e "$part_file" ]]; then
+            local filename
+            filename=$(basename "$part_file")
+            excludes+=" --exclude=./datadir/blockchain/${filename}"
+        fi
+    done
+
+    _log "Excluding block_log files (will link shared block_log on extraction)"
+    _log "Preserving RocksDB directories in cache"
+    echo "$excludes"
+}
+
 # The tar may be created while PostgreSQL is still running (docker-compose down takes time),
 # so we need all WAL files for proper recovery.
 _build_haf_tar_excludes() {
     local source_dir="$1"
-    local excludes=""
 
-    # Exclude blockchain directory - will be linked via _link_shared_block_log on extraction
-    # Saves ~1.7GB per cache
-    if [[ -d "${source_dir}/datadir/blockchain" ]]; then
-        excludes="--exclude=./datadir/blockchain"
-        _log "Excluding datadir/blockchain (will link shared block_log on extraction)"
-    fi
+    # Use common block_log exclusion logic
+    local excludes
+    excludes=$(_build_blockchain_tar_excludes "$source_dir")
 
     # Keep all pg_wal files - required for safe PostgreSQL recovery
 
@@ -568,11 +596,16 @@ cmd_get() {
         return 1
     fi
 
-    # Post-extraction fixes for HAF caches
+    # Post-extraction fixes
+    # Link shared block_log for both hive and haf* caches (block_log files excluded from tar)
+    if [[ "$cache_type" == "hive" ]] || [[ "$cache_type" == haf* ]]; then
+        _link_shared_block_log "$local_dest"
+    fi
+
+    # Additional fixes for HAF caches (PostgreSQL permissions)
     # Covers: haf, haf_sync, haf_pipeline, haf_filtered, haf_hafbe_sync, etc.
     if [[ "$cache_type" == haf* ]]; then
         _restore_pgdata_permissions "$local_dest"
-        _link_shared_block_log "$local_dest"
     fi
 
     _update_lru "$cache_type" "$cache_key"
@@ -610,15 +643,10 @@ cmd_put() {
             return 0
         fi
 
-        # Build exclusions
+        # Build exclusions - exclude block_log files but preserve RocksDB directories
         local tar_excludes=""
-        if [[ "$cache_type" == "hive" ]]; then
-            if [[ -d "${local_source}/datadir/blockchain" ]]; then
-                tar_excludes="--exclude=./datadir/blockchain"
-                _log "Excluding datadir/blockchain"
-            fi
-        elif [[ "$cache_type" == haf* ]]; then
-            tar_excludes=$(_build_haf_tar_excludes "$local_source")
+        if [[ "$cache_type" == "hive" ]] || [[ "$cache_type" == haf* ]]; then
+            tar_excludes=$(_build_blockchain_tar_excludes "$local_source")
         fi
 
         # Create tar archive (local I/O on NFS host, still fast)
@@ -658,15 +686,10 @@ cmd_put() {
         return 0
     fi
 
-    # Build exclusions
+    # Build exclusions - exclude block_log files but preserve RocksDB directories
     local tar_excludes=""
-    if [[ "$cache_type" == "hive" ]]; then
-        if [[ -d "${local_source}/datadir/blockchain" ]]; then
-            tar_excludes="--exclude=./datadir/blockchain"
-            _log "Excluding datadir/blockchain"
-        fi
-    elif [[ "$cache_type" == haf* ]]; then
-        tar_excludes=$(_build_haf_tar_excludes "$local_source")
+    if [[ "$cache_type" == "hive" ]] || [[ "$cache_type" == haf* ]]; then
+        tar_excludes=$(_build_blockchain_tar_excludes "$local_source")
     fi
 
     # Step 1: Create local tar (always, this is our primary cache)
