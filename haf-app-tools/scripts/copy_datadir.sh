@@ -178,6 +178,10 @@ then
             fi
             echo "Blockchain not in cache, linking to shared block_log at ${SHARED_BLOCK_LOG_DIR}"
             sudo -Enu hived mkdir -p "${DATADIR}/blockchain"
+            # Fix blockchain directory ownership if copied by root (needed for non-empty dirs like rocksdb)
+            if [[ -d "${DATADIR}/blockchain" ]]; then
+                sudo chown -R hived:users "${DATADIR}/blockchain" 2>/dev/null || sudo chmod -R a+w "${DATADIR}/blockchain" 2>/dev/null || true
+            fi
             for block_file in "${SHARED_BLOCK_LOG_DIR}"/block_log* ; do
                 if [[ -f "$block_file" ]]; then
                     local_name=$(basename "$block_file")
