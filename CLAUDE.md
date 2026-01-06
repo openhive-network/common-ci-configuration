@@ -17,6 +17,7 @@ Detailed documentation is available in `docs/`:
 - `cache-manager.md` - NFS-backed cache system for HAF/hive replay data
 - `common-ci-images.md` - Docker images, their purposes, and Python versions
 - `haf-app-testing.md` - Templates for HAF-dependent application testing
+- `image-cache-lookup.md` - Scripts for finding pre-built images and avoiding rebuilds
 
 ## Validation Commands
 
@@ -59,6 +60,7 @@ Templates are in `templates/` and are included by downstream projects:
 | `test_jobs.gitlab-ci.yml` | pytest, jmeter, tox test runners |
 | `python_projects.gitlab-ci.yml` | Python linting/testing |
 | `haf_app_testing.gitlab-ci.yml` | HAF app change detection, DinD testing, Tavern |
+| `source_change_detection.gitlab-ci.yml` | Source change detection, skip rules, upstream image lookup |
 | `cache-manager.gitlab-ci.yml` | Cache-manager script setup |
 | `base.gitlab-ci.yml` | Common job defaults |
 
@@ -81,6 +83,26 @@ Located in `scripts/bash/npm-helpers/`:
 - `npm_build_package.sh` - Build and package monorepos
 - `npm_publish.sh` - Publish to npm registries
 - `npm_pack_package.sh` - Create package tarballs
+
+## Image Cache Lookup Scripts
+
+Located in `scripts/bash/`:
+- `find-last-source-commit.sh` - Find the most recent commit that changed source files
+- `get-cached-image.sh` - Check if a Docker image exists in a registry for a commit
+- `find-upstream-image.sh` - Find pre-built images from upstream repos (combines git fetch + lookup)
+- `docker-image-utils.sh` - Utility functions for Docker image operations
+
+See `docs/image-cache-lookup.md` for full documentation.
+
+**Example: Downstream repo finding upstream image:**
+```bash
+# Find latest hive image without maintaining a submodule
+find-upstream-image.sh \
+  --repo-url=https://gitlab.syncad.com/hive/hive.git \
+  --registry=registry.gitlab.syncad.com/hive/hive \
+  --patterns="libraries/,programs/,CMakeLists.txt,Dockerfile"
+# Outputs: UPSTREAM_IMAGE=registry.../hive:abc12345
+```
 
 ## Architecture Notes
 
