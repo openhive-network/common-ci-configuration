@@ -1,0 +1,326 @@
+# Source Change Detection Templates
+#
+# Provides reusable templates for detecting what type of files changed in a commit
+# and skipping unnecessary builds/tests. Also provides templates for finding
+# pre-built images from upstream repositories.
+#
+# Include this file in your .gitlab-ci.yml:
+#   include:
+#     - project: 'hive/common-ci-configuration'
+#       ref: develop
+#       file: '/templates/source_change_detection.gitlab-ci.yml'
+#
+# Features:
+#   1. Detect docs-only changes (skip builds and tests)
+#   2. Detect tests-only changes (skip builds, reuse cached images)
+#   3. Find pre-built images from upstream repos
+#   4. Skip rules for conditional job execution
+#
+# Required Variables (set in your CI):
+#   SOURCE_CODE_PATTERNS    - Regex patterns for source files (pipe-separated)
+#   DOCS_PATTERNS           - Regex patterns for documentation files (pipe-separated)
+#   CI_SCRIPT_PATTERNS      - Regex patterns for CI scripts (pipe-separated)
+#
+# Example Configuration:
+#   variables:
+#     SOURCE_CODE_PATTERNS: "^(libraries/|programs/|CMakeLists\\.txt|cmake/|Dockerfile)"
+#     DOCS_PATTERNS: "^(.*\\.md|doc/|\\.gitignore|CODEOWNERS)"
+#     CI_SCRIPT_PATTERNS: "^(\\.gitlab-ci\\.yaml|scripts/ci/)"
+
+variables:
+  # Default patterns (override in your CI)
+  SOURCE_CODE_PATTERNS: "^(src/|lib/|Dockerfile|CMakeLists\\.txt|cmake/)"
+  DOCS_PATTERNS: "^(.*\\.md|doc/|docs/|\\.gitignore|\\.gitattributes|\\.dockerignore|\\.editorconfig|CODEOWNERS|\\.mailmap|LICENSE|COPYING)"
+  CI_SCRIPT_PATTERNS: "^(\\.gitlab-ci\\.yaml|\\.gitlab-ci\\.yml|scripts/ci/|\\.ci/)"
+  TEST_PATTERNS: "^(tests/|test/|spec/|__tests__/)"
+
+  # Control variables (can be set when running pipeline)
+  FORCE_FULL_PIPELINE: "false"
+  QUICK_TEST: "false"
+
+  # Output variables (set by detect_source_changes job)
+  DOCS_ONLY: "false"
+  TESTS_ONLY: "false"
+  SOURCE_CHANGED: "false"
+  CI_CHANGED: "false"
+
+# ============================================================================
+# Change Detection Job Template
+# ============================================================================
+
+# Detects what type of files changed and exports variables for other jobs
+# Extend this in your CI and customize the patterns as needed
+.detect_source_changes:
+  stage: .pre
+  image: alpine:latest
+  needs: []
+  variables:
+    GIT_DEPTH: 50
+  before_script:
+    - apk add --no-cache git
+  script:
+    - |
+      echo "=== Source Change Detection ==="
+      echo "SOURCE_CODE_PATTERNS: $SOURCE_CODE_PATTERNS"
+      echo "DOCS_PATTERNS: $DOCS_PATTERNS"
+      echo "CI_SCRIPT_PATTERNS: $CI_SCRIPT_PATTERNS"
+      echo "TEST_PATTERNS: $TEST_PATTERNS"
+      echo ""
+
+      # Determine base commit to compare against
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ]; then
+        BASE_SHA="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+        echo "Using MR diff base: $BASE_SHA"
+      elif [ -n "$CI_COMMIT_BEFORE_SHA" ] && [ "$CI_COMMIT_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+        BASE_SHA="$CI_COMMIT_BEFORE_SHA"
+        echo "Using commit before SHA: $BASE_SHA"
+      else
+        BASE_SHA="HEAD~1"
+        echo "Using HEAD~1 as base"
+      fi
+
+      # Get list of changed files
+      echo ""
+      echo "Changed files:"
+      CHANGED_FILES=$(git diff --name-only "$BASE_SHA" HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+      echo "$CHANGED_FILES" | head -50
+      if [ "$(echo "$CHANGED_FILES" | wc -l)" -gt 50 ]; then
+        echo "... (truncated, more than 50 files changed)"
+      fi
+
+      # Initialize detection flags
+      DOCS_ONLY="false"
+      SOURCE_CHANGED="false"
+      TESTS_CHANGED="false"
+      CI_CHANGED="false"
+      TESTS_ONLY="false"
+
+      if [ -n "$CHANGED_FILES" ]; then
+        # Check if ONLY documentation files changed
+        NON_DOCS=$(echo "$CHANGED_FILES" | grep -vE "$DOCS_PATTERNS" || true)
+        if [ -z "$NON_DOCS" ]; then
+          DOCS_ONLY="true"
+          echo ""
+          echo ">>> Only documentation files changed"
+        fi
+
+        # Check if source code changed
+        if echo "$CHANGED_FILES" | grep -qE "$SOURCE_CODE_PATTERNS"; then
+          SOURCE_CHANGED="true"
+        fi
+
+        # Check if tests changed
+        if echo "$CHANGED_FILES" | grep -qE "$TEST_PATTERNS"; then
+          TESTS_CHANGED="true"
+        fi
+
+        # Check if CI scripts changed
+        if echo "$CHANGED_FILES" | grep -qE "$CI_SCRIPT_PATTERNS"; then
+          CI_CHANGED="true"
+        fi
+
+        # Determine if tests-only change (tests changed, but not source or CI)
+        if [ "$DOCS_ONLY" = "false" ] && [ "$TESTS_CHANGED" = "true" ] && [ "$SOURCE_CHANGED" = "false" ] && [ "$CI_CHANGED" = "false" ]; then
+          TESTS_ONLY="true"
+          echo ""
+          echo ">>> Tests-only change detected"
+        fi
+      fi
+
+      echo ""
+      echo "=== Detection Results ==="
+      echo "  DOCS_ONLY=$DOCS_ONLY"
+      echo "  SOURCE_CHANGED=$SOURCE_CHANGED"
+      echo "  TESTS_CHANGED=$TESTS_CHANGED"
+      echo "  CI_CHANGED=$CI_CHANGED"
+      echo "  TESTS_ONLY=$TESTS_ONLY"
+
+      # Write to dotenv file for other jobs
+      cat > detect_changes.env << EOF
+      DOCS_ONLY=$DOCS_ONLY
+      TESTS_ONLY=$TESTS_ONLY
+      SOURCE_CHANGED=$SOURCE_CHANGED
+      CI_CHANGED=$CI_CHANGED
+      EOF
+  artifacts:
+    reports:
+      dotenv: detect_changes.env
+    expire_in: 1 day
+  rules:
+    # Skip on protected branches - always run full pipeline
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main"
+      when: never
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: never
+    # Skip on tags
+    - if: $CI_COMMIT_TAG
+      when: never
+    # Skip if forcing full pipeline
+    - if: $FORCE_FULL_PIPELINE == "true"
+      when: never
+    # Skip if QUICK_TEST is manually enabled
+    - if: $QUICK_TEST == "true"
+      when: never
+    - when: on_success
+
+# ============================================================================
+# Upstream Image Lookup Job Template
+# ============================================================================
+
+# Template for finding pre-built images from upstream repositories
+# Extend this and set the required variables
+.find_upstream_image:
+  stage: .pre
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:24-cli
+  needs: []
+  variables:
+    # Override these in your job
+    UPSTREAM_REPO_URL: ""
+    UPSTREAM_REGISTRY: ""
+    UPSTREAM_BRANCH: "develop"
+    UPSTREAM_PATTERNS: ""
+    UPSTREAM_IMAGE: ""
+    UPSTREAM_DEPTH: "100"
+    # Output file name
+    UPSTREAM_OUTPUT: "upstream-image.env"
+  before_script:
+    - apk add --no-cache git bash
+  script:
+    - |
+      # Fetch common-ci-configuration scripts
+      SCRIPTS_URL="https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/develop/scripts/bash"
+
+      mkdir -p /tmp/ci-scripts
+      for script in find-last-source-commit.sh get-cached-image.sh find-upstream-image.sh; do
+        wget -q -O "/tmp/ci-scripts/$script" "$SCRIPTS_URL/$script"
+        chmod +x "/tmp/ci-scripts/$script"
+      done
+
+      # Run the upstream image finder
+      /tmp/ci-scripts/find-upstream-image.sh \
+        --repo-url="$UPSTREAM_REPO_URL" \
+        --registry="$UPSTREAM_REGISTRY" \
+        --branch="$UPSTREAM_BRANCH" \
+        --patterns="$UPSTREAM_PATTERNS" \
+        ${UPSTREAM_IMAGE:+--image="$UPSTREAM_IMAGE"} \
+        --depth="$UPSTREAM_DEPTH" \
+        --output="$UPSTREAM_OUTPUT"
+  artifacts:
+    reports:
+      dotenv: $UPSTREAM_OUTPUT
+    expire_in: 1 day
+
+# ============================================================================
+# Skip Rule Templates
+# ============================================================================
+
+# Skip build jobs when only docs or tests changed
+.skip_build_on_non_source_changes:
+  rules:
+    - if: $QUICK_TEST == "true"
+      when: never
+    - if: $DOCS_ONLY == "true"
+      when: never
+    - if: $TESTS_ONLY == "true"
+      when: never
+    - if: $FORCE_FULL_PIPELINE == "true"
+      when: on_success
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: on_success
+    - if: $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"
+      when: on_success
+    - if: $CI_COMMIT_TAG
+      when: on_success
+    - when: on_success
+
+# Skip test jobs when only docs changed
+.skip_test_on_docs_only:
+  rules:
+    - if: $FORCE_FULL_PIPELINE == "true"
+      when: on_success
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: on_success
+    - if: $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"
+      when: on_success
+    - if: $CI_COMMIT_TAG
+      when: on_success
+    - if: $DOCS_ONLY == "true"
+      when: never
+    - when: on_success
+
+# Make expensive jobs manual on feature branches
+.manual_on_feature_branches:
+  rules:
+    - if: $FORCE_FULL_PIPELINE == "true"
+      when: on_success
+    - if: $TESTS_ONLY == "true"
+      when: never
+    - if: $QUICK_TEST == "true"
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: on_success
+    - if: $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"
+      when: on_success
+    - if: $CI_COMMIT_TAG
+      when: on_success
+    - when: manual
+      allow_failure: true
+
+# Run when QUICK_TEST or TESTS_ONLY is enabled (for cached binary setup)
+.run_on_quick_test:
+  rules:
+    - if: $QUICK_TEST == "true"
+      when: always
+    - if: $TESTS_ONLY == "true"
+      when: always
+    - when: never
+
+# ============================================================================
+# Local Image Lookup Job Template
+# ============================================================================
+
+# Template for checking if a locally-built image already exists
+# Use this for the "build-or-skip" pattern within the same repo
+.check_local_image:
+  stage: .pre
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:24-cli
+  needs: []
+  variables:
+    # Override these in your job
+    LOCAL_REGISTRY: "${CI_REGISTRY_IMAGE}"
+    LOCAL_IMAGE: ""
+    LOCAL_PATTERNS: ""
+    LOCAL_OUTPUT: "local-image.env"
+  before_script:
+    - apk add --no-cache git bash
+  script:
+    - |
+      # Fetch common-ci-configuration scripts
+      SCRIPTS_URL="https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/develop/scripts/bash"
+
+      mkdir -p /tmp/ci-scripts
+      for script in find-last-source-commit.sh get-cached-image.sh; do
+        wget -q -O "/tmp/ci-scripts/$script" "$SCRIPTS_URL/$script"
+        chmod +x "/tmp/ci-scripts/$script"
+      done
+
+      # Convert comma-separated patterns to arguments
+      IFS=',' read -ra PATTERNS <<< "$LOCAL_PATTERNS"
+
+      # Find last source commit
+      COMMIT=$(/tmp/ci-scripts/find-last-source-commit.sh "${PATTERNS[@]}")
+      echo "Last source commit: $COMMIT"
+
+      # Check if image exists
+      /tmp/ci-scripts/get-cached-image.sh \
+        --commit="$COMMIT" \
+        --registry="$LOCAL_REGISTRY" \
+        ${LOCAL_IMAGE:+--image="$LOCAL_IMAGE"} \
+        --output="$LOCAL_OUTPUT"
+  artifacts:
+    reports:
+      dotenv: $LOCAL_OUTPUT
+    expire_in: 1 day
