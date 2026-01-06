@@ -78,10 +78,16 @@ extract_nfs_cache_if_needed() {
     local basename
     basename=$(basename "$data_source")
 
-    # Split by first underscore: haf_pipeline_12345_filtered -> type=haf_pipeline, key=12345_filtered
-    # Most common: hive_{commit} -> type=hive, key={commit}
+    # Split by pattern to extract cache type and key
+    # Special case: replay_data_hive_{commit} -> type=hive, key={commit}
+    # Common patterns: haf_{commit} -> type=haf, key={commit}
+    #                  hive_{commit} -> type=hive, key={commit}
     local cache_type cache_key
-    if [[ "$basename" =~ ^([^_]+_[^_]+)_(.+)$ ]]; then
+    if [[ "$basename" =~ ^replay_data_hive_(.+)$ ]]; then
+        # Special case for HIVE replay data: map to hive/{commit}.tar
+        cache_type="hive"
+        cache_key="${BASH_REMATCH[1]}"
+    elif [[ "$basename" =~ ^([^_]+_[^_]+)_(.+)$ ]]; then
         cache_type="${BASH_REMATCH[1]}"
         cache_key="${BASH_REMATCH[2]}"
     elif [[ "$basename" =~ ^([^_]+)_(.+)$ ]]; then
