@@ -430,9 +430,10 @@ _link_shared_block_log() {
     local dest_dir="$1"
     local blockchain_dir="${dest_dir}/datadir/blockchain"
 
-    # If blockchain already exists in extracted data, nothing to do
-    if [[ -d "$blockchain_dir" ]] && [[ -n "$(ls -A "$blockchain_dir" 2>/dev/null)" ]]; then
-        _log "Blockchain directory exists in cache, skipping block_log linking"
+    # If block_log files already exist in extracted data, nothing to do
+    # Note: Other files like haf_wal may exist - we only care about block_log*
+    if ls "${blockchain_dir}"/block_log* 1>/dev/null 2>&1; then
+        _log "block_log files exist in cache, skipping block_log linking"
         return 0
     fi
 
