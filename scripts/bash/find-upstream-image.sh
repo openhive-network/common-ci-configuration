@@ -42,8 +42,8 @@
 #
 # Output Environment File (upstream-image.env):
 #   UPSTREAM_CACHE_HIT=true|false    Whether image was found
-#   UPSTREAM_COMMIT=<hash>           Commit hash of last source change
-#   UPSTREAM_TAG=<tag>               Docker image tag
+#   UPSTREAM_COMMIT=<hash>           Full 40-char commit hash (for cache keys)
+#   UPSTREAM_TAG=<tag>               Abbreviated commit for image tag (8 chars)
 #   UPSTREAM_IMAGE=<full name>       Full image name with tag
 #   UPSTREAM_REGISTRY=<path>         Registry path without tag
 #   UPSTREAM_BRANCH=<branch>         Branch that was checked
@@ -180,10 +180,10 @@ fi
 git clone --depth="$DEPTH" --branch="$BRANCH" --single-branch "$REPO_URL" "$WORK_DIR" 2>&1 | \
     while IFS= read -r line; do log "  $line"; done
 
-# Find last source commit
+# Find last source commit (full 40-char hash for cache keys; get-cached-image.sh will abbreviate for tags)
 log "Finding last source commit for patterns: ${PATTERN_ARRAY[*]}"
 
-FIND_COMMIT_ARGS=(--dir="$WORK_DIR" --quiet)
+FIND_COMMIT_ARGS=(--dir="$WORK_DIR" --full --quiet)
 COMMIT=$("$SCRIPT_DIR/find-last-source-commit.sh" "${FIND_COMMIT_ARGS[@]}" "${PATTERN_ARRAY[@]}")
 
 if [[ -z "$COMMIT" ]]; then
