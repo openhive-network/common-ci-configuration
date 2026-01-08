@@ -25,8 +25,11 @@ emconfigure ./configure --prefix="${INSTALL_PREFIX}" \
   --with-valgrind=no \
   --enable-module-recovery=yes \
   --enable-module-rangeproof=yes \
-  --enable-experimental
-emmake make
+  --enable-experimental \
+  --with-ecmult-window=4 \
+  --with-ecmult-gen-precision=2
+
+emmake make -j $(nproc)
 emmake make install
 
 echo "Secp256k1-zkp build finished."
