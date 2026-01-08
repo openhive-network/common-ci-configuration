@@ -96,21 +96,21 @@ Lightweight Python environment with poetry and git for running Python applicatio
 
 ### python_runtime
 
-**Base:** Ubuntu 24.04
+**Base:** Ubuntu 24.04 + deadsnakes PPA
 
-**Python:** 3.12
+**Python:** 3.14
 
-Minimal Python 3.12 runtime environment.
+Minimal Python 3.14 runtime environment.
 
-**Current version:** `3.12-u24.04-1`
+**Current version:** `3.14-u24.04-1`
 
 ### python_development
 
-**Base:** Ubuntu 24.04 (same Dockerfile as python_runtime, different target)
+**Base:** Ubuntu 24.04 + deadsnakes PPA (same Dockerfile as python_runtime, different target)
 
-**Python:** 3.12
+**Python:** 3.14
 
-Python development environment with additional tools for testing and development.
+Python development environment with Poetry and additional tools for testing and development.
 
 ### python-scripts
 
@@ -220,8 +220,8 @@ Python tox test runner for multi-version Python testing.
 |-------|----------------|-------|
 | ci-base-image | 3.14 | Latest Python for hive/HAF testing |
 | python | 3.12.9 | With poetry+git, used by hive for api_client_generator |
-| python_runtime | 3.12 | Minimal Ubuntu runtime, used by clive |
-| python_development | 3.12 | Ubuntu with dev tools, used by clive |
+| python_runtime | 3.14 | Minimal Ubuntu runtime with deadsnakes PPA, used by clive |
+| python_development | 3.14 | Ubuntu with Poetry and dev tools via deadsnakes PPA, used by clive |
 | python-scripts | 3.12.2 | CI utilities |
 | tox-test-runner | 3.11 | Multi-version testing |
 | benchmark-test-runner | 3.x | Alpine system Python |
@@ -234,7 +234,7 @@ Image versions are defined in `docker-bake.hcl`:
 |----------|---------------|-------------|
 | `EMSCRIPTEN_VERSION` | 4.0.18 | Emscripten SDK version |
 | `PYTHON_VERSION` | 3.12.9-1 | Python image version (with poetry) |
-| `PYTHON_RUNTIME_VERSION` | 3.12-u24.04-1 | Python runtime version |
+| `PYTHON_RUNTIME_VERSION` | 3.14-u24.04-1 | Python runtime version (deadsnakes PPA) |
 | `CI_BASE_IMAGE_VERSION` | ubuntu24.04-py3.14-2 | CI base image version |
 | `PSQL_IMAGE_VERSION` | 14-1 | PostgreSQL client version |
 | `POSTGREST_VERSION` | v12.0.2 | PostgREST version |

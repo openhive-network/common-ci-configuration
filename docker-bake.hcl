@@ -17,7 +17,7 @@ variable "PYTHON_VERSION" {
 }
 
 variable "PYTHON_RUNTIME_VERSION" {
-  default = "3.12-u24.04-1"
+  default = "3.14-u24.04-1"
 }
 
 variable "CI_BASE_IMAGE_VERSION" {
