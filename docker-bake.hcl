@@ -1,7 +1,7 @@
 variable "CI_REGISTRY_IMAGE" {}
 variable "CI_COMMIT_SHA" {}
 variable "EMSCRIPTEN_VERSION" {
-  default = "4.0.18"
+  default = "4.0.22"
 }
 variable "PSQL_IMAGE_VERSION" {
   default = "14-1" # After updating tag here, remeber to also update it in job 'psql_image_test'
