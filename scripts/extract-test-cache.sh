@@ -27,6 +27,7 @@
 #   POSTGRES_PORT         - PostgreSQL port (default: 5432)
 #   EXTRACT_TIMEOUT       - Timeout for PostgreSQL wait in seconds (default: 300)
 #   SKIP_POSTGRES_WAIT    - Set to "true" to skip PostgreSQL wait
+#   FORCE_EXTRACT         - Set to "1" to force extraction even if data exists (debug)
 #
 # Exit codes:
 #   0 - Success
@@ -47,6 +48,7 @@ POSTGRES_HOST="${POSTGRES_HOST:-}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 EXTRACT_TIMEOUT="${EXTRACT_TIMEOUT:-300}"
 SKIP_POSTGRES_WAIT="${SKIP_POSTGRES_WAIT:-false}"
+FORCE_EXTRACT="${FORCE_EXTRACT:-0}"
 
 # Marker file location
 MARKER_FILE="${DEST_DIR}/.cache-ready"
@@ -56,6 +58,7 @@ echo "Cache type:  ${CACHE_TYPE}"
 echo "Cache key:   ${CACHE_KEY}"
 echo "Dest dir:    ${DEST_DIR}"
 echo "Pipeline:    ${CI_PIPELINE_ID:-local}"
+[[ "$FORCE_EXTRACT" == "1" ]] && echo "Force:       enabled (skipping cache checks)"
 echo ""
 
 # -----------------------------------------------------------------------------
@@ -71,7 +74,7 @@ fi
 # -----------------------------------------------------------------------------
 # Check if extraction already done for this pipeline
 # -----------------------------------------------------------------------------
-if [[ -f "$MARKER_FILE" ]]; then
+if [[ "$FORCE_EXTRACT" != "1" ]] && [[ -f "$MARKER_FILE" ]]; then
     MARKER_PIPELINE=$(cat "$MARKER_FILE" 2>/dev/null || echo "")
     if [[ "$MARKER_PIPELINE" == "${CI_PIPELINE_ID:-local}" ]]; then
         echo "Cache already extracted for this pipeline (marker: ${MARKER_PIPELINE})"
@@ -100,7 +103,7 @@ fi
 # -----------------------------------------------------------------------------
 # Check if PostgreSQL is already running (files may be in use)
 # -----------------------------------------------------------------------------
-if [[ -n "$POSTGRES_HOST" ]]; then
+if [[ "$FORCE_EXTRACT" != "1" ]] && [[ -n "$POSTGRES_HOST" ]]; then
     if pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -q 2>/dev/null; then
         echo "PostgreSQL is already running - data may be in use"
         echo "Updating marker and skipping extraction"
@@ -114,7 +117,7 @@ fi
 # Check if valid data already exists
 # -----------------------------------------------------------------------------
 PGDATA="${DEST_DIR}/datadir/pgdata"
-if [[ -d "$PGDATA" ]] && [[ -f "$PGDATA/PG_VERSION" ]]; then
+if [[ "$FORCE_EXTRACT" != "1" ]] && [[ -d "$PGDATA" ]] && [[ -f "$PGDATA/PG_VERSION" ]]; then
     echo "Valid PostgreSQL data exists at: $PGDATA"
     echo "Updating marker and skipping extraction"
     mkdir -p "${DEST_DIR}"
@@ -144,7 +147,12 @@ fi
 echo "=== Extracting Cache ==="
 echo "Key: ${CACHE_TYPE}/${CACHE_KEY}"
 
-# Create destination and clean any partial data
+# Clean any existing partial data before extraction
+# This prevents issues with different permissions or partial extractions
+if [[ -d "${DEST_DIR}" ]]; then
+    echo "Cleaning existing data at ${DEST_DIR}..."
+    rm -rf "${DEST_DIR}" 2>/dev/null || sudo rm -rf "${DEST_DIR}" 2>/dev/null || true
+fi
 mkdir -p "${DEST_DIR}"
 
 if CACHE_HANDLING=haf "$CACHE_MANAGER" get "${CACHE_TYPE}" "${CACHE_KEY}" "${DEST_DIR}"; then
