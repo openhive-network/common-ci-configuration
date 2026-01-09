@@ -26,6 +26,7 @@
 #   CI_PIPELINE_ID        - GitLab pipeline ID (for marker file)
 #   POSTGRES_HOST         - PostgreSQL host for readiness check (default: none)
 #   POSTGRES_PORT         - PostgreSQL port (default: 5432)
+#   POSTGRES_CHECK_TIMEOUT - Timeout for initial PostgreSQL check in seconds (default: 15)
 #   EXTRACT_TIMEOUT       - Timeout for PostgreSQL wait in seconds (default: 300)
 #   SKIP_POSTGRES_WAIT    - Set to "true" to skip PostgreSQL wait
 #   FORCE_EXTRACT         - Set to "1" to force extraction even if data exists (debug)
@@ -104,14 +105,26 @@ fi
 # -----------------------------------------------------------------------------
 # Check if PostgreSQL is already running (files may be in use)
 # -----------------------------------------------------------------------------
+# HAF service containers may restart PostgreSQL during initialization (e.g., after
+# applying CI config or installing extensions). We retry the check a few times to
+# avoid racing with a brief restart window.
+POSTGRES_CHECK_TIMEOUT="${POSTGRES_CHECK_TIMEOUT:-15}"
 if [[ "$FORCE_EXTRACT" != "1" ]] && [[ -n "$POSTGRES_HOST" ]]; then
-    if pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -q 2>/dev/null; then
-        echo "PostgreSQL is already running - data may be in use"
-        echo "Updating marker and skipping extraction"
-        mkdir -p "${DEST_DIR}"
-        echo "${CI_PIPELINE_ID:-local}" > "$MARKER_FILE"
-        exit 0
-    fi
+    echo "Checking if PostgreSQL is already running on ${POSTGRES_HOST}:${POSTGRES_PORT}..."
+    PG_CHECK_WAITED=0
+    while [[ $PG_CHECK_WAITED -lt $POSTGRES_CHECK_TIMEOUT ]]; do
+        if pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -q 2>/dev/null; then
+            echo "PostgreSQL is already running - data may be in use"
+            echo "Updating marker and skipping extraction"
+            mkdir -p "${DEST_DIR}"
+            echo "${CI_PIPELINE_ID:-local}" > "$MARKER_FILE"
+            exit 0
+        fi
+        sleep 3
+        PG_CHECK_WAITED=$((PG_CHECK_WAITED + 3))
+        echo "  Retrying PostgreSQL check... (${PG_CHECK_WAITED}s/${POSTGRES_CHECK_TIMEOUT}s)"
+    done
+    echo "PostgreSQL not detected after ${POSTGRES_CHECK_TIMEOUT}s - proceeding with extraction"
 fi
 
 # -----------------------------------------------------------------------------
