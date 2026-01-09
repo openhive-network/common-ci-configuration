@@ -29,6 +29,8 @@ variables:
   # Cache manager configuration
   CACHE_MANAGER: "/tmp/cache-manager.sh"
   CACHE_MANAGER_REF: "develop"
+  # Test cache extraction script
+  EXTRACT_TEST_CACHE: "/tmp/extract-test-cache.sh"
 
   # NFS and local cache paths (standard across all builders)
   DATA_CACHE_NFS_PREFIX: "/nfs/ci-cache"
@@ -200,6 +202,27 @@ include:
       chmod +x "$CACHE_MANAGER"
       echo "Cache manager ready: $CACHE_MANAGER (ref: ${CACHE_MANAGER_REF})"
       echo -e "\e[0Ksection_end:$(date +%s):cache_manager_setup\r\e[0K"
+
+# Fetch extract-test-cache.sh script for test jobs
+# This script handles cache extraction with marker files, PostgreSQL wait, and proper error handling.
+# Usage:
+#   before_script:
+#     - !reference [.fetch_extract_test_cache, before_script]
+#     - $EXTRACT_TEST_CACHE "${APP_SYNC_CACHE_TYPE}" "${APP_CACHE_KEY}" "${HAF_DATA_DIRECTORY}"
+#
+# Environment variables (optional):
+#   POSTGRES_HOST       - If set, waits for PostgreSQL readiness
+#   SKIP_POSTGRES_WAIT  - Set to "true" to skip wait
+#   EXTRACT_TIMEOUT     - Timeout in seconds (default: 300)
+.fetch_extract_test_cache:
+  before_script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):extract_cache_setup[collapsed=true]\r\e[0KSetting up extract-test-cache..."
+      EXTRACT_TEST_CACHE="/tmp/extract-test-cache.sh"
+      curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF}/scripts/extract-test-cache.sh" -o "$EXTRACT_TEST_CACHE"
+      chmod +x "$EXTRACT_TEST_CACHE"
+      echo "Extract script ready: $EXTRACT_TEST_CACHE (ref: ${CACHE_MANAGER_REF})"
+      echo -e "\e[0Ksection_end:$(date +%s):extract_cache_setup\r\e[0K"
 
 # =============================================================================
 # CHANGE DETECTION TEMPLATE
