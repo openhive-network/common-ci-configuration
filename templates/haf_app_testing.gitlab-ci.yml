@@ -277,7 +277,12 @@ include:
         fi
 
         echo "Changed files:"
-        echo "$CHANGED_FILES" | head -50
+        # Use printf with process substitution to avoid SIGPIPE from head
+        echo "$CHANGED_FILES" | head -50 || true
+        FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l)
+        if [ "$FILE_COUNT" -gt 50 ]; then
+          echo "... (showing 50 of $FILE_COUNT files)"
+        fi
 
         NEEDS_BUILD=$(echo "$CHANGED_FILES" | grep -vE "${HAF_APP_SKIP_PATTERNS}" || true)
 
@@ -290,7 +295,11 @@ include:
         else
           echo ""
           echo "=== Files requiring full build: ==="
-          echo "$NEEDS_BUILD"
+          echo "$NEEDS_BUILD" | head -50 || true
+          BUILD_COUNT=$(echo "$NEEDS_BUILD" | wc -l)
+          if [ "$BUILD_COUNT" -gt 50 ]; then
+            echo "... (showing 50 of $BUILD_COUNT files)"
+          fi
         fi
       fi
 
