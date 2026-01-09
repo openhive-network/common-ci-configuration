@@ -10,12 +10,13 @@
 # - Marker file prevents redundant extractions in same pipeline
 # - Optional PostgreSQL readiness wait
 # - Handles pgdata permission fixing
+# - Supports both HAF-style (haf_db_store/pgdata) and app-style (pgdata) structures
 #
 # Usage:
 #   extract-test-cache.sh <cache-type> <cache-key> <dest-dir>
 #
 # Arguments:
-#   cache-type  - Cache type (e.g., haf_btracker_sync, haf_hafbe_sync)
+#   cache-type  - Cache type (e.g., haf_btracker_sync, haf_hafbe_sync, haf_hivemind_sync, haf)
 #   cache-key   - Cache key (e.g., ${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA})
 #   dest-dir    - Destination directory for extracted cache
 #
@@ -116,8 +117,15 @@ fi
 # -----------------------------------------------------------------------------
 # Check if valid data already exists
 # -----------------------------------------------------------------------------
-PGDATA="${DEST_DIR}/datadir/pgdata"
-if [[ "$FORCE_EXTRACT" != "1" ]] && [[ -d "$PGDATA" ]] && [[ -f "$PGDATA/PG_VERSION" ]]; then
+# Support both HAF-style (haf_db_store/pgdata) and app-style (pgdata) structures
+PGDATA=""
+if [[ -d "${DEST_DIR}/datadir/haf_db_store/pgdata" ]] && [[ -f "${DEST_DIR}/datadir/haf_db_store/pgdata/PG_VERSION" ]]; then
+    PGDATA="${DEST_DIR}/datadir/haf_db_store/pgdata"
+elif [[ -d "${DEST_DIR}/datadir/pgdata" ]] && [[ -f "${DEST_DIR}/datadir/pgdata/PG_VERSION" ]]; then
+    PGDATA="${DEST_DIR}/datadir/pgdata"
+fi
+
+if [[ "$FORCE_EXTRACT" != "1" ]] && [[ -n "$PGDATA" ]]; then
     echo "Valid PostgreSQL data exists at: $PGDATA"
     echo "Updating marker and skipping extraction"
     mkdir -p "${DEST_DIR}"
@@ -174,7 +182,15 @@ fi
 # -----------------------------------------------------------------------------
 # Fix PostgreSQL permissions (must be 700 for pg_ctl)
 # -----------------------------------------------------------------------------
-if [[ -d "$PGDATA" ]]; then
+# Re-detect PGDATA after extraction (supports both HAF-style and app-style)
+PGDATA=""
+if [[ -d "${DEST_DIR}/datadir/haf_db_store/pgdata" ]]; then
+    PGDATA="${DEST_DIR}/datadir/haf_db_store/pgdata"
+elif [[ -d "${DEST_DIR}/datadir/pgdata" ]]; then
+    PGDATA="${DEST_DIR}/datadir/pgdata"
+fi
+
+if [[ -n "$PGDATA" ]]; then
     echo ""
     echo "=== Fixing PostgreSQL Permissions ==="
     chmod 700 "$PGDATA" 2>/dev/null || sudo chmod 700 "$PGDATA" || true
