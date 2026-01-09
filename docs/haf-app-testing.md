@@ -60,6 +60,38 @@ my_job:
 | `CACHE_MANAGER` | `/tmp/cache-manager.sh` | Path where script is saved |
 | `CACHE_MANAGER_REF` | `develop` | Git ref to fetch from |
 
+### .fetch_extract_test_cache
+
+Sets up the extract-test-cache.sh script for test jobs. This script handles cache extraction with marker file support, PostgreSQL readiness wait, and proper error handling.
+
+```yaml
+my_test_job:
+  before_script:
+    - !reference [.fetch_extract_test_cache, before_script]
+    - $EXTRACT_TEST_CACHE "${APP_SYNC_CACHE_TYPE}" "${APP_CACHE_KEY}" "${HAF_DATA_DIRECTORY}"
+```
+
+**Variables:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EXTRACT_TEST_CACHE` | `/tmp/extract-test-cache.sh` | Path where script is saved |
+| `CACHE_MANAGER_REF` | `develop` | Git ref to fetch from |
+
+**Environment variables for the script:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `POSTGRES_HOST` | (empty) | If set, waits for PostgreSQL readiness |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port for readiness check |
+| `EXTRACT_TIMEOUT` | `300` | Timeout in seconds for PostgreSQL wait |
+| `SKIP_POSTGRES_WAIT` | `false` | Set to `true` to skip PostgreSQL wait |
+| `CI_PIPELINE_ID` | (from GitLab) | Used for marker file to prevent redundant extractions |
+
+**Features:**
+- **Exact key match only** - No fallback to caches from different app versions
+- **Marker file support** - Prevents redundant extractions in the same pipeline
+- **PostgreSQL wait** - Optional readiness check with configurable timeout
+- **Permission handling** - Fixes pgdata permissions automatically
+
 ### .haf_app_detect_changes
 
 Analyzes changed files to determine if full HAF sync can be skipped. When only tests, docs, or CI config change, cached HAF data can be reused.
@@ -440,6 +472,8 @@ This allows:
 - Same HAF data to be shared when only app code changes
 - Full rebuild when HAF commit changes
 - Easy identification of cache contents
+
+**Important:** Cache extraction uses **exact key matching only**. There is no fallback to caches from different app versions, even if the HAF commit matches. This ensures schema compatibility - a cache created with one app version will only be used by that exact version. If a cache miss occurs, the sync job must complete first to create a new cache.
 
 ## Migration Guide
 
