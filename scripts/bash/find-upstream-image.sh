@@ -192,10 +192,9 @@ git clone --depth="$DEPTH" --branch="$BRANCH" --single-branch "$REPO_URL" "$WORK
 log "Finding source commits for patterns: ${PATTERN_ARRAY[*]}"
 log "Will check up to $MAX_SEARCH commits for existing images"
 
-cd "$WORK_DIR"
-
 # Get list of commits that changed source files (most recent first)
-mapfile -t SOURCE_COMMITS < <(git log --pretty=format:"%H" -n "$MAX_SEARCH" -- "${PATTERN_ARRAY[@]}" 2>/dev/null || true)
+# Use git -C to avoid changing directories (keeps OUTPUT_FILE path correct)
+mapfile -t SOURCE_COMMITS < <(git -C "$WORK_DIR" log --pretty=format:"%H" -n "$MAX_SEARCH" -- "${PATTERN_ARRAY[@]}" 2>/dev/null || true)
 
 if [[ ${#SOURCE_COMMITS[@]} -eq 0 ]]; then
     error "Failed to find any source commits matching patterns"
