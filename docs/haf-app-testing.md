@@ -85,6 +85,7 @@ my_test_job:
 | `EXTRACT_TIMEOUT` | `300` | Timeout in seconds for PostgreSQL wait |
 | `SKIP_POSTGRES_WAIT` | `false` | Set to `true` to skip PostgreSQL wait |
 | `CI_PIPELINE_ID` | (from GitLab) | Used for marker file to prevent redundant extractions |
+| `FORCE_EXTRACT` | `0` | Set to `1` to force extraction even if data exists (debug) |
 
 **Features:**
 - **Exact key match only** - No fallback to caches from different app versions
