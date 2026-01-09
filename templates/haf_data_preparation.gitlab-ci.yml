@@ -254,6 +254,9 @@
         - hived_uid.env
     paths:
       - "${CI_PROJECT_DIR}/docker_entrypoint.log"
+  tags:
+    - standard
+    - data-cache-storage
 
 # =============================================================================
 # .prepare_hived_data_5m - Prepare 5M block hived replay data with caching
@@ -403,6 +406,9 @@
         - hived_uid.env
     paths:
       - "${CI_PROJECT_DIR}/docker_entrypoint.log"
+  tags:
+    - standard
+    - data-cache-storage
 
 # =============================================================================
 # .wait-for-haf-postgres - Wait for HAF PostgreSQL service
@@ -517,3 +523,6 @@
         echo "${HAF_APP_SCHEMA} schema verified"
       fi
       echo -e "\e[0Ksection_end:$(date +%s):wait_postgres\r\e[0K"
+  tags:
+    - standard
+    - data-cache-storage
