@@ -170,7 +170,16 @@ variables:
 # ============================================================================
 
 # Template for finding pre-built images from upstream repositories
-# Extend this and set the required variables
+# Extend this and set the required variables.
+#
+# This template automatically falls back to older commits if the latest commit's
+# image isn't available yet (e.g., after a squash merge when upstream pipeline
+# is still building). This prevents failures due to timing races between repos.
+#
+# Override behavior:
+#   Set UPSTREAM_OVERRIDE_TAG to skip dynamic lookup and use a specific image tag.
+#   Example: UPSTREAM_OVERRIDE_TAG: "abc12345" to use registry/image:abc12345
+#   This is useful for testing against a specific branch or pinning to a known good image.
 .find_upstream_image:
   stage: .pre
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:24-cli
@@ -183,12 +192,55 @@ variables:
     UPSTREAM_PATTERNS: ""
     UPSTREAM_IMAGE: ""
     UPSTREAM_DEPTH: "100"
+    # Max commits to check when looking for existing image (fallback depth)
+    UPSTREAM_MAX_SEARCH: "10"
+    # Set this to skip dynamic lookup and use a specific image tag
+    # Example: "abc12345" or "v1.27.0" - will use UPSTREAM_REGISTRY:UPSTREAM_OVERRIDE_TAG
+    UPSTREAM_OVERRIDE_TAG: ""
     # Output file name
     UPSTREAM_OUTPUT: "upstream-image.env"
   before_script:
     - apk add --no-cache git bash
   script:
     - |
+      # Check for override - skip dynamic lookup if specified
+      if [[ -n "$UPSTREAM_OVERRIDE_TAG" ]]; then
+        echo "Using override tag: $UPSTREAM_OVERRIDE_TAG (skipping dynamic lookup)"
+
+        # Build the image name
+        if [[ -n "$UPSTREAM_IMAGE" ]]; then
+          FULL_IMAGE="${UPSTREAM_REGISTRY}/${UPSTREAM_IMAGE}:${UPSTREAM_OVERRIDE_TAG}"
+          FULL_REGISTRY="${UPSTREAM_REGISTRY}/${UPSTREAM_IMAGE}"
+        else
+          FULL_IMAGE="${UPSTREAM_REGISTRY}:${UPSTREAM_OVERRIDE_TAG}"
+          FULL_REGISTRY="${UPSTREAM_REGISTRY}"
+        fi
+
+        # Check if the override image exists
+        if docker manifest inspect "$FULL_IMAGE" >/dev/null 2>&1; then
+          echo "Override image found: $FULL_IMAGE"
+          cat > "$UPSTREAM_OUTPUT" <<EOF
+      UPSTREAM_BRANCH=$UPSTREAM_BRANCH
+      UPSTREAM_FALLBACK=false
+      UPSTREAM_CACHE_HIT=true
+      UPSTREAM_COMMIT=$UPSTREAM_OVERRIDE_TAG
+      UPSTREAM_TAG=$UPSTREAM_OVERRIDE_TAG
+      UPSTREAM_IMAGE=$FULL_IMAGE
+      UPSTREAM_REGISTRY=$FULL_REGISTRY
+      UPSTREAM_OVERRIDE=true
+      EOF
+          # Remove leading whitespace from heredoc (YAML indentation artifact)
+          sed -i 's/^[[:space:]]*//' "$UPSTREAM_OUTPUT"
+        else
+          echo "ERROR: Override image not found: $FULL_IMAGE"
+          exit 1
+        fi
+
+        echo "Output written to: $UPSTREAM_OUTPUT"
+        cat "$UPSTREAM_OUTPUT"
+        exit 0
+      fi
+
       # Fetch common-ci-configuration scripts
       SCRIPTS_URL="https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/develop/scripts/bash"
 
@@ -198,7 +250,7 @@ variables:
         chmod +x "/tmp/ci-scripts/$script"
       done
 
-      # Run the upstream image finder
+      # Run the upstream image finder (with automatic fallback to older commits)
       /tmp/ci-scripts/find-upstream-image.sh \
         --repo-url="$UPSTREAM_REPO_URL" \
         --registry="$UPSTREAM_REGISTRY" \
@@ -206,6 +258,7 @@ variables:
         --patterns="$UPSTREAM_PATTERNS" \
         ${UPSTREAM_IMAGE:+--image="$UPSTREAM_IMAGE"} \
         --depth="$UPSTREAM_DEPTH" \
+        --max-search="$UPSTREAM_MAX_SEARCH" \
         --output="$UPSTREAM_OUTPUT"
   artifacts:
     reports:

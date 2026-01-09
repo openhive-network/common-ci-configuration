@@ -2,9 +2,10 @@
 #
 # find-upstream-image.sh - Find the latest built image from an upstream repo
 #
-# This script fetches an upstream repository, finds the last commit that changed
-# source files, and checks if a Docker image exists for that commit. Used by
-# downstream repos to find pre-built images from their dependencies.
+# This script fetches an upstream repository, finds commits that changed source
+# files, and checks if a Docker image exists for those commits. It automatically
+# falls back to older commits if the latest doesn't have an image yet (e.g., when
+# upstream pipeline is still building after a squash merge).
 #
 # Usage:
 #   find-upstream-image.sh [OPTIONS]
@@ -17,11 +18,12 @@
 # Optional:
 #   --branch=NAME        Branch to check (default: develop)
 #   --depth=N            Git fetch depth (default: 100)
+#   --max-search=N       Max commits to check for existing image (default: 10)
 #   --image=NAME         Image name within registry (default: none)
 #   --output=FILE        Output env file (default: upstream-image.env)
 #   --work-dir=PATH      Working directory for git clone (default: /tmp/upstream-repo-$$)
 #   --keep-repo          Don't delete cloned repo after completion
-#   --require-hit        Exit with error if image not found
+#   --require-hit        Exit with error if no image found after checking all commits
 #   --quiet              Suppress status messages
 #   --help               Show this help message
 #
@@ -47,10 +49,11 @@
 #   UPSTREAM_IMAGE=<full name>       Full image name with tag
 #   UPSTREAM_REGISTRY=<path>         Registry path without tag
 #   UPSTREAM_BRANCH=<branch>         Branch that was checked
+#   UPSTREAM_FALLBACK=true|false     Whether a fallback commit was used
 #
 # Exit Codes:
-#   0 - Success
-#   1 - Image not found (with --require-hit) or git/docker error
+#   0 - Success (image found, possibly via fallback)
+#   1 - No image found after checking all commits (with --require-hit) or git/docker error
 #   2 - Invalid arguments
 #
 
@@ -64,6 +67,7 @@ REGISTRY=""
 PATTERNS=""
 BRANCH="develop"
 DEPTH=100
+MAX_SEARCH=10
 IMAGE=""
 OUTPUT_FILE="upstream-image.env"
 WORK_DIR=""
@@ -110,6 +114,9 @@ while [[ $# -gt 0 ]]; do
             ;;
         --depth=*)
             DEPTH="${1#*=}"
+            ;;
+        --max-search=*)
+            MAX_SEARCH="${1#*=}"
             ;;
         --image=*)
             IMAGE="${1#*=}"
@@ -180,48 +187,80 @@ fi
 git clone --depth="$DEPTH" --branch="$BRANCH" --single-branch "$REPO_URL" "$WORK_DIR" 2>&1 | \
     while IFS= read -r line; do log "  $line"; done
 
-# Find last source commit (full 40-char hash for cache keys; get-cached-image.sh will abbreviate for tags)
-log "Finding last source commit for patterns: ${PATTERN_ARRAY[*]}"
+# Find source commits (full 40-char hashes for cache keys)
+# Get multiple commits so we can fall back if the latest doesn't have an image yet
+log "Finding source commits for patterns: ${PATTERN_ARRAY[*]}"
+log "Will check up to $MAX_SEARCH commits for existing images"
 
-FIND_COMMIT_ARGS=(--dir="$WORK_DIR" --full --quiet)
-COMMIT=$("$SCRIPT_DIR/find-last-source-commit.sh" "${FIND_COMMIT_ARGS[@]}" "${PATTERN_ARRAY[@]}")
+cd "$WORK_DIR"
 
-if [[ -z "$COMMIT" ]]; then
-    error "Failed to find source commit"
+# Get list of commits that changed source files (most recent first)
+mapfile -t SOURCE_COMMITS < <(git log --pretty=format:"%H" -n "$MAX_SEARCH" -- "${PATTERN_ARRAY[@]}" 2>/dev/null || true)
+
+if [[ ${#SOURCE_COMMITS[@]} -eq 0 ]]; then
+    error "Failed to find any source commits matching patterns"
     exit 1
 fi
 
-log "Found last source commit: $COMMIT"
+log "Found ${#SOURCE_COMMITS[@]} source commit(s) to check"
 
-# Check if image exists
-log "Checking for image in registry: $REGISTRY"
+# Iterate through commits, looking for one with an existing image
+FOUND_IMAGE=false
+USED_FALLBACK=false
+CHECKED_COUNT=0
+FOUND_COMMIT=""
 
-GET_IMAGE_ARGS=(
-    --commit="$COMMIT"
-    --registry="$REGISTRY"
-    --output="$OUTPUT_FILE.tmp"
-)
+for COMMIT in "${SOURCE_COMMITS[@]}"; do
+    CHECKED_COUNT=$((CHECKED_COUNT + 1))
 
-if [[ -n "$IMAGE" ]]; then
-    GET_IMAGE_ARGS+=(--image="$IMAGE")
-fi
+    if [[ $CHECKED_COUNT -eq 1 ]]; then
+        log "Checking latest commit: $COMMIT"
+    else
+        log "Checking fallback commit $CHECKED_COUNT: $COMMIT"
+    fi
 
-if [[ "$QUIET" == "true" ]]; then
-    GET_IMAGE_ARGS+=(--quiet)
-fi
+    # Build args for get-cached-image.sh (without --require-hit, we handle that ourselves)
+    GET_IMAGE_ARGS=(
+        --commit="$COMMIT"
+        --registry="$REGISTRY"
+        --output="$OUTPUT_FILE.tmp"
+    )
 
-if [[ "$REQUIRE_HIT" == "true" ]]; then
-    GET_IMAGE_ARGS+=(--require-hit)
-fi
+    if [[ -n "$IMAGE" ]]; then
+        GET_IMAGE_ARGS+=(--image="$IMAGE")
+    fi
 
-"$SCRIPT_DIR/get-cached-image.sh" "${GET_IMAGE_ARGS[@]}"
-GET_RESULT=$?
+    # Always use quiet mode for fallback checks to reduce noise
+    if [[ "$QUIET" == "true" ]] || [[ $CHECKED_COUNT -gt 1 ]]; then
+        GET_IMAGE_ARGS+=(--quiet)
+    fi
 
-# Read the temp output and rewrite with UPSTREAM_ prefix
-if [[ -f "$OUTPUT_FILE.tmp" ]]; then
+    # Check if image exists for this commit
+    "$SCRIPT_DIR/get-cached-image.sh" "${GET_IMAGE_ARGS[@]}" || true
+
+    # Check the result
+    if [[ -f "$OUTPUT_FILE.tmp" ]] && grep -q "CACHE_HIT=true" "$OUTPUT_FILE.tmp"; then
+        FOUND_IMAGE=true
+        FOUND_COMMIT="$COMMIT"
+        if [[ $CHECKED_COUNT -gt 1 ]]; then
+            USED_FALLBACK=true
+            log "Found image at fallback commit $CHECKED_COUNT: $COMMIT"
+        else
+            log "Found image at latest commit: $COMMIT"
+        fi
+        break
+    else
+        log "  No image found for $COMMIT"
+        rm -f "$OUTPUT_FILE.tmp"
+    fi
+done
+
+# Handle the result
+if [[ "$FOUND_IMAGE" == "true" ]]; then
+    # Read the temp output and rewrite with UPSTREAM_ prefix
     {
-        # Add branch info
         echo "UPSTREAM_BRANCH=$BRANCH"
+        echo "UPSTREAM_FALLBACK=$USED_FALLBACK"
         # Rename variables with UPSTREAM_ prefix
         sed 's/^CACHE_HIT=/UPSTREAM_CACHE_HIT=/;
              s/^IMAGE_COMMIT=/UPSTREAM_COMMIT=/;
@@ -230,12 +269,59 @@ if [[ -f "$OUTPUT_FILE.tmp" ]]; then
              s/^IMAGE_REGISTRY=/UPSTREAM_REGISTRY=/' "$OUTPUT_FILE.tmp"
     } > "$OUTPUT_FILE"
     rm -f "$OUTPUT_FILE.tmp"
-fi
 
-log ""
-log "Output written to: $OUTPUT_FILE"
-if [[ "$QUIET" != "true" ]]; then
-    cat "$OUTPUT_FILE" >&2
-fi
+    if [[ "$USED_FALLBACK" == "true" ]]; then
+        log ""
+        log "NOTE: Using fallback image (latest commit's image not yet available)"
+        log "      Latest source commit: ${SOURCE_COMMITS[0]}"
+        log "      Using image from:     $FOUND_COMMIT"
+    fi
 
-exit $GET_RESULT
+    log ""
+    log "Output written to: $OUTPUT_FILE"
+    if [[ "$QUIET" != "true" ]]; then
+        cat "$OUTPUT_FILE" >&2
+    fi
+
+    exit 0
+else
+    # No image found for any commit
+    log ""
+    log "ERROR: No image found after checking $CHECKED_COUNT commit(s)"
+    log "       Latest source commit: ${SOURCE_COMMITS[0]}"
+    log "       This usually means the upstream pipeline hasn't finished building yet."
+
+    # Write output with CACHE_HIT=false for the latest commit
+    LATEST_COMMIT="${SOURCE_COMMITS[0]}"
+    LATEST_TAG="${LATEST_COMMIT:0:8}"
+    if [[ -n "$IMAGE" ]]; then
+        FULL_IMAGE="${REGISTRY}/${IMAGE}:${LATEST_TAG}"
+        FULL_REGISTRY="${REGISTRY}/${IMAGE}"
+    else
+        FULL_IMAGE="${REGISTRY}:${LATEST_TAG}"
+        FULL_REGISTRY="${REGISTRY}"
+    fi
+
+    cat > "$OUTPUT_FILE" << EOF
+UPSTREAM_BRANCH=$BRANCH
+UPSTREAM_FALLBACK=false
+UPSTREAM_CACHE_HIT=false
+UPSTREAM_COMMIT=$LATEST_COMMIT
+UPSTREAM_TAG=$LATEST_TAG
+UPSTREAM_IMAGE=$FULL_IMAGE
+UPSTREAM_REGISTRY=$FULL_REGISTRY
+EOF
+
+    log ""
+    log "Output written to: $OUTPUT_FILE"
+    if [[ "$QUIET" != "true" ]]; then
+        cat "$OUTPUT_FILE" >&2
+    fi
+
+    if [[ "$REQUIRE_HIT" == "true" ]]; then
+        error "No upstream image available (--require-hit specified)"
+        exit 1
+    fi
+
+    exit 0
+fi
