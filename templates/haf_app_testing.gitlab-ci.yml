@@ -748,9 +748,10 @@ include:
       fi
       echo -e "\e[0Ksection_end:$(date +%s):haf_cache\r\e[0K"
 
-# Advanced cache lookup with QUICK_TEST and AUTO_SKIP_SYNC support
+# Advanced cache lookup with QUICK_TEST support
 # Checks for existing app sync cache first (avoiding re-sync), then falls back to HAF cache.
-# When AUTO_SKIP_SYNC is true, also searches for any compatible app cache with matching HAF commit.
+# NOTE: This template does NOT search for caches from different app versions.
+# The cache key includes both HAF commit and app commit to ensure schema compatibility.
 #
 # Requires variables:
 #   HAF_COMMIT: Current HAF submodule commit
@@ -761,8 +762,7 @@ include:
 # Optional variables (from detect_changes job):
 #   QUICK_TEST: Set to "true" to use QUICK_TEST_HAF_COMMIT
 #   QUICK_TEST_HAF_COMMIT: HAF commit to use in quick test mode
-#   AUTO_SKIP_SYNC: Set to "true" when only tests/docs changed
-#   AUTO_CACHE_HAF_COMMIT: HAF commit from detect_changes
+#   AUTO_CACHE_HAF_COMMIT: HAF commit from detect_changes (used with QUICK_TEST)
 #
 # Outputs (written to /tmp for use in script section):
 #   /tmp/cache_hit: "true" if app sync cache was found (skip sync)
@@ -813,25 +813,8 @@ include:
       if "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${EFFECTIVE_CACHE_KEY}" "${JOB_DATA_DIR}" 2>/dev/null; then
         echo "App sync cache found - skipping sync"
         CACHE_HIT="true"
-      elif [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]]; then
-        # For docs-only changes, search for ANY app cache with matching HAF commit
-        echo "Exact cache not found, searching for compatible app cache with HAF commit ${EFFECTIVE_HAF_COMMIT}..."
-        NFS_CACHE_DIR="${DATA_CACHE_NFS_PREFIX}/${APP_SYNC_CACHE_TYPE}"
-        FOUND_CACHE=$(ls -t "${NFS_CACHE_DIR}/${EFFECTIVE_HAF_COMMIT}_"*.tar 2>/dev/null | head -1 || true)
-        if [[ -n "$FOUND_CACHE" ]]; then
-          FOUND_KEY=$(basename "$FOUND_CACHE" .tar)
-          echo "Found compatible app cache: ${FOUND_KEY}"
-          EFFECTIVE_CACHE_KEY="${FOUND_KEY}"  # Update for save_cache
-          if "$CACHE_MANAGER" get "${APP_SYNC_CACHE_TYPE}" "${FOUND_KEY}" "${JOB_DATA_DIR}" 2>/dev/null; then
-            echo "Fetched compatible app sync cache - skipping sync"
-            CACHE_HIT="true"
-          fi
-        fi
-        if [[ "$CACHE_HIT" != "true" ]]; then
-          echo "No compatible app cache found, will use HAF-only cache and run sync"
-        fi
       else
-        echo "App sync cache not found, will use HAF-only cache and run sync"
+        echo "App sync cache not found (key: ${EFFECTIVE_CACHE_KEY}), will use HAF-only cache and run sync"
       fi
 
       # Fall back to HAF-only cache if no app cache found
