@@ -292,6 +292,8 @@ build_docker_builder_image:
   stage: build
   variables:
     BUILD_TARGET: "docker-builder"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -347,6 +349,8 @@ build_benchmark_test_runner_image:
   stage: build
   variables:
     BUILD_TARGET: "benchmark-test-runner"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -372,6 +376,8 @@ build_haf_app_test_runner_image:
   stage: build
   variables:
     BUILD_TARGET: "haf-app-test-runner"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -401,6 +407,8 @@ build_tox_test_runner_image:
   stage: build
   variables:
     BUILD_TARGET: "tox-test-runner"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -426,6 +434,8 @@ build_nginx_image:
   stage: build
   variables:
     BUILD_TARGET: "nginx"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -451,6 +461,8 @@ build_postgrest_image:
   stage: build
   variables:
     BUILD_TARGET: "postgrest"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -476,6 +488,8 @@ build_alpine_image:
   stage: build
   variables:
     BUILD_TARGET: "alpine"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -502,6 +516,8 @@ build_python_image:
   variables:
     BUILD_TARGET: "python"
     DOCKERFILE_PATH: "Dockerfile.python"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -512,6 +528,8 @@ build_python_dev_image:
   variables:
     BUILD_TARGET: "python_development"
     DOCKERFILE_PATH: "Dockerfile.python_runtime"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -522,6 +540,8 @@ build_python_runtime_image:
   variables:
     BUILD_TARGET: "python_runtime"
     DOCKERFILE_PATH: "Dockerfile.python_runtime"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -532,6 +552,8 @@ build_ci_base_image:
   variables:
     BUILD_TARGET: "ci-base-image"
     DOCKERFILE_PATH: "Dockerfile.ci-base-image"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -541,6 +563,8 @@ build_dockerfile_image:
   stage: build
   variables:
     BUILD_TARGET: "dockerfile"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -566,6 +590,9 @@ build_emsdk_image:
   stage: build
   variables:
     BUILD_TARGET: "emsdk"
+    # Use latest docker images - emsdk doesn't depend on fresh docker builds
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
@@ -597,6 +624,8 @@ build_psql_image:
   stage: build
   variables:
     BUILD_TARGET: "psql"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
   needs:
     - job: build_docker_dind_image
       optional: true
