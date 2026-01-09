@@ -20,6 +20,9 @@ include:
     - du -h -d 1 /cache
     - rm $CLEANUP_PATH_PATTERN -rf
   when: manual
+  tags:
+    - standard
+    - data-cache-storage
 
 .cleanup_old_cache_template:
   extends: .job-defaults
@@ -33,6 +36,9 @@ include:
     - du -h -d 1 /cache
     - find "/cache" -maxdepth 1 -wholename "$CLEANUP_PATH_PATTERN" -mtime "+${CACHE_DAYS}"
     - find "/cache" -maxdepth 1 -wholename "$CLEANUP_PATH_PATTERN" -mtime "+${CACHE_DAYS}" -exec rm -rf {} \;
+  tags:
+    - standard
+    - data-cache-storage
 
 # =============================================================================
 # Stale Cache Cleanup Template

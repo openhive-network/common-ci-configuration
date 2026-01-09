@@ -10,3 +10,5 @@ default:
 .job-defaults:
   timeout: 1 hour
   interruptible: true
+  tags:
+    - standard
