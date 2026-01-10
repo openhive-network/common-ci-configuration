@@ -122,7 +122,8 @@ extract_nfs_cache_if_needed() {
             mkdir -p "$data_source"
             chmod 777 "$data_source" 2>/dev/null || true
 
-            if tar xf "$nfs_tar" -C "$data_source"; then
+            # Use flock to prevent race conditions when multiple jobs extract to the same cache dir
+            if flock "$data_source" tar xf "$nfs_tar" -C "$data_source"; then
                 echo "NFS cache extracted successfully"
 
                 # Restore pgdata permissions for PostgreSQL
