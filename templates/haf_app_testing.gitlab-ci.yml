@@ -283,8 +283,15 @@ include:
           BASE_SHA="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
           echo "MR pipeline: comparing against target branch"
         elif [ "${CI_PIPELINE_SOURCE:-}" = "push" ]; then
-          BASE_SHA="HEAD~1"
-          echo "Push pipeline: comparing against previous commit"
+          # For protected branches (develop/master), compare against previous commit
+          # For feature branches, compare against merge-base with develop
+          if [ "$CI_COMMIT_REF_NAME" = "develop" ] || [ "$CI_COMMIT_REF_NAME" = "master" ]; then
+            BASE_SHA="HEAD~1"
+            echo "Push to protected branch: comparing against previous commit"
+          else
+            BASE_SHA=$(git merge-base HEAD origin/develop 2>/dev/null || echo "HEAD~1")
+            echo "Push to feature branch: comparing against develop merge-base"
+          fi
         else
           BASE_SHA=$(git merge-base HEAD origin/develop 2>/dev/null || echo "HEAD~1")
           echo "Other pipeline: comparing against develop"
