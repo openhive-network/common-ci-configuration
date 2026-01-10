@@ -1,6 +1,11 @@
 # syntax=docker/dockerfile:1.4
 FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-26.1.4-cli AS docker-builder
 
+# Disable buildx attestations (provenance/SBOM) to avoid panic in buildkit
+# when parsing empty digests. Can be removed when buildkit bug is fixed.
+# See: https://github.com/moby/buildkit/issues/4778
+ENV BUILDX_NO_DEFAULT_ATTESTATIONS=1
+
 # util-linux provides proper flock support for NFS (BusyBox flock fails on NFS)
 RUN apk add --no-cache bash git coreutils ca-certificates curl sudo util-linux
 RUN <<EOF

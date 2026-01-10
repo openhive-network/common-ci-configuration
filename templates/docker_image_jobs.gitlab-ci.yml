@@ -13,10 +13,6 @@ include:
     DOCKER_DRIVER: overlay2
     DOCKER_TLS_CERTDIR: "/certs"
     FF_NETWORK_PER_BUILD: "true"
-    # Disable buildx attestations (provenance/SBOM) to avoid panic in buildkit
-    # when parsing empty digests. Can be removed when buildkit bug is fixed.
-    # See: https://github.com/moby/buildkit/issues/4778
-    BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
 
   image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:${DOCKER_BUILDER_TAG}
   before_script:
