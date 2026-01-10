@@ -44,6 +44,9 @@ variables:
   SOURCE_CHANGED: "false"
   CI_CHANGED: "false"
 
+  # Docker builder image for upstream/local image lookup jobs
+  DOCKER_BUILDER_TAG: "latest"
+
 # ============================================================================
 # Change Detection Job Template
 # ============================================================================
@@ -182,7 +185,7 @@ variables:
 #   This is useful for testing against a specific branch or pinning to a known good image.
 .find_upstream_image:
   stage: .pre
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:24-cli
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:${DOCKER_BUILDER_TAG}
   needs: []
   variables:
     # Override these in your job
@@ -199,8 +202,7 @@ variables:
     UPSTREAM_OVERRIDE_TAG: ""
     # Output file name
     UPSTREAM_OUTPUT: "upstream-image.env"
-  before_script:
-    - apk add --no-cache git bash
+  # docker-builder image already has git and bash installed
   script:
     - |
       # Check for override - skip dynamic lookup if specified
@@ -339,7 +341,7 @@ variables:
 # Use this for the "build-or-skip" pattern within the same repo
 .check_local_image:
   stage: .pre
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:24-cli
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:${DOCKER_BUILDER_TAG}
   needs: []
   variables:
     # Override these in your job
@@ -347,8 +349,7 @@ variables:
     LOCAL_IMAGE: ""
     LOCAL_PATTERNS: ""
     LOCAL_OUTPUT: "local-image.env"
-  before_script:
-    - apk add --no-cache git bash
+  # docker-builder image already has git and bash installed
   script:
     - |
       # Fetch common-ci-configuration scripts
