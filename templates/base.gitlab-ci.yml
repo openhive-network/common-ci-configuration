@@ -12,3 +12,87 @@ default:
   interruptible: true
   tags:
     - standard
+
+# =============================================================================
+# Pre-get-sources hooks for cleaning corrupt git state
+# =============================================================================
+# These hooks run before GitLab fetches source code, cleaning up corruption
+# left by cancelled pipelines (see GitLab #296638, #4600).
+#
+# Usage in your .gitlab-ci.yml:
+#   default:
+#     hooks:
+#       pre_get_sources_script: !reference [.pre_get_sources_simple, pre_get_sources_script]
+#
+# Or for repos with submodules:
+#       pre_get_sources_script: !reference [.pre_get_sources_with_submodules, pre_get_sources_script]
+
+# Simple version for repos WITHOUT submodules (e.g., nft_tracker, reputation_tracker)
+.pre_get_sources_simple:
+  pre_get_sources_script:
+    - |
+      (
+      cd "${CI_PROJECT_DIR:-/builds}" 2>/dev/null || exit 0
+      echo "pre_get_sources: checking $(pwd) for corrupt git state"
+      if [ -d ".git" ]; then
+        # Remove stale lock files that block git operations
+        find .git -name "*.lock" -delete 2>/dev/null || true
+
+        # Check if main repo is corrupt - if so, remove .git to force fresh clone
+        if ! git rev-parse HEAD >/dev/null 2>&1; then
+          echo "pre_get_sources: main repository corrupt, forcing fresh clone"
+          rm -rf .git
+        else
+          echo "pre_get_sources: existing repo OK"
+        fi
+      else
+        echo "pre_get_sources: no .git directory (fresh workspace)"
+      fi
+      )
+
+# Full version for repos WITH submodules (e.g., balance_tracker, haf_block_explorer, hivemind)
+.pre_get_sources_with_submodules:
+  pre_get_sources_script:
+    - |
+      (
+      cd "${CI_PROJECT_DIR:-/builds}" 2>/dev/null || exit 0
+      echo "pre_get_sources: checking $(pwd) for corrupt git state"
+      if [ -d ".git" ]; then
+        # Remove stale lock files that block git operations
+        find .git -name "*.lock" -delete 2>/dev/null || true
+
+        # Check if main repo is corrupt - if so, remove .git to force fresh clone
+        if ! git rev-parse HEAD >/dev/null 2>&1; then
+          echo "pre_get_sources: main repository corrupt, forcing fresh clone"
+          rm -rf .git
+        else
+          # Main repo OK - check and clean corrupt submodules
+          if [ -f ".gitmodules" ]; then
+            git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{print $2}' | while read submod; do
+              needs_clean=false
+              [ -z "$submod" ] && continue
+              # Check if submodule working directory exists but is corrupt
+              if [ -d "$submod" ] && [ -f "$submod/.git" ]; then
+                if ! git -C "$submod" rev-parse HEAD >/dev/null 2>&1; then
+                  needs_clean=true
+                fi
+              fi
+              # Check if .git/modules exists but is corrupt (even if working dir is gone)
+              if [ -d ".git/modules/$submod" ]; then
+                if ! git --git-dir=".git/modules/$submod" rev-parse HEAD >/dev/null 2>&1; then
+                  echo "pre_get_sources: $submod corrupt (rev-parse failed)"
+                  needs_clean=true
+                fi
+              fi
+              if [ "$needs_clean" = true ]; then
+                echo "pre_get_sources: cleaning corrupt submodule: $submod"
+                rm -rf "$submod" ".git/modules/$submod"
+              fi
+            done
+          fi
+          echo "pre_get_sources: existing repo OK"
+        fi
+      else
+        echo "pre_get_sources: no .git directory (fresh workspace)"
+      fi
+      )
