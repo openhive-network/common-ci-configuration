@@ -7,8 +7,8 @@
 set -xeuo pipefail
 
 # Default shared block_log location (used when blockchain not in cache)
-# Try NFS cache first, fall back to local cache
-SHARED_BLOCK_LOG_DIR="${SHARED_BLOCK_LOG_DIR:-/nfs/ci-cache/hive/block_log_5m}"
+# Use local static copy on each builder (faster than NFS)
+SHARED_BLOCK_LOG_DIR="${SHARED_BLOCK_LOG_DIR:-/blockchain/block_log_5m}"
 
 # NFS cache configuration
 CACHE_NFS_PATH="${CACHE_NFS_PATH:-/nfs/ci-cache}"
