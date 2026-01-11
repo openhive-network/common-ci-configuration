@@ -597,6 +597,40 @@ include:
     - !reference [.tavern_run_tests, script]
   artifacts: !reference [.tavern_test_artifacts, artifacts]
 
+# Combined DinD + Tavern test template
+# This template provides a complete DinD test environment with Tavern setup:
+# - Cache extraction and docker-compose startup
+# - Service readiness checks (PostgreSQL + PostgREST)
+# - Tavern dependency installation
+# - Automatic cleanup
+#
+# Required variables from app:
+#   APP_SYNC_CACHE_TYPE: Cache type (e.g., "haf_btracker_sync")
+#   APP_CACHE_KEY: Cache key from sync job
+#   HAF_IMAGE_NAME: HAF Docker image
+#   HAF_APP_ROLE_PREFIX: Role prefix for PostgREST (e.g., "btracker")
+#
+# Apps can add custom before_script steps after extending, e.g.:
+#   before_script:
+#     - !reference [.haf_app_dind_tavern_tests, before_script]
+#     - pip install -e ./tests_api  # App-specific module
+.haf_app_dind_tavern_tests:
+  extends:
+    - .haf_app_dind_test_variables
+    - .tavern_test_variables
+  stage: test
+  timeout: 30 minutes
+  before_script:
+    - !reference [.haf_app_dind_extract_cache, script]
+    - !reference [.haf_app_dind_compose_startup, script]
+    - !reference [.haf_app_dind_wait_for_services, script]
+    - !reference [.tavern_install_deps, script]
+  after_script: !reference [.haf_app_dind_compose_teardown, after_script]
+  artifacts: !reference [.tavern_test_artifacts, artifacts]
+  tags:
+    - data-cache-storage
+    - fast
+
 # =============================================================================
 # QUICK TEST MODE HELPERS
 # =============================================================================
