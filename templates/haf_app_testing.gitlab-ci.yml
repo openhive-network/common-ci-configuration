@@ -1689,3 +1689,77 @@ include:
   tags:
     - data-cache-storage
     - fast
+
+# =============================================================================
+# COMPLETE PREPARE_HAF_DATA TEMPLATES WITH STANDARD NEEDS
+# =============================================================================
+# These templates extend .prepare_haf_data_5m and add the standard needs
+# dependencies. Use these to avoid duplicating needs: definitions across repos.
+#
+# Two patterns are provided:
+#   1. .haf_app_prepare_data_with_build - For repos that build HAF from submodule
+#   2. .haf_app_prepare_data_with_find - For repos that use pre-built HAF images
+#
+# The detect_changes dependency is marked optional: true to support tag pipelines
+# where detect_changes is intentionally skipped (tags always do full builds).
+
+# Pattern 1: For repos that build HAF image from submodule
+# Use when you have: detect_changes -> prepare_haf_image -> prepare_haf_data
+#
+# Usage:
+#   prepare_haf_data:
+#     extends: .haf_app_prepare_data_with_build
+#     stage: build
+#     variables:
+#       BLOCK_LOG_SOURCE_DIR: $BLOCK_LOG_SOURCE_DIR_5M
+#     tags:
+#       - data-cache-storage
+#
+.haf_app_prepare_data_with_build:
+  extends: .prepare_haf_data_5m
+  needs:
+    - job: detect_changes
+      artifacts: true
+      optional: true  # For tag pipelines where detect_changes is skipped
+    - job: prepare_haf_image
+      artifacts: true
+
+# Pattern 2: For repos that use pre-built HAF images from registry
+# Use when you have: find_haf_image -> prepare_haf_data
+#
+# Usage:
+#   prepare_haf_data:
+#     extends: .haf_app_prepare_data_with_find
+#     stage: build
+#     variables:
+#       BLOCK_LOG_SOURCE_DIR: $BLOCK_LOG_SOURCE_DIR_5M
+#       HAF_IMAGE_NAME: "${HAF_UPSTREAM_IMAGE}"
+#       HAF_COMMIT: "${HAF_UPSTREAM_COMMIT}"
+#     tags:
+#       - data-cache-storage
+#
+.haf_app_prepare_data_with_find:
+  extends: .prepare_haf_data_5m
+  needs:
+    - job: find_haf_image
+      artifacts: true
+
+# =============================================================================
+# REUSABLE NEEDS FRAGMENTS
+# =============================================================================
+# For jobs that need to add detect_changes as an optional dependency alongside
+# other custom dependencies, use !reference to include this fragment.
+#
+# Usage:
+#   sync:
+#     needs:
+#       - !reference [.needs_detect_changes_optional, needs, 0]
+#       - job: prepare_haf_image
+#         artifacts: true
+#       - job: my_custom_job
+#
+.needs_detect_changes_optional:
+  needs:
+    - job: detect_changes
+      artifacts: true
+      optional: true  # For tag pipelines where detect_changes is skipped
