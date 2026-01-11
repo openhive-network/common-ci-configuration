@@ -1,3 +1,16 @@
+# =============================================================================
+# Base CI Configuration Variables and Defaults
+# =============================================================================
+# This file provides common variables and job defaults used across all Hive repos.
+
+variables:
+  # CI base image for build/test jobs
+  # Built in common-ci-configuration, used by hive, haf, and downstream projects
+  CI_BASE_IMAGE_TAG: ":ubuntu24.04-py3.14-2"
+  CI_BASE_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/ci-base-image${CI_BASE_IMAGE_TAG}"
+  # Legacy variable for backwards compatibility (deprecated - use CI_BASE_IMAGE instead)
+  TEST_IMAGE_TAG: "${CI_BASE_IMAGE_TAG}"
+
 default:
   interruptible: true
   timeout: 1 hour
@@ -22,10 +35,10 @@ default:
 # Usage in your .gitlab-ci.yml:
 #   default:
 #     hooks:
-#       pre_get_sources_script: !reference [.pre_get_sources_simple, pre_get_sources_script]
+#       pre_get_sources_script: \!reference [.pre_get_sources_simple, pre_get_sources_script]
 #
 # Or for repos with submodules:
-#       pre_get_sources_script: !reference [.pre_get_sources_with_submodules, pre_get_sources_script]
+#       pre_get_sources_script: \!reference [.pre_get_sources_with_submodules, pre_get_sources_script]
 
 # Simple version for repos WITHOUT submodules (e.g., nft_tracker, reputation_tracker)
 .pre_get_sources_simple:
@@ -39,7 +52,7 @@ default:
         find .git -name "*.lock" -delete 2>/dev/null || true
 
         # Check if main repo is corrupt - if so, remove .git to force fresh clone
-        if ! git rev-parse HEAD >/dev/null 2>&1; then
+        if \! git rev-parse HEAD >/dev/null 2>&1; then
           echo "pre_get_sources: main repository corrupt, forcing fresh clone"
           rm -rf .git
         else
@@ -62,7 +75,7 @@ default:
         find .git -name "*.lock" -delete 2>/dev/null || true
 
         # Check if main repo is corrupt - if so, remove .git to force fresh clone
-        if ! git rev-parse HEAD >/dev/null 2>&1; then
+        if \! git rev-parse HEAD >/dev/null 2>&1; then
           echo "pre_get_sources: main repository corrupt, forcing fresh clone"
           rm -rf .git
         else
@@ -73,13 +86,13 @@ default:
               [ -z "$submod" ] && continue
               # Check if submodule working directory exists but is corrupt
               if [ -d "$submod" ] && [ -f "$submod/.git" ]; then
-                if ! git -C "$submod" rev-parse HEAD >/dev/null 2>&1; then
+                if \! git -C "$submod" rev-parse HEAD >/dev/null 2>&1; then
                   needs_clean=true
                 fi
               fi
               # Check if .git/modules exists but is corrupt (even if working dir is gone)
               if [ -d ".git/modules/$submod" ]; then
-                if ! git --git-dir=".git/modules/$submod" rev-parse HEAD >/dev/null 2>&1; then
+                if \! git --git-dir=".git/modules/$submod" rev-parse HEAD >/dev/null 2>&1; then
                   echo "pre_get_sources: $submod corrupt (rev-parse failed)"
                   needs_clean=true
                 fi
