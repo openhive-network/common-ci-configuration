@@ -806,6 +806,7 @@ include:
       echo -e "\e[0Ksection_start:$(date +%s):cache_lookup[collapsed=true]\r\e[0KSmart cache lookup..."
 
       # Determine effective HAF commit based on mode
+      # Default: use HAF_COMMIT from find_haf_image (dynamic, always current)
       EFFECTIVE_HAF_COMMIT="${HAF_COMMIT}"
       if [[ "${QUICK_TEST:-false}" == "true" ]]; then
         echo "=== QUICK_TEST Mode (manual) ==="
@@ -818,10 +819,10 @@ include:
         fi
         EFFECTIVE_HAF_COMMIT="${QUICK_TEST_HAF_COMMIT}"
         echo "Using cached HAF data from: ${EFFECTIVE_HAF_COMMIT}"
-      elif [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]] && [[ -n "${AUTO_CACHE_HAF_COMMIT}" ]]; then
+      elif [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]]; then
         echo "=== AUTO_SKIP_SYNC Mode (only tests/docs changed) ==="
-        EFFECTIVE_HAF_COMMIT="${AUTO_CACHE_HAF_COMMIT}"
-        echo "Using cached HAF data from: ${EFFECTIVE_HAF_COMMIT}"
+        # Use HAF_COMMIT from find_haf_image - if no cache exists, sync runs normally
+        echo "Using HAF commit from find_haf_image: ${EFFECTIVE_HAF_COMMIT}"
       fi
 
       # Build cache key and job data directory
