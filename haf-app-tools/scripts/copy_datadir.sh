@@ -67,7 +67,7 @@ fix_pg_tblspc_symlinks() {
 extract_nfs_cache_if_needed() {
     local data_source="$1"
 
-    # Skip if already exists
+    # Quick check without lock - if cache exists, skip entirely
     if [[ -d "${data_source}/datadir" ]]; then
         echo "Local cache exists at ${data_source}/datadir"
         return 0
@@ -123,7 +123,14 @@ extract_nfs_cache_if_needed() {
             chmod 777 "$data_source" 2>/dev/null || true
 
             # Use flock to prevent race conditions when multiple jobs extract to the same cache dir
-            if flock "$data_source" tar xf "$nfs_tar" -C "$data_source"; then
+            # Check again inside lock - another job may have just finished extracting
+            if flock "$data_source" bash -c "
+                if [[ -d \"${data_source}/datadir\" ]]; then
+                    echo 'Cache already extracted by another job'
+                    exit 0
+                fi
+                tar xf \"$nfs_tar\" -C \"$data_source\"
+            "; then
                 echo "NFS cache extracted successfully"
 
                 # Restore pgdata permissions for PostgreSQL
