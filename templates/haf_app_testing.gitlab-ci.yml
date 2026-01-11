@@ -535,15 +535,19 @@ include:
 # Apps can mix these with their own DinD/cache setup.
 
 # Variables for tavern tests (set these in your job)
+# Note: pytest 8.0+ and tavern 2.10+ required for Python 3.12+ compatibility
 .tavern_test_variables:
   variables:
     PYTEST_WORKERS: "4"
-    TAVERN_VERSION: "2.2.0"
+    PYTEST_VERSION: "8.0.0"
+    TAVERN_VERSION: "2.10.0"
     TAVERN_DIR: "tests/tavern"
     JUNIT_REPORT: "tests/tavern/report.xml"
 
 # Script to install tavern dependencies in a venv
 # Use with: !reference [.tavern_install_deps, script]
+# Note: pytest 8.0+ required for Python 3.12+ (ast.Str removed in 3.12)
+#       tavern 2.10+ required for pytest 8 compatibility
 .tavern_install_deps:
   script:
     - |
@@ -551,7 +555,8 @@ include:
       python3 -m venv venv
       . venv/bin/activate
       pip install --quiet \
-        "tavern==${TAVERN_VERSION:-2.2.0}" \
+        "pytest>=${PYTEST_VERSION:-8.0.0}" \
+        "tavern>=${TAVERN_VERSION:-2.10.0}" \
         "pytest-xdist>=3.2.0" \
         "pyyaml>=6.0" \
         "requests>=2.28.0" \
