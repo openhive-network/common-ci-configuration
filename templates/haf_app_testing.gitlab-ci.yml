@@ -1467,6 +1467,32 @@ include:
     # Timeouts
     SERVICE_WAIT_TIMEOUT: "300"
 
+    # ==========================================================================
+    # PostgREST Configuration
+    # ==========================================================================
+    # Apps must set HAF_APP_ROLE_PREFIX to their role prefix (e.g., "btracker").
+    # The template automatically constructs the correct PostgREST configuration:
+    #   - PGRST_DB_URI uses <prefix>_owner for schema introspection
+    #   - PGRST_DB_ANON_ROLE uses <prefix>_user for API request security
+    #
+    # This pattern is REQUIRED because PostgREST needs owner-level access to
+    # introspect the schema (discover functions, parameters, return types),
+    # but API requests should run with restricted user permissions.
+    #
+    # Common mistake (causes "0 Relations" error):
+    #   Using <prefix>_user for PGRST_DB_URI - the user role often lacks
+    #   permissions to query system catalogs for full schema introspection.
+    # ==========================================================================
+    HAF_APP_ROLE_PREFIX: ""  # REQUIRED: Set to app role prefix (e.g., "btracker", "reptracker")
+
+    # Optional overrides (defaults derived from HAF_APP_ROLE_PREFIX)
+    # PGRST_DB_URI_USER: ""       # Override connection user (default: ${HAF_APP_ROLE_PREFIX}_owner)
+    # PGRST_DB_ANON_ROLE: ""      # Override anon role (default: ${HAF_APP_ROLE_PREFIX}_user)
+    # PGRST_DB_SCHEMA: ""         # Override schema (default: ${HAF_APP_ROLE_PREFIX}_endpoints)
+    # PGRST_DB_EXTRA_SEARCH_PATH: ""  # Override search path (default: ${HAF_APP_ROLE_PREFIX}_app)
+    PGRST_DB_POOL: "20"
+    PGRST_DB_POOL_ACQUISITION_TIMEOUT: "10"
+
 # Extract cache and prepare blockchain for DinD test jobs
 # Handles shm_dir relocation and blockchain symlink/copy logic
 # Requires: APP_SYNC_CACHE_TYPE, APP_CACHE_KEY, HAF_DATA_DIRECTORY, HAF_SHM_DIRECTORY
@@ -1519,6 +1545,14 @@ include:
 # Create ci.env and start Docker Compose services
 # Requires: HAF_IMAGE_NAME, HAF_DATA_DIRECTORY, HAF_SHM_DIRECTORY, COMPOSE_OPTIONS_STRING
 # Optional: POSTGREST_IMAGE (default: registry.gitlab.syncad.com/hive/haf_api_node/postgrest:latest)
+#
+# PostgREST Configuration:
+#   If HAF_APP_ROLE_PREFIX is set, automatically generates correct PostgREST config:
+#   - PGRST_DB_URI: Uses <prefix>_owner for connection (schema introspection)
+#   - PGRST_DB_ANON_ROLE: Uses <prefix>_user for API requests (security)
+#   - PGRST_DB_SCHEMA: Uses <prefix>_endpoints (or override with PGRST_DB_SCHEMA)
+#   - PGRST_DB_EXTRA_SEARCH_PATH: Uses <prefix>_app (or override)
+#
 # Use: !reference [.haf_app_dind_compose_startup, script]
 .haf_app_dind_compose_startup:
   script:
@@ -1526,6 +1560,24 @@ include:
       echo -e "\e[0Ksection_start:$(date +%s):compose[collapsed=true]\r\e[0KStarting Docker Compose services..."
 
       cd "${CI_PROJECT_DIR}/docker"
+
+      # Validate HAF_APP_ROLE_PREFIX if PostgREST config is needed
+      if [[ -n "${HAF_APP_ROLE_PREFIX:-}" ]]; then
+        echo "Configuring PostgREST with role prefix: ${HAF_APP_ROLE_PREFIX}"
+
+        # Derive PostgREST settings from role prefix (with optional overrides)
+        PGRST_URI_USER="${PGRST_DB_URI_USER:-${HAF_APP_ROLE_PREFIX}_owner}"
+        PGRST_ANON="${PGRST_DB_ANON_ROLE:-${HAF_APP_ROLE_PREFIX}_user}"
+        PGRST_SCHEMA="${PGRST_DB_SCHEMA:-${HAF_APP_ROLE_PREFIX}_endpoints}"
+        PGRST_SEARCH_PATH="${PGRST_DB_EXTRA_SEARCH_PATH:-${HAF_APP_ROLE_PREFIX}_app}"
+
+        echo "  PGRST_DB_URI user: ${PGRST_URI_USER} (for schema introspection)"
+        echo "  PGRST_DB_ANON_ROLE: ${PGRST_ANON} (for API requests)"
+        echo "  PGRST_DB_SCHEMA: ${PGRST_SCHEMA}"
+      else
+        echo "WARNING: HAF_APP_ROLE_PREFIX not set - PostgREST config not auto-generated"
+        echo "  Set HAF_APP_ROLE_PREFIX to enable automatic PostgREST configuration"
+      fi
 
       # Create ci.env for docker-compose variable substitution
       cat <<-EOF | tee ci.env
@@ -1535,6 +1587,21 @@ include:
       HIVED_UID=$(id -u)
       POSTGREST_IMAGE=${POSTGREST_IMAGE:-registry.gitlab.syncad.com/hive/haf_api_node/postgrest:latest}
       EOF
+
+      # Add PostgREST config if role prefix is set
+      if [[ -n "${HAF_APP_ROLE_PREFIX:-}" ]]; then
+        cat <<-EOF >> ci.env
+
+      # PostgREST configuration (auto-generated from HAF_APP_ROLE_PREFIX=${HAF_APP_ROLE_PREFIX})
+      # Pattern: owner role for connection (introspection), user role for API requests
+      PGRST_DB_URI=postgresql://${PGRST_URI_USER}@haf:5432/${HAF_DB_NAME:-haf_block_log}
+      PGRST_DB_ANON_ROLE=${PGRST_ANON}
+      PGRST_DB_SCHEMA=${PGRST_SCHEMA}
+      PGRST_DB_POOL=${PGRST_DB_POOL:-20}
+      PGRST_DB_POOL_ACQUISITION_TIMEOUT=${PGRST_DB_POOL_ACQUISITION_TIMEOUT:-10}
+      PGRST_DB_EXTRA_SEARCH_PATH=${PGRST_SEARCH_PATH}
+      EOF
+      fi
 
       # Parse compose options
       IFS=" " read -ra COMPOSE_OPTIONS <<< "${COMPOSE_OPTIONS_STRING}"
@@ -1648,10 +1715,20 @@ include:
 #   APP_CACHE_KEY: Cache key (e.g., "${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}")
 #   HAF_IMAGE_NAME: HAF Docker image (from prepare_haf_image job)
 #
+# PostgREST configuration (recommended):
+#   HAF_APP_ROLE_PREFIX: App's database role prefix (e.g., "btracker", "reptracker")
+#     When set, automatically generates correct PostgREST config in ci.env:
+#     - PGRST_DB_URI: postgresql://<prefix>_owner@haf:5432/haf_block_log
+#     - PGRST_DB_ANON_ROLE: <prefix>_user
+#     - PGRST_DB_SCHEMA: <prefix>_endpoints
+#     Your docker-compose-test.yml should use ${PGRST_*} variable references.
+#
 # Optional variables:
 #   HAF_APP_SCHEMA: Schema to verify exists (e.g., "btracker_app")
 #   COMPOSE_FILE: Docker Compose file (default: docker-compose-test.yml)
 #   POSTGREST_IMAGE: PostgREST image (default: registry.gitlab.syncad.com/hive/haf_api_node/postgrest:latest)
+#   PGRST_DB_SCHEMA: Override endpoint schema (default: ${HAF_APP_ROLE_PREFIX}_endpoints)
+#   PGRST_DB_EXTRA_SEARCH_PATH: Override search path (default: ${HAF_APP_ROLE_PREFIX}_app)
 #
 # Usage:
 #   my-test:
@@ -1662,7 +1739,8 @@ include:
 #     variables:
 #       APP_SYNC_CACHE_TYPE: "haf_myapp_sync"
 #       APP_CACHE_KEY: "${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}"
-#       HAF_APP_SCHEMA: "myapp"
+#       HAF_APP_ROLE_PREFIX: "myapp"  # Auto-configures PostgREST
+#       HAF_APP_SCHEMA: "myapp_app"
 #     script:
 #       - ./run-my-tests.sh --host=docker
 #

@@ -613,6 +613,81 @@ tests:
     HAF_APP_CACHE_KEY: "$CACHE_KEY"
 ```
 
+## PostgREST Configuration Pattern
+
+When using PostgREST in HAF applications, the correct configuration pattern is critical:
+
+**The Pattern:**
+- `PGRST_DB_URI` uses `<prefix>_owner` role for database connection (schema introspection)
+- `PGRST_DB_ANON_ROLE` uses `<prefix>_user` role for API requests (security)
+
+**Why this matters:**
+1. PostgREST needs owner-level permissions to introspect the schema (discover functions, parameters, return types via `pg_catalog`)
+2. API requests should run with restricted user permissions for security
+3. Using `_user` for both causes "0 Relations" errors because the user role cannot access system catalogs
+
+### Automatic Configuration with HAF_APP_ROLE_PREFIX
+
+Set `HAF_APP_ROLE_PREFIX` in your job variables to auto-generate correct PostgREST config:
+
+```yaml
+my_tests:
+  extends: .haf_app_dind_complete_test
+  variables:
+    HAF_APP_ROLE_PREFIX: "btracker"  # Your app's role prefix
+    # Auto-generates:
+    #   PGRST_DB_URI: postgresql://btracker_owner@haf:5432/haf_block_log
+    #   PGRST_DB_ANON_ROLE: btracker_user
+    #   PGRST_DB_SCHEMA: btracker_endpoints
+    #   PGRST_DB_EXTRA_SEARCH_PATH: btracker_app
+```
+
+### Updating docker-compose-test.yml
+
+To use the auto-generated config, update your compose file to use environment variable substitution:
+
+```yaml
+# docker/docker-compose-test.yml
+services:
+  postgrest:
+    image: ${POSTGREST_IMAGE}
+    environment:
+      PGRST_DB_URI: ${PGRST_DB_URI}
+      PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE}
+      PGRST_DB_SCHEMA: ${PGRST_DB_SCHEMA}
+      PGRST_DB_POOL: ${PGRST_DB_POOL:-20}
+      PGRST_DB_EXTRA_SEARCH_PATH: ${PGRST_DB_EXTRA_SEARCH_PATH}
+```
+
+### Optional Overrides
+
+If your app uses non-standard naming, override individual settings:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PGRST_DB_URI_USER` | `${HAF_APP_ROLE_PREFIX}_owner` | Connection role |
+| `PGRST_DB_ANON_ROLE` | `${HAF_APP_ROLE_PREFIX}_user` | Anonymous API role |
+| `PGRST_DB_SCHEMA` | `${HAF_APP_ROLE_PREFIX}_endpoints` | Schema to expose |
+| `PGRST_DB_EXTRA_SEARCH_PATH` | `${HAF_APP_ROLE_PREFIX}_app` | Additional search path |
+| `PGRST_DB_POOL` | `20` | Connection pool size |
+| `PGRST_DB_POOL_ACQUISITION_TIMEOUT` | `10` | Pool timeout (seconds) |
+
+### Common Mistake
+
+**Wrong (causes "0 Relations" error):**
+```yaml
+# Using _user for connection - lacks introspection permissions
+PGRST_DB_URI: postgresql://btracker_user@haf:5432/haf_block_log
+PGRST_DB_ANON_ROLE: btracker_user
+```
+
+**Correct:**
+```yaml
+# Owner for connection (introspection), user for API requests (security)
+PGRST_DB_URI: postgresql://btracker_owner@haf:5432/haf_block_log
+PGRST_DB_ANON_ROLE: btracker_user
+```
+
 ## Best Practices
 
 1. **Use consistent cache type names**: Prefix with `haf_` for automatic pgdata permission handling
