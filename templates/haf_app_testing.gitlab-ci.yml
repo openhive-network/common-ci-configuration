@@ -137,11 +137,66 @@ include:
                 fi
               done
             fi
+
+            # Handle directory-to-submodule transitions: fetch target ref's .gitmodules
+            # and remove any paths that exist as regular directories (not submodules).
+            # This handles cases where a path changed from directory to submodule between branches.
+            if [ -n "$CI_COMMIT_REF_NAME" ]; then
+              echo "pre_get_sources: checking for directory-to-submodule transitions (ref: $CI_COMMIT_REF_NAME)"
+              # Fetch the target ref first (it may not exist locally yet)
+              git fetch origin "$CI_COMMIT_REF_NAME" --depth=1 2>&1 || true
+              target_gitmodules=$(git show "origin/$CI_COMMIT_REF_NAME:.gitmodules" 2>/dev/null) || true
+              if [ -n "$target_gitmodules" ]; then
+                echo "$target_gitmodules" | grep "path = " | sed 's/.*path = //' | while read submod; do
+                  [ -z "$submod" ] && continue
+                  # If path exists as a regular directory (not a submodule), remove it
+                  if [ -d "$submod" ] && [ ! -f "$submod/.git" ]; then
+                    echo "pre_get_sources: removing directory for submodule transition: $submod"
+                    rm -rf "$submod"
+                  fi
+                done
+              fi
+            fi
+
             echo "pre_get_sources: existing repo OK"
           fi
         else
           echo "pre_get_sources: no .git directory (fresh workspace)"
         fi
+        )
+
+# Permission fix hook for fetch strategy with cross-user CI jobs
+# Different jobs may run as different users; this ensures writable workspaces.
+# Usage: Add after .haf_git_corruption_cleanup if experiencing permission issues:
+#   default:
+#     hooks:
+#       pre_get_sources_script:
+#         - !reference [.haf_git_corruption_cleanup, hooks, pre_get_sources_script]
+#         - !reference [.haf_permission_fix, hooks, pre_get_sources_script]
+#
+# Or set HAF_PERMISSION_FIX_PATHS variable in your CI to customize paths:
+#   variables:
+#     HAF_PERMISSION_FIX_PATHS: "hive/libraries/plugins src/generated"
+.haf_permission_fix:
+  hooks:
+    pre_get_sources_script:
+      - |
+        (
+        cd "${CI_PROJECT_DIR:-/builds}" 2>/dev/null || exit 0
+        # Default paths that commonly need permission fixes
+        fix_paths="${HAF_PERMISSION_FIX_PATHS:-}"
+        if [ -z "$fix_paths" ]; then
+          # Auto-detect common paths that need fixing
+          for path in "hive/libraries/plugins" "libraries/plugins"; do
+            [ -d "$path" ] && fix_paths="$fix_paths $path"
+          done
+        fi
+        for path in $fix_paths; do
+          if [ -d "$path" ]; then
+            echo "pre_get_sources: fixing permissions on $path"
+            chmod -R a+w "$path" 2>/dev/null || true
+          fi
+        done
         )
 
 # HAF submodule initialization for fetch strategy
