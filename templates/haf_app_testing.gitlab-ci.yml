@@ -691,10 +691,15 @@ include:
 #   script:
 #     - !reference [.haf_app_early_exit_on_skip, script]
 #     - # Your actual work here...
+#
+# Note: If QUICK_TEST=true, we do NOT early exit - the user explicitly wants
+# to run tests using cached data, even if AUTO_SKIP would normally skip them.
 .haf_app_early_exit_on_skip:
   script:
     - |
-      if [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]] || [[ "${AUTO_SKIP_BUILD:-false}" == "true" ]]; then
+      if [[ "${QUICK_TEST:-false}" == "true" ]]; then
+        echo "=== QUICK_TEST mode: running tests with cached data ==="
+      elif [[ "${AUTO_SKIP_SYNC:-false}" == "true" ]] || [[ "${AUTO_SKIP_BUILD:-false}" == "true" ]]; then
         echo "=== Early Exit: No work needed ==="
         echo "Only documentation, tests, or non-critical files changed."
         echo "Exiting with success."
