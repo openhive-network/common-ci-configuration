@@ -92,17 +92,28 @@ default:
             done
           fi
 
-          # Handle directory-to-submodule transitions: fetch target ref's .gitmodules
-          # and remove any paths that exist as regular directories (not submodules).
+          # Handle directory-to-submodule transitions: remove directories that became
+          # submodules in the target ref but weren't submodules in the current checkout.
           # This handles cases where a path changed from directory to submodule between branches.
+          # NOTE: We only remove if the path is NOT already a submodule in current checkout,
+          # to avoid breaking GIT_SUBMODULE_STRATEGY=none workflows with uninitialized submodules.
           if [ -n "$CI_COMMIT_REF_NAME" ]; then
             echo "pre_get_sources: checking for directory-to-submodule transitions (ref: $CI_COMMIT_REF_NAME)"
+            # Get current checkout's submodules (if any)
+            current_submodules=""
+            if [ -f ".gitmodules" ]; then
+              current_submodules=$(git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{print $2}' | tr '\n' ' ')
+            fi
             # Fetch the target ref first (it may not exist locally yet)
             git fetch origin "$CI_COMMIT_REF_NAME" --depth=1 2>&1 || true
             target_gitmodules=$(git show "origin/$CI_COMMIT_REF_NAME:.gitmodules" 2>/dev/null) || true
             if [ -n "$target_gitmodules" ]; then
               echo "$target_gitmodules" | grep "path = " | sed 's/.*path = //' | while read submod; do
                 [ -z "$submod" ] && continue
+                # Skip if already a submodule in current checkout (might be uninitialized)
+                if echo " $current_submodules " | grep -q " $submod "; then
+                  continue
+                fi
                 # If path exists as a regular directory (not a submodule), remove it
                 if [ -d "$submod" ] && [ ! -f "$submod/.git" ]; then
                   echo "pre_get_sources: removing directory for submodule transition: $submod"
