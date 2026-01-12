@@ -247,6 +247,14 @@
     - ls -la "${DATA_CACHE_DIR}/datadir/"
   after_script:
     - rm "${DATA_CACHE_DIR}/replay_running" -f
+    - |
+      # Clean up extracted directory if tar cache exists
+      # The tar file is the actual cache - directory is just a working copy
+      CACHE_TAR="/cache/haf_${HAF_COMMIT}.tar"
+      if [[ -f "$CACHE_TAR" ]] && [[ -d "${DATA_CACHE_DIR}" ]]; then
+        echo "Cleaning up extracted cache directory: ${DATA_CACHE_DIR}"
+        sudo rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || true
+      fi
   artifacts:
     reports:
       dotenv:
@@ -399,6 +407,14 @@
     - ls -la "${DATA_CACHE_DIR}/datadir/"
   after_script:
     - rm "${DATA_CACHE_DIR}/replay_running" -f
+    - |
+      # Clean up extracted directory if tar cache exists
+      # The tar file is the actual cache - directory is just a working copy
+      CACHE_TAR="/cache/hive_${HIVE_COMMIT}.tar"
+      if [[ -f "$CACHE_TAR" ]] && [[ -d "${DATA_CACHE_DIR}" ]]; then
+        echo "Cleaning up extracted cache directory: ${DATA_CACHE_DIR}"
+        sudo rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || true
+      fi
   artifacts:
     reports:
       dotenv:
@@ -523,6 +539,16 @@
         echo "${HAF_APP_SCHEMA} schema verified"
       fi
       echo -e "\e[0Ksection_end:$(date +%s):wait_postgres\r\e[0K"
+  after_script:
+    - |
+      # Clean up extracted directory if tar cache exists
+      # The tar file is the actual cache - directory is just a working copy
+      LOCAL_CACHE="/cache/${SYNC_CACHE_TYPE}_${SYNC_CACHE_KEY}"
+      CACHE_TAR="${LOCAL_CACHE}.tar"
+      if [[ -f "$CACHE_TAR" ]] && [[ -d "${LOCAL_CACHE}" ]]; then
+        echo "Cleaning up extracted cache directory: ${LOCAL_CACHE}"
+        sudo rm -rf "${LOCAL_CACHE}" 2>/dev/null || rm -rf "${LOCAL_CACHE}" 2>/dev/null || true
+      fi
   tags:
     - standard
     - data-cache-storage

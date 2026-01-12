@@ -1048,13 +1048,23 @@ include:
       fi
       echo -e "\e[0Ksection_end:$(date +%s):save_cache\r\e[0K"
 
-# Cleanup job directory in after_script
+# Cleanup job directory and local cache in after_script
 # Use: after_script: !reference [.haf_app_sync_cleanup, after_script]
 .haf_app_sync_cleanup:
   after_script:
     - |
       echo -e "\e[0Ksection_start:$(date +%s):cleanup[collapsed=true]\r\e[0KCleaning up..."
+      # Clean up job-specific directory
       sudo rm -rf ${CI_PROJECT_DIR}/${CI_JOB_ID} 2>/dev/null || true
+
+      # Clean up local cache directory if tar cache exists
+      # The tar file is the actual cache - directory is just a working copy
+      LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${APP_CACHE_KEY}"
+      CACHE_TAR="/cache/${APP_SYNC_CACHE_TYPE}_${APP_CACHE_KEY}.tar"
+      if [[ -f "$CACHE_TAR" ]] && [[ -d "${LOCAL_APP_CACHE}" ]]; then
+        echo "Cleaning up extracted cache directory: ${LOCAL_APP_CACHE}"
+        sudo rm -rf "${LOCAL_APP_CACHE}" 2>/dev/null || rm -rf "${LOCAL_APP_CACHE}" 2>/dev/null || true
+      fi
       echo -e "\e[0Ksection_end:$(date +%s):cleanup\r\e[0K"
 
 # Standard artifacts for sync jobs
