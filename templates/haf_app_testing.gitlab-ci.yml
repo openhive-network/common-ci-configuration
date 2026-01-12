@@ -94,76 +94,19 @@ include:
     # Separate clone path prevents clone-strategy jobs from erasing fetch workspaces
     GIT_CLONE_PATH: $CI_BUILDS_DIR/fetch/$CI_RUNNER_SHORT_TOKEN/$CI_CONCURRENT_ID/$CI_PROJECT_PATH
 
+# =============================================================================
+# GIT CLEANUP HOOKS (HAF-specific aliases)
+# =============================================================================
+# These are HAF-specific aliases for the base templates in base.gitlab-ci.yml.
+# They provide backward compatibility for HAF repos using the .haf_* naming convention.
+
 # Git corruption cleanup hook for fetch strategy
 # Cleans corrupt git state left by cancelled pipelines (see GitLab #296638, #4600)
 # Usage: default: hooks: !reference [.haf_git_corruption_cleanup, hooks]
+# Note: This is an alias for .pre_get_sources_with_submodules from base.gitlab-ci.yml
 .haf_git_corruption_cleanup:
   hooks:
-    pre_get_sources_script:
-      - |
-        (
-        cd "${CI_PROJECT_DIR:-/builds}" 2>/dev/null || exit 0
-        echo "pre_get_sources: checking $(pwd) for corrupt git state"
-        if [ -d ".git" ]; then
-          # Remove stale lock files that block git operations
-          find .git -name "*.lock" -delete 2>/dev/null || true
-
-          # Check if main repo is corrupt - if so, remove .git to force fresh clone
-          if ! git rev-parse HEAD >/dev/null 2>&1; then
-            echo "pre_get_sources: main repository corrupt, forcing fresh clone"
-            rm -rf .git
-          else
-            # Main repo OK - check and clean corrupt submodules
-            if [ -f ".gitmodules" ]; then
-              git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{print $2}' | while read submod; do
-                needs_clean=false
-                [ -z "$submod" ] && continue
-                # Check if submodule working directory exists but is corrupt
-                if [ -d "$submod" ] && [ -f "$submod/.git" ]; then
-                  if ! git -C "$submod" rev-parse HEAD >/dev/null 2>&1; then
-                    needs_clean=true
-                  fi
-                fi
-                # Check if .git/modules exists but is corrupt (even if working dir is gone)
-                if [ -d ".git/modules/$submod" ]; then
-                  if ! git --git-dir=".git/modules/$submod" rev-parse HEAD >/dev/null 2>&1; then
-                    echo "pre_get_sources: $submod corrupt (rev-parse failed)"
-                    needs_clean=true
-                  fi
-                fi
-                if [ "$needs_clean" = true ]; then
-                  echo "pre_get_sources: cleaning corrupt submodule: $submod"
-                  rm -rf "$submod" ".git/modules/$submod"
-                fi
-              done
-            fi
-
-            # Handle directory-to-submodule transitions: fetch target ref's .gitmodules
-            # and remove any paths that exist as regular directories (not submodules).
-            # This handles cases where a path changed from directory to submodule between branches.
-            if [ -n "$CI_COMMIT_REF_NAME" ]; then
-              echo "pre_get_sources: checking for directory-to-submodule transitions (ref: $CI_COMMIT_REF_NAME)"
-              # Fetch the target ref first (it may not exist locally yet)
-              git fetch origin "$CI_COMMIT_REF_NAME" --depth=1 2>&1 || true
-              target_gitmodules=$(git show "origin/$CI_COMMIT_REF_NAME:.gitmodules" 2>/dev/null) || true
-              if [ -n "$target_gitmodules" ]; then
-                echo "$target_gitmodules" | grep "path = " | sed 's/.*path = //' | while read submod; do
-                  [ -z "$submod" ] && continue
-                  # If path exists as a regular directory (not a submodule), remove it
-                  if [ -d "$submod" ] && [ ! -f "$submod/.git" ]; then
-                    echo "pre_get_sources: removing directory for submodule transition: $submod"
-                    rm -rf "$submod"
-                  fi
-                done
-              fi
-            fi
-
-            echo "pre_get_sources: existing repo OK"
-          fi
-        else
-          echo "pre_get_sources: no .git directory (fresh workspace)"
-        fi
-        )
+    pre_get_sources_script: !reference [.pre_get_sources_with_submodules, pre_get_sources_script]
 
 # Permission fix hook for fetch strategy with cross-user CI jobs
 # Different jobs may run as different users; this ensures writable workspaces.
@@ -174,30 +117,13 @@ include:
 #         - !reference [.haf_git_corruption_cleanup, hooks, pre_get_sources_script]
 #         - !reference [.haf_permission_fix, hooks, pre_get_sources_script]
 #
-# Or set HAF_PERMISSION_FIX_PATHS variable in your CI to customize paths:
+# Or set PERMISSION_FIX_PATHS variable in your CI to customize paths:
 #   variables:
-#     HAF_PERMISSION_FIX_PATHS: "hive/libraries/plugins src/generated"
+#     PERMISSION_FIX_PATHS: "hive/libraries/plugins src/generated"
+# Note: This is an alias for .pre_get_sources_permission_fix from base.gitlab-ci.yml
 .haf_permission_fix:
   hooks:
-    pre_get_sources_script:
-      - |
-        (
-        cd "${CI_PROJECT_DIR:-/builds}" 2>/dev/null || exit 0
-        # Default paths that commonly need permission fixes
-        fix_paths="${HAF_PERMISSION_FIX_PATHS:-}"
-        if [ -z "$fix_paths" ]; then
-          # Auto-detect common paths that need fixing
-          for path in "hive/libraries/plugins" "libraries/plugins"; do
-            [ -d "$path" ] && fix_paths="$fix_paths $path"
-          done
-        fi
-        for path in $fix_paths; do
-          if [ -d "$path" ]; then
-            echo "pre_get_sources: fixing permissions on $path"
-            chmod -R a+w "$path" 2>/dev/null || true
-          fi
-        done
-        )
+    pre_get_sources_script: !reference [.pre_get_sources_permission_fix, pre_get_sources_script]
 
 # HAF submodule initialization for fetch strategy
 # Manually clones and checks out HAF submodule with nested hive submodules
