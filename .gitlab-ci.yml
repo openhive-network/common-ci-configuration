@@ -53,7 +53,11 @@ default:
 
           # Check if main repo is corrupt - if so, remove .git to force fresh clone
           if ! git rev-parse HEAD >/dev/null 2>&1; then
-            echo "pre_get_sources: main repository corrupt, forcing fresh clone"
+            echo "pre_get_sources: main repository corrupt (rev-parse failed), forcing fresh clone"
+            rm -rf .git
+          # Check if origin remote is configured (missing config file = no remote)
+          elif ! git remote get-url origin >/dev/null 2>&1; then
+            echo "pre_get_sources: origin remote missing (incomplete clone), forcing fresh clone"
             rm -rf .git
           else
             # Main repo OK - check and clean corrupt submodules
