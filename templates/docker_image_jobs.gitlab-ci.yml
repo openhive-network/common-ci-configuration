@@ -125,3 +125,221 @@ include:
         docker tag "$HIVE_BLOG_IMAGE_SOURCE" "${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}"
         docker push "${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}"
       fi
+
+# =============================================================================
+# STANDARDIZED BUILD/PUBLISH TEMPLATES (New Flow)
+#
+# These templates implement the new standardized Docker publishing flow:
+#   1. Build phase: Build once, push to GitLab with SHA + branch/version tags
+#   2. Test phase: Validate images (no building)
+#   3. Publish phase: Pull/retag/push to external registries (no rebuild)
+#
+# Tagging convention:
+#   - Always: ${CI_COMMIT_SHA} (full 40-char hash for traceability)
+#   - develop branch: also 'latest'
+#   - main/master branch: also 'stable'
+#   - Protected tags: also ${CI_COMMIT_TAG}
+# =============================================================================
+
+# Standard Docker build template that handles common tagging logic.
+#
+# This template builds a single Docker image and pushes it to GitLab registry
+# with appropriate tags based on branch/tag context.
+#
+# Required variables:
+#   IMAGE_NAME: Name of the image within the registry (e.g., "myapp", "postgrest-rewriter")
+#               For the main/root image, use "" to push to $CI_REGISTRY_IMAGE directly
+#
+# Optional variables:
+#   DOCKERFILE_PATH: Path to Dockerfile (default: "Dockerfile")
+#   DOCKER_BUILD_TARGET: Dockerfile target stage (default: none)
+#   DOCKER_BUILD_CONTEXT: Build context directory (default: ".")
+#   DOCKER_BUILD_ARGS: Additional build args (space-separated, e.g., "ARG1=val1 ARG2=val2")
+#
+# Example usage:
+#   build_main_image:
+#     extends: .docker_build_job_template
+#     variables:
+#       IMAGE_NAME: ""
+#       DOCKER_BUILD_TARGET: "instance"
+#
+#   build_rewriter:
+#     extends: .docker_build_job_template
+#     variables:
+#       IMAGE_NAME: "postgrest-rewriter"
+#       DOCKERFILE_PATH: "Dockerfile.rewriter"
+#
+.docker_build_job_template:
+  extends: .docker_image_builder_job_template
+  stage: build
+  variables:
+    IMAGE_NAME: ""
+    DOCKERFILE_PATH: "Dockerfile"
+    DOCKER_BUILD_TARGET: ""
+    DOCKER_BUILD_CONTEXT: "."
+    DOCKER_BUILD_ARGS: ""
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to GitLab registry..."
+      echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+      echo -e "\e[0Ksection_end:$(date +%s):registry_login\r\e[0K"
+
+      # Determine base image path
+      if [[ -n "$IMAGE_NAME" ]]; then
+        IMAGE_BASE="${CI_REGISTRY_IMAGE}/${IMAGE_NAME}"
+      else
+        IMAGE_BASE="${CI_REGISTRY_IMAGE}"
+      fi
+
+      # Build tag arguments
+      TAGS="--tag ${IMAGE_BASE}:${CI_COMMIT_SHA}"
+
+      # Branch-specific tags
+      if [[ "$CI_COMMIT_BRANCH" == "develop" ]]; then
+        TAGS="$TAGS --tag ${IMAGE_BASE}:latest"
+        echo "Adding 'latest' tag for develop branch"
+      elif [[ "$CI_COMMIT_BRANCH" == "main" || "$CI_COMMIT_BRANCH" == "master" ]]; then
+        TAGS="$TAGS --tag ${IMAGE_BASE}:stable"
+        echo "Adding 'stable' tag for main/master branch"
+      fi
+
+      # Protected tag gets version tag
+      if [[ -n "${CI_COMMIT_TAG:-}" && "${CI_COMMIT_REF_PROTECTED:-}" == "true" ]]; then
+        TAGS="$TAGS --tag ${IMAGE_BASE}:${CI_COMMIT_TAG}"
+        echo "Adding version tag '${CI_COMMIT_TAG}' for protected tag"
+      fi
+
+      # Build cache configuration
+      CACHE_FROM="type=registry,ref=${IMAGE_BASE}/cache:buildcache"
+      CACHE_TO="type=registry,ref=${IMAGE_BASE}/cache:buildcache,mode=max"
+
+      # Construct build command
+      BUILD_CMD="docker buildx build --provenance=false --progress=plain"
+      BUILD_CMD="$BUILD_CMD --cache-from=$CACHE_FROM --cache-to=$CACHE_TO"
+      BUILD_CMD="$BUILD_CMD --push"
+      BUILD_CMD="$BUILD_CMD $TAGS"
+
+      # Add target if specified
+      if [[ -n "$DOCKER_BUILD_TARGET" ]]; then
+        BUILD_CMD="$BUILD_CMD --target=$DOCKER_BUILD_TARGET"
+      fi
+
+      # Add custom build args if specified
+      for ARG in $DOCKER_BUILD_ARGS; do
+        BUILD_CMD="$BUILD_CMD --build-arg $ARG"
+      done
+
+      BUILD_CMD="$BUILD_CMD -f $DOCKERFILE_PATH $DOCKER_BUILD_CONTEXT"
+
+      echo "Building image: ${IMAGE_BASE}"
+      echo "Tags: ${CI_COMMIT_SHA}${CI_COMMIT_BRANCH:+ + branch tag}${CI_COMMIT_TAG:+ + version tag}"
+      echo "Running: $BUILD_CMD"
+
+      eval $BUILD_CMD
+
+      # Export image reference for downstream jobs
+      echo "BUILD_IMAGE_REF=${IMAGE_BASE}:${CI_COMMIT_SHA}" >> build.env
+      echo "BUILD_IMAGE_BASE=${IMAGE_BASE}" >> build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+
+# Standard Docker publish template for pushing images to external registries.
+#
+# This template implements the "pull/retag/push" pattern - NO rebuilding.
+# It pulls images from GitLab registry using the protected tag (for security)
+# and pushes them to registry.hive.blog.
+#
+# IMPORTANT: This job only runs on protected tags. Images must already exist
+# in GitLab registry with the version tag from the build phase.
+#
+# Required variables:
+#   PUBLISH_IMAGES: Space-separated list of images to publish
+#                   e.g., "myapp postgrest-rewriter" or just "myapp"
+#
+# Optional variables:
+#   HIVE_BLOG_REGISTRY: Target registry (default: "registry-upload.hive.blog")
+#   PUBLISH_PROJECT_NAME: Project name on target registry (default: $CI_PROJECT_NAME)
+#
+# Example usage:
+#   publish:
+#     extends: .docker_publish_job_template
+#     variables:
+#       PUBLISH_IMAGES: "balance_tracker postgrest-rewriter"
+#
+#   # For repos with custom project paths on hive.blog:
+#   publish:
+#     extends: .docker_publish_job_template
+#     variables:
+#       PUBLISH_IMAGES: "hafah hafah-rewriter"
+#       PUBLISH_PROJECT_NAME: "hafah"
+#
+.docker_publish_job_template:
+  extends: .docker_image_builder_job_template
+  stage: publish
+  variables:
+    PUBLISH_IMAGES: ""
+    HIVE_BLOG_REGISTRY: "registry-upload.hive.blog"
+    PUBLISH_PROJECT_NAME: "${CI_PROJECT_NAME}"
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to registries..."
+      echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+      if [[ -n "${BLOG_REGISTRY_USER:-}" && -n "${BLOG_REGISTRY_PASSWORD:-}" ]]; then
+        echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"
+      else
+        echo "WARNING: BLOG_REGISTRY_USER or BLOG_REGISTRY_PASSWORD not set, skipping hive.blog login"
+      fi
+      echo -e "\e[0Ksection_end:$(date +%s):registry_login\r\e[0K"
+
+      # Security: Pull using protected tag (not commit SHA)
+      # This ensures we publish the exact tagged version that was validated
+      SOURCE_TAG="${CI_COMMIT_TAG}"
+
+      if [[ -z "$SOURCE_TAG" ]]; then
+        echo "ERROR: CI_COMMIT_TAG not set. Publish job only runs on protected tags."
+        exit 1
+      fi
+
+      if [[ -z "$PUBLISH_IMAGES" ]]; then
+        echo "ERROR: PUBLISH_IMAGES not set. Specify images to publish."
+        exit 1
+      fi
+
+      echo "Publishing images for tag: ${SOURCE_TAG}"
+      echo "Target registry: ${HIVE_BLOG_REGISTRY}/${PUBLISH_PROJECT_NAME}"
+
+      for IMAGE in $PUBLISH_IMAGES; do
+        # Determine source path (handle root image vs subpath)
+        if [[ -n "$IMAGE" && "$IMAGE" != "${CI_PROJECT_NAME}" ]]; then
+          SOURCE="${CI_REGISTRY_IMAGE}/${IMAGE}:${SOURCE_TAG}"
+          TARGET="${HIVE_BLOG_REGISTRY}/${PUBLISH_PROJECT_NAME}/${IMAGE}:${SOURCE_TAG}"
+        else
+          SOURCE="${CI_REGISTRY_IMAGE}:${SOURCE_TAG}"
+          TARGET="${HIVE_BLOG_REGISTRY}/${PUBLISH_PROJECT_NAME}:${SOURCE_TAG}"
+        fi
+
+        echo ""
+        echo "Publishing: $IMAGE"
+        echo "  Source: $SOURCE"
+        echo "  Target: $TARGET"
+
+        docker pull "$SOURCE"
+        docker tag "$SOURCE" "$TARGET"
+        docker push "$TARGET"
+
+        echo "  ✓ Published successfully"
+      done
+
+      echo ""
+      echo "All images published successfully to ${HIVE_BLOG_REGISTRY}"
+  rules:
+    - if: $QUICK_TEST == "true"
+      when: never
+    - if: $SKIP_PRODUCTION_DEPLOY == "true"
+      when: never
+    - if: $SKIP_DOCKER_PUBLISH == "true"
+      when: never
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED == "true"'
+      when: on_success
+    - when: never
