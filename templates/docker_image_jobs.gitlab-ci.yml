@@ -76,10 +76,9 @@ include:
   extends: .docker_image_builder_job_template
   needs: []
   variables:
-    DOCKER_HUB_USER: $DOCKER_HUB_USER
-    DOCKER_HUB_PASSWORD: $DOCKER_HUB_PASSWORD
-    BLOG_REGISTRY_USER: $BLOG_REGISTRY_USER
-    BLOG_REGISTRY_PASSWORD: $BLOG_REGISTRY_PASSWORD
+    # Note: DOCKER_HUB_USER, DOCKER_HUB_PASSWORD, BLOG_REGISTRY_USER, BLOG_REGISTRY_PASSWORD
+    # must be set as CI/CD variables in the project/group settings. Do NOT re-declare them
+    # here as `VAR: $VAR` - GitLab CI doesn't properly expand protected variables in that pattern.
     HIVE_BLOG_REGISTRY: registry-upload.hive.blog
   before_script:
     - !reference [.docker_image_builder_job_template, before_script]
