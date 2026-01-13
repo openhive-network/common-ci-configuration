@@ -19,16 +19,18 @@ Usage: $0 --image-tag=TAG --src-dir=DIR [OPTIONS]
 Build HAF app Docker images and push to registries.
 
 OPTIONS:
-  --image-tag=TAG           Tag for the Docker images (required)
-  --src-dir=DIR             Source directory containing build_instance.sh (required)
-  --project-name=NAME       Project name for Docker Hub (default: \$CI_PROJECT_NAME)
-  --registry=URL            Registry URL (default: \$CI_REGISTRY_IMAGE)
-  --docker-hub-user=USER    Docker Hub username (optional, default: \$DOCKER_HUB_USER)
-  --docker-hub-password=PW  Docker Hub password (optional, default: \$DOCKER_HUB_PASSWORD)
-  --help                    Show this help
+  --image-tag=TAG             Tag for the Docker images (required)
+  --src-dir=DIR               Source directory containing build_instance.sh (required)
+  --project-name=NAME         Project name for registries (default: \$CI_PROJECT_NAME)
+  --registry=URL              Registry URL (default: \$CI_REGISTRY_IMAGE)
+  --docker-hub-user=USER      Docker Hub username (optional, default: \$DOCKER_HUB_USER)
+  --docker-hub-password=PW    Docker Hub password (optional, default: \$DOCKER_HUB_PASSWORD)
+  --blog-registry-user=USER   Hive blog registry username (optional, default: \$BLOG_REGISTRY_USER)
+  --blog-registry-password=PW Hive blog registry password (optional, default: \$BLOG_REGISTRY_PASSWORD)
+  --help                      Show this help
 
 This script calls the repo's scripts/ci-helpers/build_instance.sh to build images,
-then optionally pushes to Docker Hub if credentials are provided.
+then optionally pushes to Docker Hub and/or hive.blog if credentials are provided.
 EOF
 }
 
@@ -38,6 +40,9 @@ PROJECT_NAME="${CI_PROJECT_NAME:-}"
 REGISTRY="${CI_REGISTRY_IMAGE:-}"
 DOCKER_HUB_USER="${DOCKER_HUB_USER:-}"
 DOCKER_HUB_PASSWORD="${DOCKER_HUB_PASSWORD:-}"
+BLOG_REGISTRY_USER="${BLOG_REGISTRY_USER:-}"
+BLOG_REGISTRY_PASSWORD="${BLOG_REGISTRY_PASSWORD:-}"
+HIVE_BLOG_REGISTRY="registry-upload.hive.blog"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -58,6 +63,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         --docker-hub-password=*)
             DOCKER_HUB_PASSWORD="${1#*=}"
+            ;;
+        --blog-registry-user=*)
+            BLOG_REGISTRY_USER="${1#*=}"
+            ;;
+        --blog-registry-password=*)
+            BLOG_REGISTRY_PASSWORD="${1#*=}"
             ;;
         --help|-h|-?)
             print_help
@@ -107,7 +118,7 @@ echo "Source dir: $SRC_DIR"
 # Call repo's build_instance.sh to build and push to GitLab registry
 "$BUILD_SCRIPT" "$IMAGE_TAG" "$SRC_DIR" "$REGISTRY"
 
-# Push to Docker Hub if credentials provided
+# Push to Docker Hub if credentials provided (main app only)
 if [[ -n "$DOCKER_HUB_USER" && -n "$DOCKER_HUB_PASSWORD" ]]; then
     echo "Pushing to Docker Hub..."
     echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USER" --password-stdin
@@ -116,6 +127,29 @@ if [[ -n "$DOCKER_HUB_USER" && -n "$DOCKER_HUB_PASSWORD" ]]; then
     docker tag "$REGISTRY:$IMAGE_TAG" "$DOCKER_HUB_IMAGE"
     docker push "$DOCKER_HUB_IMAGE"
     echo "Pushed: $DOCKER_HUB_IMAGE"
+fi
+
+# Push to hive.blog registry if credentials provided
+if [[ -n "$BLOG_REGISTRY_USER" && -n "$BLOG_REGISTRY_PASSWORD" ]]; then
+    echo "Pushing to hive.blog registry..."
+    echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"
+
+    # Push main app
+    HIVE_BLOG_IMAGE="${HIVE_BLOG_REGISTRY}/${PROJECT_NAME}:$IMAGE_TAG"
+    docker tag "$REGISTRY:$IMAGE_TAG" "$HIVE_BLOG_IMAGE"
+    docker push "$HIVE_BLOG_IMAGE"
+    echo "Pushed: $HIVE_BLOG_IMAGE"
+
+    # Push postgrest-rewriter if it exists
+    REWRITER_SOURCE="$REGISTRY/postgrest-rewriter:$IMAGE_TAG"
+    if docker image inspect "$REWRITER_SOURCE" >/dev/null 2>&1; then
+        REWRITER_TARGET="${HIVE_BLOG_REGISTRY}/${PROJECT_NAME}/postgrest-rewriter:$IMAGE_TAG"
+        docker tag "$REWRITER_SOURCE" "$REWRITER_TARGET"
+        docker push "$REWRITER_TARGET"
+        echo "Pushed: $REWRITER_TARGET"
+    else
+        echo "No postgrest-rewriter image found, skipping"
+    fi
 fi
 
 echo "Build and publish completed successfully"
