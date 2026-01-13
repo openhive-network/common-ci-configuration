@@ -78,14 +78,16 @@ include:
   variables:
     DOCKER_HUB_USER: $DOCKER_HUB_USER
     DOCKER_HUB_PASSWORD: $DOCKER_HUB_PASSWORD
+    BLOG_REGISTRY_USER: $BLOG_REGISTRY_USER
+    BLOG_REGISTRY_PASSWORD: $BLOG_REGISTRY_PASSWORD
     HIVE_BLOG_REGISTRY: registry-upload.hive.blog
   before_script:
     - !reference [.docker_image_builder_job_template, before_script]
     - |
       echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to Docker registries..."
       docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
-      if [[ -n "${DOCKER_HUB_USER:-}" && -n "${DOCKER_HUB_PASSWORD:-}" ]]; then
-        docker login -u "$DOCKER_HUB_USER" -p "$DOCKER_HUB_PASSWORD" "$HIVE_BLOG_REGISTRY" || echo "WARNING: hive.blog registry login failed, continuing..."
+      if [[ -n "${BLOG_REGISTRY_USER:-}" && -n "${BLOG_REGISTRY_PASSWORD:-}" ]]; then
+        docker login -u "$BLOG_REGISTRY_USER" -p "$BLOG_REGISTRY_PASSWORD" "$HIVE_BLOG_REGISTRY"
       fi
       echo -e "\e[0Ksection_end:$(date +%s):registry_login\r\e[0K"
   rules:
@@ -122,5 +124,5 @@ include:
       if [[ -n "${HIVE_BLOG_IMAGE_SOURCE:-}" && -n "${HIVE_BLOG_IMAGE_TARGET:-}" ]]; then
         echo "Pushing to hive.blog registry: ${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}"
         docker tag "$HIVE_BLOG_IMAGE_SOURCE" "${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}"
-        docker push "${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}" || echo "WARNING: hive.blog registry push failed, continuing..."
+        docker push "${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}"
       fi
