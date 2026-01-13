@@ -135,7 +135,7 @@ include:
 #   3. Publish phase: Pull/retag/push to external registries (no rebuild)
 #
 # Tagging convention:
-#   - Always: ${CI_COMMIT_SHA} (full 40-char hash for traceability)
+#   - Always: ${CI_COMMIT_SHORT_SHA} (8-char hash)
 #   - develop branch: also 'latest'
 #   - main/master branch: also 'stable'
 #   - Protected tags: also ${CI_COMMIT_TAG}
@@ -191,8 +191,8 @@ include:
         IMAGE_BASE="${CI_REGISTRY_IMAGE}"
       fi
 
-      # Build tag arguments
-      TAGS="--tag ${IMAGE_BASE}:${CI_COMMIT_SHA}"
+      # Build tag arguments - use short SHA for consistency with existing repos
+      TAGS="--tag ${IMAGE_BASE}:${CI_COMMIT_SHORT_SHA}"
 
       # Branch-specific tags
       if [[ "$CI_COMMIT_BRANCH" == "develop" ]]; then
@@ -232,13 +232,13 @@ include:
       BUILD_CMD="$BUILD_CMD -f $DOCKERFILE_PATH $DOCKER_BUILD_CONTEXT"
 
       echo "Building image: ${IMAGE_BASE}"
-      echo "Tags: ${CI_COMMIT_SHA}${CI_COMMIT_BRANCH:+ + branch tag}${CI_COMMIT_TAG:+ + version tag}"
+      echo "Tags: ${CI_COMMIT_SHORT_SHA}${CI_COMMIT_BRANCH:+ + branch tag}${CI_COMMIT_TAG:+ + version tag}"
       echo "Running: $BUILD_CMD"
 
       eval $BUILD_CMD
 
       # Export image reference for downstream jobs
-      echo "BUILD_IMAGE_REF=${IMAGE_BASE}:${CI_COMMIT_SHA}" >> build.env
+      echo "BUILD_IMAGE_REF=${IMAGE_BASE}:${CI_COMMIT_SHORT_SHA}" >> build.env
       echo "BUILD_IMAGE_BASE=${IMAGE_BASE}" >> build.env
   artifacts:
     reports:
