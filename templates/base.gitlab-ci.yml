@@ -67,13 +67,27 @@ default:
         find .git -name "*.lock" -delete 2>/dev/null || true
 
         # Check if main repo is corrupt - if so, remove .git to force fresh clone
+        needs_fresh_clone=false
         if ! git rev-parse HEAD >/dev/null 2>&1; then
           echo "pre_get_sources: main repository corrupt (rev-parse failed), forcing fresh clone"
-          rm -rf .git
+          needs_fresh_clone=true
         # Check if origin remote is configured (missing config file = no remote)
         elif ! git remote get-url origin >/dev/null 2>&1; then
           echo "pre_get_sources: origin remote missing (incomplete clone), forcing fresh clone"
+          needs_fresh_clone=true
+        fi
+
+        if [ "$needs_fresh_clone" = true ]; then
           rm -rf .git
+          # Also clean orphaned submodule directories that have .git files pointing to
+          # the now-removed .git/modules/<name>
+          find . -maxdepth 2 -name ".git" -type f 2>/dev/null | while read gitfile; do
+            submod_dir=$(dirname "$gitfile")
+            if [ "$submod_dir" != "." ]; then
+              echo "pre_get_sources: removing orphaned submodule directory: $submod_dir"
+              rm -rf "$submod_dir"
+            fi
+          done
         else
           # Main repo OK - check and clean corrupt submodules
           if [ -f ".gitmodules" ]; then
