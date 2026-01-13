@@ -78,11 +78,15 @@ include:
   variables:
     DOCKER_HUB_USER: $DOCKER_HUB_USER
     DOCKER_HUB_PASSWORD: $DOCKER_HUB_PASSWORD
+    HIVE_BLOG_REGISTRY: registry-upload.hive.blog
   before_script:
     - !reference [.docker_image_builder_job_template, before_script]
     - |
-      echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to Docker registry..."
+      echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to Docker registries..."
       docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+      if [[ -n "${DOCKER_HUB_USER:-}" && -n "${DOCKER_HUB_PASSWORD:-}" ]]; then
+        docker login -u "$DOCKER_HUB_USER" -p "$DOCKER_HUB_PASSWORD" "$HIVE_BLOG_REGISTRY"
+      fi
       echo -e "\e[0Ksection_end:$(date +%s):registry_login\r\e[0K"
   rules:
     - if: $QUICK_TEST == "true"
