@@ -85,9 +85,9 @@ include:
     - !reference [.docker_image_builder_job_template, before_script]
     - |
       echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to Docker registries..."
-      docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY" <<< "$CI_REGISTRY_PASSWORD"
+      echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
       if [[ -n "${BLOG_REGISTRY_USER:-}" && -n "${BLOG_REGISTRY_PASSWORD:-}" ]]; then
-        docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY" <<< "$BLOG_REGISTRY_PASSWORD"
+        echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"
       fi
       echo -e "\e[0Ksection_end:$(date +%s):registry_login\r\e[0K"
   rules:
