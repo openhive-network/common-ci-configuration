@@ -81,7 +81,7 @@ default:
           rm -rf .git
           # Also clean orphaned submodule directories that have .git files pointing to
           # the now-removed .git/modules/<name>
-          find . -maxdepth 2 -name ".git" -type f 2>/dev/null | while read gitfile; do
+          find . -maxdepth 6 -name ".git" -type f 2>/dev/null | while read gitfile; do
             submod_dir=$(dirname "$gitfile")
             if [ "$submod_dir" != "." ]; then
               echo "pre_get_sources: removing orphaned submodule directory: $submod_dir"
@@ -152,7 +152,7 @@ default:
         # Clean up orphaned submodule directories - these have .git files pointing
         # to .git/modules/<name> which doesn't exist when .git is missing.
         # Find directories with .git files (submodule markers) and remove them.
-        find . -maxdepth 2 -name ".git" -type f 2>/dev/null | while read gitfile; do
+        find . -maxdepth 6 -name ".git" -type f 2>/dev/null | while read gitfile; do
           submod_dir=$(dirname "$gitfile")
           if [ "$submod_dir" != "." ]; then
             echo "pre_get_sources: removing orphaned submodule directory: $submod_dir"
