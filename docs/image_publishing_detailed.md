@@ -894,3 +894,50 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | `/instance`, `/minimal-instance` | balance_tracker, haf_block_explorer, nft_tracker |
 | `/minimal` | hivemind, HAfAH |
 | None | Others |
+
+---
+
+## Standardized Publishing Migration Status
+
+All repos have been migrated to use `.docker_publish_job_template` from common-ci-configuration. This template implements a pull/retag/push pattern where:
+
+1. **Build phase**: Images built and pushed to GitLab registry only
+2. **Publish phase**: Images pulled from GitLab, retagged, and pushed to hive.blog registry
+3. **No rebuild**: Publish phase does not rebuild images, ensuring tested images are deployed
+
+### Migration Status
+
+| Repository | Status | Job Name | Images Published |
+|------------|--------|----------|------------------|
+| hive | Migrated | `publish_images` | hive |
+| haf | Migrated | `publish_images` | haf |
+| hivemind | Migrated | `publish_images` | hivemind, postgrest-rewriter |
+| HAfAH | Migrated | `publish_images` | hafah, postgrest-rewriter |
+| balance_tracker | Migrated | `publish_images` | balance_tracker, postgrest-rewriter |
+| reputation_tracker | Migrated | `publish_images` | reputation_tracker, postgrest-rewriter |
+| haf_block_explorer | Migrated | `publish_images` | haf_block_explorer, postgrest-rewriter |
+| nft_tracker | Migrated | `publish_images` | nft_tracker, postgrest-rewriter |
+| hivesense | Migrated | `publish_images` | hivesense, postgrest-rewriter, syncer, pca |
+| haf_api_node | Migrated | `publish_images` | Multiple service images |
+| block_explorer_ui | Migrated | `publish_images` | block_explorer_ui, explorer-subdirectory |
+| denser | Migrated | `publish_images` | blog, wallet |
+
+### Template Usage
+
+```yaml
+# Standard usage pattern
+publish_images:
+  extends: .docker_publish_job_template
+  stage: publish
+  variables:
+    PUBLISH_IMAGES: "image1 image2"  # Space-separated list of subimages
+  tags:
+    - public-runner-docker
+```
+
+The template automatically:
+- Runs only on protected tags
+- Logs into both GitLab and hive.blog registries
+- Pulls images by `CI_COMMIT_TAG` from GitLab
+- Retags and pushes to `registry-upload.hive.blog`
+- Respects `SKIP_DOCKER_PUBLISH` and `QUICK_TEST` variables
