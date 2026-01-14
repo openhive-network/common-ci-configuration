@@ -48,46 +48,17 @@ RUN set -ex; python3 -m venv --system-site-packages /poetry_venv && \
     source /poetry_venv/bin/activate && \
     pip install --no-cache-dir poetry==$POETRY_VERSION
 
-FROM ubuntu/python:${PYTHON_VERSION} AS python_u24_runtime
+FROM ubuntu:24.04 AS python_u24_runtime
 
 USER 0:0
+RUN apt-get update && \
+    apt-get install  --no-install-recommends -y python3.12 python3.12-venv python3-pip  && \
+    apt-get clean && rm -r /var/lib/apt/lists/*
 
 # Copy initial set of tools just to be able to add regular root user and group
 
-COPY --from=python_dev /bin/bash \
-  /bin/ls \
-  /bin/ln \
-  /bin/chown \
-  /bin/chmod \
-  /bin/whoami \
-  /bin/
 
 SHELL ["/bin/bash", "-c"]
-
-COPY --from=python_dev \
-  /usr/sbin/useradd \
-  /usr/sbin/usermod \
-  /usr/sbin/groupadd \
-  \
-  /usr/sbin/
-
-COPY --from=python_dev \
-  /usr/bin/mkdir \
-  /usr/bin/dirname \
-  /usr/bin/basename \
-  /usr/bin/id \
-  \
-  /usr/bin/
-
-COPY --from=python_dev \
-  /lib/x86_64-linux-gnu/libmd.so.0 \
-  /lib/x86_64-linux-gnu/libselinux.so.1 \
-  /lib/x86_64-linux-gnu/libpcre2-8.so.0 \
-  /lib/x86_64-linux-gnu/libcap-ng.so.0 \
-  /lib/x86_64-linux-gnu/libsemanage.so.2 \
-  /lib/x86_64-linux-gnu/libsepol.so.2 \
-  /lib/x86_64-linux-gnu/libaudit.so.1 \
-  /lib/x86_64-linux-gnu/
 
 
 ENV PYTHON_VENV_PATH="/python_venv"
@@ -99,33 +70,6 @@ COPY --from=python_dev \
 
 COPY --from=python_dev /packages_to_install /packages_to_install
 
-RUN ln -sf /bin/bash /bin/sh && \
-  groupadd users && \
-  useradd -r -U -o -d /root -ms /bin/bash -u 0 -c "root account" "root" && \
-  mkdir -vp /root && chown -R root:root /root && \
-  \
-  export LD_LIBRARY_PATH="/packages_to_install/:$LD_LIBRARY_PATH" && \
-  export DEBIAN_FRONTEND=noninteractive && \
-  pushd /packages_to_install && \
-  dpkg --force-depends  -i \
-    dpkg_1.22.11ubuntu1_amd64.deb \
-    perl-base_5.38.2-5_amd64.deb \
-    debconf_1.5.86ubuntu1_all.deb \
-    libpam0g_1.5.3-5ubuntu5.4_amd64.deb \
-    libpam-modules-bin_1.5.3-5ubuntu5.4_amd64.deb \
-    libpam-modules_1.5.3-5ubuntu5.4_amd64.deb \
-    libpam-runtime_1.5.3-5ubuntu5.4_all.deb \
-    libapparmor1_4.1.0~beta1-0ubuntu3_amd64.deb \
-    libpam-apparmor_4.1.0~beta1-0ubuntu3_amd64.deb \
-    coreutils_9.4-3.1ubuntu1_amd64.deb \
-    sudo_1.9.15p5-3ubuntu5_amd64.deb \
-    && \
-    dpkg --force-remove-essential --purge \
-       perl-base \
-       dpkg && \
-  rm -rf /var/lib/dpkg/ \
-         /packages_to_install && \
-  popd
 
 # Compile so __pycache__ will be already created for standard Python modules
 # Will work similar as e.g. `python -m compileall /urs/lib/python3.12` but is more flexible

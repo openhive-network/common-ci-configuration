@@ -28,6 +28,14 @@ variable "HAF_APP_TEST_RUNNER_VERSION" {
   default = "2.1"
 }
 
+variable "PYENV_PYTHON_VERSION" {
+  default = "3.12"
+}
+
+variable "WHEEL_BUILDER_REVISION" {
+  default = "1"
+}
+
 variable "PAAS_PSQL_VERSION" {
   default = "11251948d5dd4867552f9b9836a9e02110304df5"
 }
@@ -187,4 +195,15 @@ target "haf-app-test-runner" {
   tags = generate-tags("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
   cache-from = generate-cache-from("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
   cache-to = generate-cache-to("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
+}
+
+target "wheel-builder" {
+  dockerfile = "Dockerfile.wheel-builder"
+  tags = generate-tags("wheel-builder", "${PYENV_PYTHON_VERSION}-${WHEEL_BUILDER_REVISION}")
+  cache-from = generate-cache-from("wheel-builder", "${PYENV_PYTHON_VERSION}")
+  cache-to = generate-cache-to("wheel-builder", "${PYENV_PYTHON_VERSION}")
+  args = {
+    CI_BASE_IMAGE_VERSION = "${CI_BASE_IMAGE_VERSION}"
+    PYENV_PYTHON_VERSION = "${PYENV_PYTHON_VERSION}"
+  }
 }

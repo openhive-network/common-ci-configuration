@@ -44,7 +44,7 @@ docker buildx bake <target>
 
 # Available targets: benchmark-test-runner, docker-builder, docker-dind,
 # python-scripts, tox-test-runner, emsdk, psql, dockerfile, nginx,
-# postgrest, alpine, python, python_runtime, python_development
+# postgrest, alpine, python, python_runtime, python_development, wheel-builder
 ```
 
 Version pinning is managed in `docker-bake.hcl` - update variables there when bumping versions.

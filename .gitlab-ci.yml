@@ -562,6 +562,38 @@ build_ci_base_image:
     - job: build_docker_dind_image
       optional: true
 
+build_wheel_builder_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "wheel-builder"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  parallel:
+    matrix:
+      - PYENV_PYTHON_VERSION: ["3.12", "3.13", "3.14"]
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+    - job: build_ci_base_image
+      optional: true
+  rules:
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.wheel-builder
+      changes:
+        paths:
+          - Dockerfile.wheel-builder
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.wheel-builder
+      changes:
+        paths:
+          - Dockerfile.wheel-builder
+        compare_to: 'refs/heads/develop'
+
 build_dockerfile_image:
   extends: .build_docker_image
   stage: build
@@ -687,7 +719,7 @@ buildkit_cache_cleanup:
   variables:
     # Use latest tag since the image may not be built in this pipeline (change detection)
     IMAGE_REMOVER_TAG: latest
-    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache"
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache,wheel-builder/cache"
 
 example_docker_image_builder_job:
   extends: .pure_docker_image_builder_job_template

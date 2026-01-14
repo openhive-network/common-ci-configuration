@@ -78,6 +78,29 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 
 **Used by:** wax and other WASM projects for building JavaScript/TypeScript packages.
 
+### wheel-builder
+
+**Base:** ci-base-image (Ubuntu 24.04)
+
+Python wheel build environment with pyenv for flexible Python version management. Inherits full C++ toolchain from ci-base-image.
+
+**Includes:**
+- Everything from ci-base-image (C++ toolchain, Boost, OpenSSL, etc.)
+- pyenv with auto-detected latest patch version
+- pip, setuptools, wheel, build
+- poetry with poetry-dynamic-versioning plugin
+
+**Available versions:** `3.12-1`, `3.13-1`, `3.14-1`
+
+**CI builds in parallel matrix** for Python 3.12, 3.13, and 3.14. The latest patch version is automatically detected at build time (e.g., 3.12 → 3.12.12).
+
+**Build with custom Python major.minor version:**
+```bash
+docker buildx bake wheel-builder --set wheel-builder.args.PYENV_PYTHON_VERSION=3.11
+```
+
+**Used by:** wax Python wheel builds and tests.
+
 ## Runtime Images
 
 ### python
@@ -209,6 +232,7 @@ Python tox test runner for multi-version Python testing.
 | `postgrest` | Yes | REST API for PostgreSQL |
 | `psql` | Yes | PostgreSQL client |
 | `ci-base-image` | No | Used directly by hive/haf pipelines |
+| `wheel-builder` | No | Used by wax for Python wheel builds |
 | `python` | No | Used by hive for api_client_generator (needs Python 3.12) |
 | `python_runtime` | No | Used by clive as runtime base image |
 | `python_development` | No | Used by clive as testnet base image |
@@ -219,6 +243,7 @@ Python tox test runner for multi-version Python testing.
 | Image | Python Version | Notes |
 |-------|----------------|-------|
 | ci-base-image | 3.14 | Latest Python for hive/HAF testing |
+| wheel-builder | 3.12, 3.13, 3.14 (latest patch) | pyenv-based, matrix build for wax wheels |
 | python | 3.12.9 | With poetry+git, used by hive for api_client_generator |
 | python_runtime | 3.12 | Minimal Ubuntu runtime, used by clive |
 | python_development | 3.12 | Ubuntu with dev tools, used by clive |
@@ -236,6 +261,8 @@ Image versions are defined in `docker-bake.hcl`:
 | `PYTHON_VERSION` | 3.12.9-1 | Python image version (with poetry) |
 | `PYTHON_RUNTIME_VERSION` | 3.12-u24.04-1 | Python runtime version |
 | `CI_BASE_IMAGE_VERSION` | ubuntu24.04-py3.14-2 | CI base image version |
+| `PYENV_PYTHON_VERSION` | 3.12 | Python major.minor for wheel-builder (matrix: 3.12, 3.13, 3.14) |
+| `WHEEL_BUILDER_REVISION` | 1 | Wheel builder revision suffix |
 | `PSQL_IMAGE_VERSION` | 14-1 | PostgreSQL client version |
 | `POSTGREST_VERSION` | v12.0.2 | PostgREST version |
 | `ALPINE_VERSION` | 3.21.3 | Alpine base version |
@@ -251,9 +278,9 @@ docker buildx bake <target>
 docker buildx bake <target> --set *.tags=myregistry/myimage:mytag
 
 # Available targets:
-# docker-builder, docker-dind, ci-base-image, emsdk, python, python_runtime,
-# python_development, python-scripts, psql, postgrest, nginx, alpine,
-# dockerfile, benchmark-test-runner, tox-test-runner
+# docker-builder, docker-dind, ci-base-image, wheel-builder, emsdk,
+# python, python_runtime, python_development, python-scripts, psql, postgrest,
+# nginx, alpine, dockerfile, benchmark-test-runner, tox-test-runner
 ```
 
 ## NFS Compatibility
