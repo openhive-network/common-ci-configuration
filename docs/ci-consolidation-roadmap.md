@@ -313,10 +313,10 @@ These templates already exist from earlier phases:
 |---------|----------|------------|--------|-------|
 | balance_tracker | High | Low | ✅ Done | Phase 4 DinD templates (MR !261) |
 | reputation_tracker | High | Low | ✅ Done | Phase 4 DinD templates (MR !143) |
-| hafah | Medium | Medium | Pending | Different test patterns |
-| haf_block_explorer | Medium | Medium | Pending | Custom sync process |
-| hivemind | Low | High | Pending | Complex, multiple test types |
-| nft_tracker | Low | Low | Pending | Simpler patterns |
+| hafah | Medium | Medium | ✅ Done | Publishing migration complete |
+| haf_block_explorer | Medium | Medium | ✅ Done | Publishing migration complete |
+| hivemind | Low | High | ✅ Done | Publishing migration complete |
+| nft_tracker | Low | Low | ✅ Done | Publishing migration complete |
 
 ### Migration Checklist
 
@@ -354,6 +354,49 @@ For each project:
 3. **Easier Maintenance**: Bug fixes applied once, benefit all projects
 4. **Consistent Behavior**: Same patterns behave identically across projects
 
+## Phase 6: Docker Publishing Standardization (Completed)
+
+Migrate all repos to use `.docker_publish_job_template` for consistent Docker image publishing.
+
+### Goals
+- Separate build and publish phases (no rebuild during publish)
+- Use pull/retag/push pattern for hive.blog registry
+- Standardize tagging (short SHA, branch tags, version tags)
+- Remove inline hive.blog logic from build jobs
+
+### Migration Status
+
+| Repository | Status | MR |
+|------------|--------|-----|
+| hive | ✅ Completed | Merged to develop |
+| haf | ✅ Completed | Merged to develop |
+| hivemind | ✅ Completed | Merged to develop |
+| hafah | ✅ Completed | Merged to develop |
+| balance_tracker | ✅ Completed | Merged to develop |
+| reputation_tracker | ✅ Completed | Merged to develop |
+| haf_block_explorer | ✅ Completed | Merged to develop |
+| nft_tracker | ✅ Completed | Merged to develop |
+| hivesense | ✅ Completed | Merged to develop |
+| haf_api_node | ✅ Completed | Already using template |
+| block_explorer_ui | ✅ Completed | MR !852 |
+| denser | ✅ Completed | MR !847 |
+
+### Template Usage
+
+```yaml
+publish_images:
+  extends: .docker_publish_job_template
+  stage: publish
+  variables:
+    PUBLISH_IMAGES: "subimage1 subimage2"
+  tags:
+    - public-runner-docker
+```
+
+See `docs/image_publishing_detailed.md` for full details.
+
+---
+
 ## Timeline
 
 | Phase | Description | Status |
@@ -361,5 +404,6 @@ For each project:
 | Phase 1 | Script Consolidation | Completed |
 | Phase 2 | Flatten Include Hierarchy | Completed |
 | Phase 3 | Reusable YAML Blocks | Completed |
-| Phase 4 | HAF App Template Expansion | Completed (high-priority apps) |
-| Phase 5 | Documentation & Migration Guides | Ongoing |
+| Phase 4 | HAF App Template Expansion | Completed |
+| Phase 5 | Documentation & Migration Guides | Completed |
+| Phase 6 | Docker Publishing Standardization | Completed |
