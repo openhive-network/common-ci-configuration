@@ -21,7 +21,7 @@ variable "PYTHON_RUNTIME_VERSION" {
 }
 
 variable "CI_BASE_IMAGE_VERSION" {
-  default = "ubuntu24.04-py3.14-2"
+  default = "ubuntu24.04-py3.14-3"
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
