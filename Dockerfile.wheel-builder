@@ -5,6 +5,11 @@
 #   docker buildx bake wheel-builder --set wheel-builder.args.PYENV_PYTHON_VERSION=3.13
 #
 # Version format: <python-major.minor>-<revision>
+#
+# NOTE: The glibc version (and thus wheel compatibility tag like manylinux_2_39)
+# is determined by the base image. Ubuntu 24.04 ships with glibc 2.39.
+# To target a different glibc version, change CI_BASE_IMAGE_VERSION to use
+# a different Ubuntu version (e.g., ubuntu:22.04 for glibc 2.35).
 
 ARG CI_BASE_IMAGE_VERSION=ubuntu24.04-py3.14-2
 ARG CI_REGISTRY_IMAGE=registry.gitlab.syncad.com/hive/common-ci-configuration
