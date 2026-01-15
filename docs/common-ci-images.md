@@ -52,13 +52,13 @@ Full build environment for hive/HAF C++ compilation and Python testing.
 **Python:** 3.14
 
 **Includes:**
-- C++ build toolchain (cmake, ninja, ccache)
+- C++ build toolchain (cmake, ninja, sccache)
 - Python 3.14 with poetry
 - Docker CLI and buildx
 - PostgreSQL client libraries (libpq-dev)
 - Compression libraries (zstd, snappy)
 
-**Current version:** `ubuntu24.04-py3.14-2`
+**Current version:** `ubuntu24.04-py3.14-5`
 
 **Used by:** hive and HAF build/test pipelines that need the full toolchain.
 
