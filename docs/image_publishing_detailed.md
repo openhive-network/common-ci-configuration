@@ -2,6 +2,16 @@
 
 This document provides a detailed per-job breakdown of Docker image publishing across the Hive ecosystem.
 
+## Runner Tags
+
+Jobs use one of the following runner tags:
+- `public-runner-docker` - Standard jobs that don't require extra resources
+- `bigjob` - Resource-intensive jobs (Docker image builds, large compilations)
+
+**Note:** These tags are mutually exclusive. Each job should use one or the other, not both.
+
+**Note:** The `standard` tag is deprecated and should not be used. It provides no scheduling benefit over `public-runner-docker`.
+
 ---
 
 ## Hive (Core Blockchain)
@@ -13,7 +23,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | publish |
 | **Extends** | `.publish_docker_image_template` (common-ci-configuration/templates/docker_image_jobs.gitlab-ci.yml:75-101) |
 | **Trigger** | Protected tags only (`$CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED`) |
-| **Runner tags** | public-runner-docker, standard |
+| **Runner tags** | public-runner-docker |
 | **Script entry** | `scripts/ci-helpers/build_and_publish_instance.sh` (hive) |
 | **Needs** | None (template has `needs: []`) |
 | **Artifacts consumed** | None |
@@ -42,7 +52,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build |
 | **Extends** | `.prepare_hived_image` (hive/scripts/ci-helpers/prepare_data_image_job.yml:32-47) |
 | **Trigger** | All branches and tags (with skip on QUICK_TEST/DOCS_ONLY) |
-| **Runner tags** | public-runner-docker, bigjob |
+| **Runner tags** | bigjob |
 | **Script entry** | `scripts/ci-helpers/get_image4submodule.sh` (hive) |
 | **Needs** | `detect_changes` (optional) |
 | **Artifacts consumed** | None |
@@ -71,7 +81,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build |
 | **Extends** | `.extended_block_log_creation`, `.test_tools_based` |
 | **Trigger** | All commits (except QUICK_TEST) |
-| **Runner tags** | public-runner-docker, bigjob |
+| **Runner tags** | bigjob |
 | **Script entry** | `scripts/ci-helpers/testing_block_log_image_generator.sh` (hive) |
 | **Needs** | None |
 | **Artifacts consumed** | None |
@@ -98,7 +108,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build |
 | **Extends** | `.docker_image_builder_job` |
 | **Trigger** | After generate_testing_block_logs completes |
-| **Runner tags** | public-runner-docker, standard |
+| **Runner tags** | public-runner-docker |
 | **Script entry** | `scripts/ci-helpers/build_combined_testing_block_logs_image.sh` (hive) |
 | **Needs** | `generate_testing_block_logs` (all 9 matrix jobs) |
 | **Artifacts consumed** | Checksum env files from generate_testing_block_logs |
@@ -121,7 +131,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build |
 | **Extends** | `.docker_image_builder_job` |
 | **Trigger** | All commits |
-| **Runner tags** | public-runner-docker, standard |
+| **Runner tags** | public-runner-docker |
 | **Script entry** | Inline docker buildx build (hive/.gitlab-ci.yaml:1656-1693) |
 | **Needs** | None |
 | **Artifacts consumed** | None |
@@ -152,7 +162,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build_and_test_phase_1 |
 | **Extends** | `.haf_image_build` (haf/.gitlab-ci.yml:365-437) |
 | **Trigger** | All pipelines (with QUICK_TEST/AUTO_SKIP_BUILD skip) |
-| **Runner tags** | public-runner-docker, bigjob |
+| **Runner tags** | bigjob |
 | **Script entry** | `get_image4submodule.sh` (fetched from hive repo at runtime) |
 | **Needs** | `detect_changes` (optional) |
 | **Artifacts consumed** | None |
@@ -175,7 +185,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build_and_test_phase_1 |
 | **Extends** | `.haf_image_build` |
 | **Trigger** | All pipelines |
-| **Runner tags** | public-runner-docker, bigjob |
+| **Runner tags** | bigjob |
 | **Script entry** | Same as haf_image_build |
 | **Build args** | `BUILD_HIVE_TESTNET=ON`, `HIVE_CONVERTER_BUILD=OFF` |
 
@@ -192,7 +202,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build_and_test_phase_1 |
 | **Extends** | `.haf_image_build` |
 | **Trigger** | All pipelines + branch-specific publishing in after_script |
-| **Runner tags** | public-runner-docker, bigjob |
+| **Runner tags** | bigjob |
 | **Script entry** | Same as haf_image_build |
 | **Build args** | `BUILD_HIVE_TESTNET=OFF`, `HIVE_CONVERTER_BUILD=ON` |
 
@@ -212,7 +222,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | publish |
 | **Extends** | `.publish_docker_image_template` (common-ci-configuration/templates/docker_image_jobs.gitlab-ci.yml:75-101) |
 | **Trigger** | Protected tags only |
-| **Runner tags** | public-runner-docker, standard |
+| **Runner tags** | public-runner-docker |
 | **Script entry** | Fetches `build_and_publish_instance.sh` from hive repo (HIVE_SCRIPTS_REF) |
 | **Needs** | None (`needs: []` from template) |
 | **Skip conditions** | `QUICK_TEST`, `SKIP_PRODUCTION_DEPLOY`, `SKIP_DOCKER_PUBLISH` |
@@ -235,7 +245,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build |
 | **Extends** | `.docker_image_builder_job_template` (common-ci-configuration) |
 | **Trigger** | All branches |
-| **Runner tags** | public-runner-docker, standard |
+| **Runner tags** | public-runner-docker |
 | **Script entry** | `scripts/ci-helpers/build_instance.sh` (hivemind) |
 | **Needs** | `prepare_base_images` |
 | **Skip conditions** | None |
@@ -259,7 +269,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | publish |
 | **Extends** | `.publish_docker_image_template` (common-ci-configuration) |
 | **Trigger** | Git tag pipelines |
-| **Runner tags** | public-runner-docker, standard |
+| **Runner tags** | public-runner-docker |
 | **Script entry** | `scripts/ci-helpers/build_and_publish_instance.sh` (hivemind) |
 | **Needs** | Template default |
 | **Skip conditions** | Template defaults |
@@ -307,7 +317,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | publish |
 | **Extends** | `.publish_docker_image_template` (common-ci-configuration) |
 | **Trigger** | Protected tags only |
-| **Runner tags** | public-runner-docker, standard |
+| **Runner tags** | public-runner-docker |
 | **Script entry** | `scripts/ci-helpers/build_and_publish_instance.sh` (HAfAH) |
 | **Needs** | None |
 | **Skip conditions** | `QUICK_TEST`, `SKIP_PRODUCTION_DEPLOY`, `SKIP_DOCKER_PUBLISH` |
@@ -331,7 +341,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build |
 | **Extends** | `.docker-build-template` (reputation_tracker/.gitlab-ci.yml:319-351) |
 | **Trigger** | All branches |
-| **Runner tags** | public-runner-docker, bigjob |
+| **Runner tags** | bigjob |
 | **Script entry** | `scripts/ci-helpers/build_docker_image.sh` (reputation_tracker) |
 | **Needs** | None |
 | **Skip conditions** | Image existence check |
@@ -354,7 +364,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | publish |
 | **Extends** | `.publish_docker_image_template` (common-ci-configuration) |
 | **Trigger** | Protected tags only |
-| **Runner tags** | public-runner-docker, bigjob |
+| **Runner tags** | bigjob |
 | **Script entry** | `scripts/ci-helpers/build_and_publish_instance.sh` (reputation_tracker) |
 | **Needs** | None |
 | **Skip conditions** | `QUICK_TEST`, `SKIP_PRODUCTION_DEPLOY`, `SKIP_DOCKER_PUBLISH` |
@@ -383,7 +393,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build |
 | **Extends** | `.docker-build-template` (balance_tracker/.gitlab-ci.yml:319-351) |
 | **Trigger** | All branches |
-| **Runner tags** | public-runner-docker, bigjob |
+| **Runner tags** | bigjob |
 | **Script entry** | `scripts/ci-helpers/build_docker_image.sh` (balance_tracker) |
 | **Needs** | None |
 | **Skip conditions** | Image existence check (balance_tracker/.gitlab-ci.yml:333-344) |
@@ -406,7 +416,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | publish |
 | **Extends** | `.publish_docker_image_template` (common-ci-configuration/templates/docker_image_jobs.gitlab-ci.yml:75-128) |
 | **Trigger** | Protected tags only |
-| **Runner tags** | public-runner-docker, bigjob |
+| **Runner tags** | bigjob |
 | **Script entry** | `scripts/ci-helpers/build_and_publish_instance.sh` (balance_tracker) |
 | **Needs** | Inherited from template (test jobs must pass) |
 | **Skip conditions** | `QUICK_TEST`, `SKIP_PRODUCTION_DEPLOY`, `SKIP_DOCKER_PUBLISH` |
@@ -440,7 +450,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build |
 | **Extends** | `.docker-base-build-template` → `.docker_image_builder_job_template` |
 | **Trigger** | Not on docs-only changes |
-| **Runner tags** | public-runner-docker, bigjob |
+| **Runner tags** | bigjob |
 | **Script entry** | `scripts/ci-helpers/build_docker_image.sh` (haf_block_explorer) |
 | **Needs** | None |
 | **Skip conditions** | None |
@@ -463,7 +473,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | publish |
 | **Extends** | `.publish_docker_image_template` (common-ci-configuration) |
 | **Trigger** | Protected tags only |
-| **Runner tags** | public-runner-docker, standard |
+| **Runner tags** | public-runner-docker |
 | **Script entry** | `scripts/ci-helpers/build_and_publish_instance.sh` (haf_block_explorer - symlink to haf submodule) |
 | **Needs** | None |
 | **Skip conditions** | `QUICK_TEST`, `SKIP_PRODUCTION_DEPLOY`, `SKIP_DOCKER_PUBLISH` |
@@ -575,7 +585,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | build |
 | **Extends** | `.docker_image_builder_job_template` (common-ci-configuration) |
 | **Trigger** | All branches and tags |
-| **Runner tags** | standard, public-runner-docker |
+| **Runner tags** | public-runner-docker |
 | **Script entry** | `scripts/ci-helpers/build_instance.sh` (nft_tracker) |
 | **Needs** | None |
 | **Skip conditions** | None |
@@ -600,7 +610,7 @@ This document provides a detailed per-job breakdown of Docker image publishing a
 | **Stage** | publish |
 | **Extends** | `.publish_docker_image_template` (common-ci-configuration) |
 | **Trigger** | Protected version tags (v* or numeric) |
-| **Runner tags** | standard, public-runner-docker |
+| **Runner tags** | public-runner-docker |
 | **Script entry** | `scripts/ci-helpers/build_instance.sh` (nft_tracker) |
 | **Needs** | None |
 | **Skip conditions** | `QUICK_TEST`, `SKIP_PRODUCTION_DEPLOY`, `SKIP_DOCKER_PUBLISH` |
