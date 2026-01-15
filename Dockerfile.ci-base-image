@@ -2,7 +2,7 @@
 # Provides full build toolchain for C++ projects (hived, HAF) and Python testing
 #
 # This replaces the ci-base-image previously built from hive/hive repo
-# Version: ubuntu24.04-py3.14-3 - adds ccache for compiler caching
+# Version: ubuntu24.04-py3.14-4 - adds hived user for hive builds
 
 ARG BASE_IMAGE=phusion/baseimage:noble-1.0.1
 FROM ${BASE_IMAGE}
@@ -93,6 +93,9 @@ RUN apt-get update && \
 # Create hived_admin user with sudo access (for backwards compatibility with hive/hive ci-base-image)
 RUN useradd -ms /bin/bash -u 2000 -g users -c "Hived admin account" hived_admin && \
     echo "hived_admin ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Create hived user for running hived daemon (used by hive builds)
+RUN useradd -ms /bin/bash -u 2001 -g users -c "Hived daemon account" hived
 
 # Install Docker CLI
 RUN curl -fsSLO "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" && \
