@@ -17,7 +17,8 @@ perform_wiki_cleanup() {
 
       set +e
       AUTHED_REPO_URL="${repo_url/https\:\/\//https://gitlab-ci-token:${PROJECT_ACCESS_TOKEN}@}"
-      git ls-remote --heads -q --exit-code "${AUTHED_REPO_URL}" "refs/heads/${d}"
+      # Disable credential helper to prevent git from trying to connect to localhost:8080
+      git -c credential.helper= ls-remote --heads -q --exit-code "${AUTHED_REPO_URL}" "refs/heads/${d}"
       local retcode=$?
       set -e
 
