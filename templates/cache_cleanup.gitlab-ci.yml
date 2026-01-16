@@ -21,7 +21,7 @@ include:
     - rm $CLEANUP_PATH_PATTERN -rf
   when: manual
   tags:
-    - standard
+    - public-docker-runner
     - data-cache-storage
 
 .cleanup_old_cache_template:
@@ -37,7 +37,7 @@ include:
     - find "/cache" -maxdepth 1 -wholename "$CLEANUP_PATH_PATTERN" -mtime "+${CACHE_DAYS}"
     - find "/cache" -maxdepth 1 -wholename "$CLEANUP_PATH_PATTERN" -mtime "+${CACHE_DAYS}" -exec rm -rf {} \;
   tags:
-    - standard
+    - public-docker-runner
     - data-cache-storage
 
 # =============================================================================
