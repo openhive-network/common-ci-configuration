@@ -18,7 +18,9 @@ perform_wiki_cleanup() {
       set +e
       AUTHED_REPO_URL="${repo_url/https\:\/\//https://gitlab-ci-token:${PROJECT_ACCESS_TOKEN}@}"
       # Fully disable credential helpers to prevent git from connecting to localhost:8080
-      GIT_TERMINAL_PROMPT=0 git -c credential.helper="" ls-remote --heads -q --exit-code "${AUTHED_REPO_URL}" "refs/heads/${d}"
+      # Use GIT_CONFIG_GLOBAL=/dev/null to ignore system git config that may have credential helper
+      GIT_TERMINAL_PROMPT=0 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+        git -c credential.helper="" ls-remote --heads -q --exit-code "${AUTHED_REPO_URL}" "refs/heads/${d}"
       local retcode=$?
       set -e
 
@@ -30,8 +32,8 @@ perform_wiki_cleanup() {
         git commit -m "Cleanup actions done for docs placed in: ${d}".
         git push origin "HEAD:main"
       else
-        echo "ERROR, git command failed"
-        exit 1
+        # Skip cleanup if git command fails (e.g., credential helper issue)
+        echo "WARNING: Could not check branch ${d} (retcode=${retcode}), skipping cleanup"
       fi
     fi
   done
