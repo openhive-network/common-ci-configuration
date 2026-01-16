@@ -263,7 +263,7 @@
     paths:
       - "${CI_PROJECT_DIR}/docker_entrypoint.log"
   tags:
-    - standard
+    - public-docker-runner
     - data-cache-storage
 
 # =============================================================================
@@ -423,7 +423,7 @@
     paths:
       - "${CI_PROJECT_DIR}/docker_entrypoint.log"
   tags:
-    - standard
+    - public-docker-runner
     - data-cache-storage
 
 # =============================================================================
@@ -550,5 +550,5 @@
         sudo rm -rf "${LOCAL_CACHE}" 2>/dev/null || rm -rf "${LOCAL_CACHE}" 2>/dev/null || true
       fi
   tags:
-    - standard
+    - public-docker-runner
     - data-cache-storage
