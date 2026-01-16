@@ -11,7 +11,7 @@ default:
   timeout: 1 hour
   interruptible: true
   tags:
-    - public-docker-runner
+    - public-runner-docker
 
 # =============================================================================
 # Pre-get-sources hooks for cleaning corrupt git state
