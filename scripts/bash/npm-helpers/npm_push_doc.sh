@@ -16,7 +16,8 @@ perform_wiki_cleanup() {
       echo "Processing subdirectory ${d}"
 
       set +e
-      git ls-remote --heads -q --exit-code "${repo_url}" "refs/heads/${d}"
+      AUTHED_REPO_URL="${repo_url/https\:\/\//https://gitlab-ci-token:${PROJECT_ACCESS_TOKEN}@}"
+      git ls-remote --heads -q --exit-code "${AUTHED_REPO_URL}" "refs/heads/${d}"
       local retcode=$?
       set -e
 
