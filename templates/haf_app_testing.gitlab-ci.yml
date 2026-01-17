@@ -1404,7 +1404,7 @@ include:
           # IPv6 addresses often don't work in DinD - try Docker bridge gateway
           if [[ "$DOCKER_IP" == *:* ]]; then
             echo "IPv6 address detected ($DOCKER_IP), trying Docker bridge gateway..."
-            BRIDGE_IP=$(docker network inspect bridge 2>/dev/null | grep -oP '"Gateway":\s*"\K[^"]+' | head -1)
+            BRIDGE_IP=$(docker network inspect bridge 2>/dev/null | grep -o '"Gateway": "[^"]*"' | head -1 | cut -d'"' -f4)
             if [[ -n "$BRIDGE_IP" ]]; then
               echo "Using Docker bridge gateway: $BRIDGE_IP"
               DOCKER_IP="$BRIDGE_IP"
@@ -1744,7 +1744,7 @@ include:
       # IPv6 addresses often don't work in DinD - try Docker bridge gateway
       if [[ "$DOCKER_IP" == *:* ]]; then
         echo "IPv6 address detected ($DOCKER_IP), trying Docker bridge gateway..."
-        BRIDGE_IP=$(docker network inspect bridge 2>/dev/null | grep -oP '"Gateway":\s*"\K[^"]+' | head -1)
+        BRIDGE_IP=$(docker network inspect bridge 2>/dev/null | grep -o '"Gateway": "[^"]*"' | head -1 | cut -d'"' -f4)
         if [[ -n "$BRIDGE_IP" ]]; then
           echo "Using Docker bridge gateway: $BRIDGE_IP"
           DOCKER_IP="$BRIDGE_IP"
