@@ -920,10 +920,9 @@ include:
         # Save to local cache - keep datadir and shm_dir as siblings (matching HAF cache structure)
         LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${EFFECTIVE_CACHE_KEY}"
         mkdir -p "${LOCAL_APP_CACHE}"
-        # Remove existing directories to prevent nested copy (cp -a into existing dir creates subdir)
-        sudo rm -rf "${LOCAL_APP_CACHE}/datadir" "${LOCAL_APP_CACHE}/shm_dir"
-        sudo cp -a "${DATADIR}" "${LOCAL_APP_CACHE}/datadir"
-        sudo cp -a "${SHM_DIR}" "${LOCAL_APP_CACHE}/shm_dir"
+        # Use -T to replace destination rather than copying into existing directory
+        sudo cp -aT "${DATADIR}" "${LOCAL_APP_CACHE}/datadir"
+        sudo cp -aT "${SHM_DIR}" "${LOCAL_APP_CACHE}/shm_dir"
 
         # Remove empty blockchain dir to trigger symlink on test runners
         if [[ -d "${LOCAL_APP_CACHE}/datadir/blockchain" ]] && [[ -z "$(ls -A "${LOCAL_APP_CACHE}/datadir/blockchain" 2>/dev/null)" ]]; then
