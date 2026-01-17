@@ -1228,7 +1228,9 @@ cmd_status() {
     echo ""
     echo "Local Cache:"
     if [[ -d "$CACHE_LOCAL_PATH" ]]; then
-        local local_size=$(du -sb "$CACHE_LOCAL_PATH" 2>/dev/null | awk '{print $1}') || local_size=0
+        # Note: du may return non-zero due to permission errors while still outputting valid size
+        local local_size=$(du -sb "$CACHE_LOCAL_PATH" 2>/dev/null | awk '{print $1}') || true
+        [[ -z "$local_size" || ! "$local_size" =~ ^[0-9]+$ ]] && local_size=0
         local local_size_gb=$((local_size / 1024 / 1024 / 1024))
         local local_count=$(find "$CACHE_LOCAL_PATH" -maxdepth 1 -name "*.tar" -type f 2>/dev/null | wc -l)
         echo "  Usage: ${local_size_gb}GB / ${CACHE_LOCAL_MAX_GB}GB (${local_count} files)"
