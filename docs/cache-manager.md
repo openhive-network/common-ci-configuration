@@ -100,7 +100,49 @@ This "local-first" approach ensures the builder always has a local cache after P
 cache-manager.sh cleanup <cache-type> [--max-size-gb N] [--max-age-days N]
 ```
 
-Removes old caches using LRU eviction. Triggered automatically when cache reaches 90% capacity.
+Removes old caches from NFS using LRU eviction. Triggered automatically when cache reaches 90% capacity.
+
+### cleanup-local
+
+```bash
+cache-manager.sh cleanup-local [--max-size-gb N]
+```
+
+Removes oldest tar files from local cache (`/cache/`) when size exceeds the limit. Triggered automatically by `_maybe_cleanup()` when local cache reaches 90% of `CACHE_LOCAL_MAX_GB`.
+
+### cleanup-orphans
+
+```bash
+cache-manager.sh cleanup-orphans [--max-age-days N] [--dry-run]
+```
+
+Removes orphaned directories from local cache. Orphans are extracted cache directories without corresponding `.tar` files - these accumulate when CI jobs fail or are canceled before cleanup runs.
+
+**Options:**
+- `--max-age-days N`: Only remove directories older than N days (default: 7)
+- `--dry-run`: Show what would be removed without actually deleting
+
+**Example:**
+```bash
+# Preview what would be cleaned up
+cache-manager.sh cleanup-orphans --dry-run --max-age-days 3
+
+# Actually clean up orphans older than 7 days
+cache-manager.sh cleanup-orphans --max-age-days 7
+```
+
+**What it skips:**
+- Directories with corresponding `.tar` files (valid extracted caches)
+- Known non-cache directories: `blockchain`, `block_log_5m`, `logs`, `tmp`, dotfiles
+- Directories on NFS that have matching tar files
+
+**Automatic cleanup:** Also triggered by `_maybe_cleanup()` with a 3-day threshold when local cache exceeds 90% capacity.
+
+**Cron job:** A daily cron job runs at 3:00 AM on all builders:
+```bash
+# /etc/cron.d/cache-orphan-cleanup
+0 3 * * * root /usr/local/bin/cache-manager.sh cleanup-orphans --max-age-days 7 >> /var/log/cache-orphan-cleanup.log 2>&1
+```
 
 ### list / status
 
@@ -352,6 +394,25 @@ find /cache -name "*.tar" -mtime +7 -delete
 ```
 
 Local caches are automatically populated when fetching from NFS and persist across jobs on the same builder.
+
+### Orphan Directories
+
+Orphan directories accumulate when CI jobs extract caches but fail or are canceled before cleanup:
+```bash
+# Check for orphan directories (directories without .tar files)
+cache-manager.sh cleanup-orphans --dry-run --max-age-days 3
+
+# Clean up orphans
+cache-manager.sh cleanup-orphans --max-age-days 3
+
+# Check cleanup log
+tail -f /var/log/cache-orphan-cleanup.log
+```
+
+Common orphan patterns:
+- `haf_filtered_*` - HAF filtered replay jobs
+- `replay_data_haf_*` - App sync jobs (btracker, hafbe, reptracker)
+- `haf_<commit>` - HAF replay jobs that failed before tar creation
 
 ## Block Log Storage
 
