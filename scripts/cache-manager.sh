@@ -23,8 +23,8 @@
 # Environment variables:
 #   CACHE_NFS_PATH        - NFS mount point (default: /nfs/ci-cache)
 #   CACHE_LOCAL_PATH      - Local cache directory (default: /cache)
-#   CACHE_MAX_SIZE_GB     - Max total NFS cache size (default: 2000)
-#   CACHE_LOCAL_MAX_GB    - Max local cache size (default: 4000, ~55% of 7.3TB disk)
+#   CACHE_MAX_SIZE_GB     - Max total NFS cache size (default: 4000)
+#   CACHE_LOCAL_MAX_GB    - Max local cache size (default: 3000)
 #   CACHE_MAX_AGE_DAYS    - Max cache age (default: 30)
 #   CACHE_LOCK_TIMEOUT    - Lock timeout in seconds (default: 3600)
 #   CACHE_QUIET           - Suppress verbose output (default: false)
@@ -60,8 +60,8 @@ _flock_with_timeout() {
 # Configuration with defaults
 CACHE_NFS_PATH="${CACHE_NFS_PATH:-/nfs/ci-cache}"
 CACHE_LOCAL_PATH="${CACHE_LOCAL_PATH:-/cache}"
-CACHE_MAX_SIZE_GB="${CACHE_MAX_SIZE_GB:-2000}"
-CACHE_LOCAL_MAX_GB="${CACHE_LOCAL_MAX_GB:-4000}"
+CACHE_MAX_SIZE_GB="${CACHE_MAX_SIZE_GB:-4000}"
+CACHE_LOCAL_MAX_GB="${CACHE_LOCAL_MAX_GB:-3000}"
 CACHE_MAX_AGE_DAYS="${CACHE_MAX_AGE_DAYS:-30}"
 CACHE_LOCK_TIMEOUT="${CACHE_LOCK_TIMEOUT:-120}"  # 2 minutes (NFS writes take ~10s, 12x margin)
 CACHE_STALE_LOCK_MINUTES="${CACHE_STALE_LOCK_MINUTES:-10}"  # Break locks older than this (writes take ~10s)
@@ -909,11 +909,13 @@ cmd_cleanup() {
     local lru_index="${CACHE_NFS_PATH}/.lru_index"
 
     # Calculate current total size
-    local search_path="$CACHE_NFS_PATH"
-    [[ -n "$cache_type" ]] && search_path="$CACHE_NFS_PATH/$cache_type"
+    # Resolve symlinks - du on a symlink returns symlink size, not target size
+    local search_path
+    search_path=$(readlink -f "$CACHE_NFS_PATH")
+    [[ -n "$cache_type" ]] && search_path="${search_path}/$cache_type"
 
     local total_size
-    total_size=$(du -sb "$search_path" 2>/dev/null | awk '{print $1}' | head -1) || total_size=0
+    total_size=$(du -sb "$search_path" 2>/dev/null | awk '{print $1}' | head -1) || true
     [[ -z "$total_size" || ! "$total_size" =~ ^[0-9]+$ ]] && total_size=0
     _log "Current cache size: $((total_size / 1024 / 1024 / 1024))GB"
 
@@ -1124,9 +1126,13 @@ _maybe_cleanup() {
         return 0
     fi
 
+    # Resolve symlinks - du on a symlink returns symlink size, not target size
+    local real_nfs_path
+    real_nfs_path=$(readlink -f "$CACHE_NFS_PATH")
+
     local total_size
-    total_size=$(du -sb "$CACHE_NFS_PATH" 2>/dev/null | awk '{print $1}') || total_size=0
-    [[ -z "$total_size" ]] && total_size=0
+    total_size=$(du -sb "$real_nfs_path" 2>/dev/null | awk '{print $1}') || true
+    [[ -z "$total_size" || ! "$total_size" =~ ^[0-9]+$ ]] && total_size=0
     local max_bytes=$((CACHE_MAX_SIZE_GB * 1024 * 1024 * 1024))
     local threshold=$((max_bytes * 90 / 100))  # 90% threshold
 
@@ -1218,7 +1224,10 @@ cmd_status() {
 
     if _nfs_available; then
         echo "NFS Status:   AVAILABLE"
-        local total=$(du -sh "$CACHE_NFS_PATH" 2>/dev/null | cut -f1 || echo "?")
+        # Resolve symlinks - du on a symlink returns symlink size, not target size
+        local real_nfs_path
+        real_nfs_path=$(readlink -f "$CACHE_NFS_PATH")
+        local total=$(du -sh "$real_nfs_path" 2>/dev/null | cut -f1 || echo "?")
         echo "NFS Usage:    $total / ${CACHE_MAX_SIZE_GB}GB"
 
         if [[ -f "$lru_index" ]]; then
