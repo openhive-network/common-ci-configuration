@@ -10,6 +10,7 @@
 #   cache-manager.sh put <cache-type> <cache-key> <local-source>
 #   cache-manager.sh cleanup <cache-type> [--max-size-gb N] [--max-age-days N]
 #   cache-manager.sh cleanup-local [--max-size-gb N]   # Clean local cache only
+#   cache-manager.sh cleanup-orphans [--max-age-days N] [--dry-run]  # Clean orphan dirs
 #   cache-manager.sh list <cache-type>
 #   cache-manager.sh status
 #   cache-manager.sh is-fast-builder    # Check if current host is a fast builder
@@ -1085,6 +1086,94 @@ _cleanup_local_cache() {
     _log "Local cleanup complete: removed $removed files, new size: ${final_size_gb}GB"
 }
 
+# Clean up orphaned directories in local cache
+# Orphans are directories without corresponding .tar files that are older than max_age_days.
+# These are created when CI jobs extract caches but fail/cancel before cleanup runs.
+# Returns number of directories removed (or that would be removed in dry-run mode).
+_cleanup_orphan_directories() {
+    local max_age_days="${1:-7}"
+    local cache_path="${2:-$CACHE_LOCAL_PATH}"
+    local dry_run="${3:-false}"
+    local removed=0
+
+    # Skip if cache path doesn't exist
+    if [[ ! -d "$cache_path" ]]; then
+        _log "Cache path does not exist: $cache_path"
+        return 0
+    fi
+
+    # Resolve symlinks for consistent path handling
+    local real_cache_path
+    real_cache_path=$(readlink -f "$cache_path")
+
+    _log "Scanning for orphan directories in: $real_cache_path (older than ${max_age_days} days)"
+
+    # Find directories older than max_age_days
+    # Using -mtime +N finds files modified MORE than N days ago
+    while IFS= read -r dir; do
+        [[ -d "$dir" ]] || continue
+
+        local base
+        base=$(basename "$dir")
+
+        # Skip known non-cache directories
+        case "$base" in
+            blockchain|block_log_5m|logs|tmp|.*)
+                continue
+                ;;
+        esac
+
+        # Skip if corresponding tar file exists (this is a valid extracted cache)
+        # Check both local naming (type_key.tar) and the directory name as-is
+        if [[ -f "${real_cache_path}/${base}.tar" ]]; then
+            continue
+        fi
+
+        # For directories like "haf_filtered_12345_filtered", check if tar exists
+        # Also check NFS for haf_ prefixed caches
+        local skip=false
+
+        # Check if any matching tar file exists
+        for pattern in "${real_cache_path}/${base}.tar" "${CACHE_NFS_PATH}/haf/${base}.tar" "${CACHE_NFS_PATH}/haf_sync/${base}.tar"; do
+            if [[ -f "$pattern" ]]; then
+                skip=true
+                break
+            fi
+        done
+        [[ "$skip" == "true" ]] && continue
+
+        # Get directory size
+        local dir_size
+        dir_size=$(du -sb "$dir" 2>/dev/null | awk '{print $1}') || dir_size=0
+        local dir_size_gb
+        dir_size_gb=$(echo "scale=2; ${dir_size:-0} / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "?")
+
+        if [[ "$dry_run" == "true" ]]; then
+            echo "Would remove orphan directory: $base (${dir_size_gb}GB)" >&2
+        else
+            _log "Removing orphan directory: $base (${dir_size_gb}GB)"
+            # Use sudo for directories that may be owned by postgres (UID 105)
+            if sudo rm -rf "$dir" 2>/dev/null || rm -rf "$dir" 2>/dev/null; then
+                _log "Removed: $base"
+            else
+                _error "Failed to remove: $base"
+                continue
+            fi
+        fi
+        removed=$((removed + 1))
+
+    done < <(find "$real_cache_path" -maxdepth 1 -type d -mtime "+${max_age_days}" 2>/dev/null)
+
+    if [[ "$dry_run" == "true" ]]; then
+        echo "Would remove $removed orphan directories" >&2
+    else
+        _log "Removed $removed orphan directories"
+    fi
+
+    # Return count on stdout (for capture by caller)
+    echo "$removed"
+}
+
 # Command wrapper for manual local cleanup
 cmd_cleanup_local() {
     local max_size_gb="$CACHE_LOCAL_MAX_GB"
@@ -1105,6 +1194,67 @@ cmd_cleanup_local() {
     _cleanup_local_cache "$max_size_gb"
 }
 
+# Command wrapper for orphan directory cleanup
+# Usage: cache-manager.sh cleanup-orphans [--max-age-days N] [--dry-run]
+cmd_cleanup_orphans() {
+    local max_age_days=7
+    local dry_run=false
+
+    # Parse options
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --max-age-days)
+                max_age_days="$2"
+                shift 2
+                ;;
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    # Resolve symlinks for accurate size calculation
+    local real_cache_path
+    real_cache_path=$(readlink -f "$CACHE_LOCAL_PATH" 2>/dev/null || echo "$CACHE_LOCAL_PATH")
+
+    echo "=== Orphan Directory Cleanup ==="
+    echo "Cache path:    $CACHE_LOCAL_PATH"
+    [[ "$real_cache_path" != "$CACHE_LOCAL_PATH" ]] && echo "Resolved path: $real_cache_path"
+    echo "Max age:       $max_age_days days"
+    echo "Dry run:       $dry_run"
+    echo ""
+
+    # Get initial size (use resolved path for accurate size)
+    local initial_size
+    initial_size=$(du -sb "$real_cache_path" 2>/dev/null | awk '{print $1}') || initial_size=0
+    [[ -z "$initial_size" || ! "$initial_size" =~ ^[0-9]+$ ]] && initial_size=0
+    local initial_size_gb
+    initial_size_gb=$(echo "scale=2; ${initial_size:-0} / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "?")
+    echo "Initial cache size: ${initial_size_gb}GB"
+    echo ""
+
+    local removed
+    removed=$(_cleanup_orphan_directories "$max_age_days" "$CACHE_LOCAL_PATH" "$dry_run")
+
+    echo ""
+
+    if [[ "$dry_run" != "true" ]] && [[ "$removed" -gt 0 ]]; then
+        # Get final size (use resolved path for accurate size)
+        local final_size
+        final_size=$(du -sb "$real_cache_path" 2>/dev/null | awk '{print $1}') || final_size=0
+        [[ -z "$final_size" || ! "$final_size" =~ ^[0-9]+$ ]] && final_size=0
+        local final_size_gb
+        final_size_gb=$(echo "scale=2; ${final_size:-0} / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "?")
+        local freed_gb
+        freed_gb=$(echo "scale=2; (${initial_size:-0} - ${final_size:-0}) / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "?")
+        echo "Final cache size: ${final_size_gb}GB (freed ${freed_gb}GB)"
+    fi
+}
+
 # Maybe trigger cleanup if size is getting large (both local and NFS)
 _maybe_cleanup() {
     # Check local cache first (independent of NFS)
@@ -1118,6 +1268,8 @@ _maybe_cleanup() {
         if [[ $local_size -gt $local_threshold ]]; then
             _log "Local cache at 90% capacity, triggering local cleanup"
             _cleanup_local_cache "$CACHE_LOCAL_MAX_GB"
+            # Also clean orphan directories (more aggressive when at high capacity)
+            _cleanup_orphan_directories 3 "$CACHE_LOCAL_PATH" false >/dev/null
         fi
     fi
 
@@ -1262,7 +1414,7 @@ cmd_status() {
 
 # Main
 usage() {
-    head -20 "$0" | tail -18 | sed 's/^# //'
+    head -21 "$0" | tail -19 | sed 's/^# //'
     exit 1
 }
 
@@ -1288,6 +1440,9 @@ case "$cmd" in
         ;;
     cleanup-local)
         cmd_cleanup_local "$@"
+        ;;
+    cleanup-orphans)
+        cmd_cleanup_orphans "$@"
         ;;
     list)
         cmd_list "$@"
