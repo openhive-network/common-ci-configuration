@@ -372,6 +372,87 @@ _restore_pgdata_permissions() {
     fi
 }
 
+# Validate PostgreSQL pgdata directory integrity before caching
+# PostgreSQL requires certain directories to exist, even if empty.
+# If these are missing, the database cannot start and the cache is corrupted.
+# Returns 0 if valid, 1 if invalid (with error messages)
+_validate_pgdata_integrity() {
+    local source_dir="$1"
+    local pgdata_path="${source_dir}/datadir/haf_db_store/pgdata"
+
+    if [[ ! -d "$pgdata_path" ]]; then
+        _log "No pgdata directory found at $pgdata_path - skipping validation"
+        return 0
+    fi
+
+    # Required PostgreSQL directories (must exist, can be empty)
+    # These are created by initdb and required for PostgreSQL to start
+    local required_dirs=(
+        "pg_notify"      # LISTEN/NOTIFY async notifications
+        "pg_serial"      # Serializable transaction info
+        "pg_snapshots"   # Exported snapshots
+        "pg_replslot"    # Replication slots
+        "pg_dynshmem"    # Dynamic shared memory
+        "pg_commit_ts"   # Commit timestamps
+        "pg_stat"        # Statistics subsystem
+        "pg_logical"     # Logical replication
+        "pg_subtrans"    # Subtransaction status
+        "pg_multixact"   # Multixact status
+        "pg_twophase"    # Two-phase commit state
+        "pg_tblspc"      # Tablespace symlinks
+        "pg_wal"         # Write-ahead log
+    )
+
+    local missing_dirs=()
+    for dir in "${required_dirs[@]}"; do
+        if [[ ! -d "${pgdata_path}/${dir}" ]]; then
+            missing_dirs+=("$dir")
+        fi
+    done
+
+    if [[ ${#missing_dirs[@]} -gt 0 ]]; then
+        _error "PostgreSQL pgdata is CORRUPTED - missing required directories:"
+        for dir in "${missing_dirs[@]}"; do
+            _error "  - ${dir}/"
+        done
+        _error ""
+        _error "This usually indicates PostgreSQL was not shut down cleanly."
+        _error "The cache will NOT be saved to prevent propagating corruption."
+        _error ""
+        _error "Possible causes:"
+        _error "  1. PostgreSQL checkpoint failed before shutdown"
+        _error "  2. Container was force-killed (SIGKILL) without graceful stop"
+        _error "  3. pg_ctl stop was not used for proper shutdown"
+        _error ""
+        _error "Fix: Ensure the sync job uses pg_ctl stop before docker-compose down"
+        return 1
+    fi
+
+    # Also check for critical files
+    local required_files=(
+        "PG_VERSION"
+        "postgresql.auto.conf"
+    )
+
+    local missing_files=()
+    for file in "${required_files[@]}"; do
+        if [[ ! -f "${pgdata_path}/${file}" ]]; then
+            missing_files+=("$file")
+        fi
+    done
+
+    if [[ ${#missing_files[@]} -gt 0 ]]; then
+        _error "PostgreSQL pgdata is CORRUPTED - missing required files:"
+        for file in "${missing_files[@]}"; do
+            _error "  - ${file}"
+        done
+        return 1
+    fi
+
+    _log "pgdata integrity check passed - all required directories present"
+    return 0
+}
+
 # Build tar exclusion arguments for HAF caches to reduce size
 # Excludes: blockchain (use shared block_log via _link_shared_block_log)
 # NOTE: We keep ALL WAL files to ensure safe PostgreSQL recovery.
@@ -624,9 +705,14 @@ cmd_put() {
         return 1
     fi
 
-    # Relax pgdata permissions for HAF caches so they can be copied
-    # Covers: haf, haf_sync, haf_pipeline, haf_filtered, etc.
+    # For HAF caches: validate integrity and relax permissions
+    # Covers: haf, haf_sync, haf_pipeline, haf_filtered, haf_btracker_sync, etc.
     if [[ "$cache_type" == haf* ]]; then
+        # Validate pgdata integrity BEFORE caching to prevent propagating corruption
+        if ! _validate_pgdata_integrity "$local_source"; then
+            _error "Refusing to cache corrupted pgdata - fix PostgreSQL shutdown"
+            return 1
+        fi
         _relax_pgdata_permissions "$local_source"
     fi
 
