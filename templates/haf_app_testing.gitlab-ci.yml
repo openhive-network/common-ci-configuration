@@ -1012,10 +1012,10 @@ include:
       # 3. All required PostgreSQL directories remain intact
       echo "Stopping PostgreSQL with pg_ctl (smart mode, 60s timeout)..."
       if ! docker compose "${COMPOSE_OPTIONS[@]}" exec -T --user postgres "$HAF_CONTAINER" \
-          pg_ctl stop -D /home/hived/datadir/haf_db_store/pgdata -m smart -t 60 2>&1; then
+          /usr/lib/postgresql/17/bin/pg_ctl stop -D /home/hived/datadir/haf_db_store/pgdata -m smart -t 60 2>&1; then
         echo "WARNING: pg_ctl smart stop failed, trying fast mode..."
         docker compose "${COMPOSE_OPTIONS[@]}" exec -T --user postgres "$HAF_CONTAINER" \
-          pg_ctl stop -D /home/hived/datadir/haf_db_store/pgdata -m fast -t 30 2>&1 || true
+          /usr/lib/postgresql/17/bin/pg_ctl stop -D /home/hived/datadir/haf_db_store/pgdata -m fast -t 30 2>&1 || true
       fi
 
       # Collect logs before stopping containers
