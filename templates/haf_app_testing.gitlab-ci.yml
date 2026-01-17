@@ -1401,6 +1401,14 @@ include:
           DOCKER_IP=$(getent hosts docker 2>/dev/null | awk '{print $1}' | head -1)
         fi
         if [[ -n "$DOCKER_IP" ]]; then
+          # Check if IPv6 - try localhost fallback
+          if [[ "$DOCKER_IP" == *:* ]]; then
+            echo "IPv6 address detected ($DOCKER_IP), trying localhost first..."
+            if curl -sf --max-time 2 "http://127.0.0.1:3000/" >/dev/null 2>&1; then
+              DOCKER_IP="127.0.0.1"
+              echo "Using localhost (127.0.0.1) for PostgREST"
+            fi
+          fi
           PGRST_URL="http://${DOCKER_IP}:3000"
           echo "Using resolved Docker IP: $DOCKER_IP"
         else
@@ -1730,8 +1738,19 @@ include:
       fi
       echo "Using Docker host IP: $DOCKER_IP for PostgREST"
 
+      # Determine if we need to use IPv4 explicitly (some DinD IPv6 configs don't work)
+      CURL_OPTS=""
+      if [[ "$DOCKER_IP" == *:* ]]; then
+        # IPv6 address detected - try IPv4 first via localhost
+        echo "IPv6 address detected, trying localhost first..."
+        if curl -sf --max-time 2 "http://127.0.0.1:${POSTGREST_PORT:-3000}/" >/dev/null 2>&1; then
+          DOCKER_IP="127.0.0.1"
+          echo "Using localhost (127.0.0.1) for PostgREST"
+        fi
+      fi
+
       WAITED=0
-      until curl -sf --max-time 5 "http://${DOCKER_IP}:${POSTGREST_PORT:-3000}/" >/dev/null 2>&1; do
+      until curl -sf --max-time 5 ${CURL_OPTS} "http://${DOCKER_IP}:${POSTGREST_PORT:-3000}/" >/dev/null 2>&1; do
         echo "Waiting for PostgREST at ${DOCKER_IP}:${POSTGREST_PORT:-3000}... ($WAITED/$MAX_WAIT seconds)"
         sleep 5
         WAITED=$((WAITED + 5))
