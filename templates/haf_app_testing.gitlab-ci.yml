@@ -1401,10 +1401,16 @@ include:
           DOCKER_IP=$(getent hosts docker 2>/dev/null | awk '{print $1}' | head -1)
         fi
         if [[ -n "$DOCKER_IP" ]]; then
-          # IPv6 addresses often don't work in DinD - use localhost instead
+          # IPv6 addresses often don't work in DinD - try Docker bridge gateway
           if [[ "$DOCKER_IP" == *:* ]]; then
-            echo "IPv6 address detected ($DOCKER_IP), using localhost instead"
-            DOCKER_IP="127.0.0.1"
+            echo "IPv6 address detected ($DOCKER_IP), trying Docker bridge gateway..."
+            BRIDGE_IP=$(docker network inspect bridge 2>/dev/null | grep -oP '"Gateway":\s*"\K[^"]+' | head -1)
+            if [[ -n "$BRIDGE_IP" ]]; then
+              echo "Using Docker bridge gateway: $BRIDGE_IP"
+              DOCKER_IP="$BRIDGE_IP"
+            else
+              echo "Could not get bridge gateway, keeping IPv6 address"
+            fi
           fi
           PGRST_URL="http://${DOCKER_IP}:3000"
           echo "Using Docker IP: $DOCKER_IP"
@@ -1735,10 +1741,16 @@ include:
       fi
       echo "Using Docker host IP: $DOCKER_IP for PostgREST"
 
-      # IPv6 addresses often don't work in DinD - use localhost instead
+      # IPv6 addresses often don't work in DinD - try Docker bridge gateway
       if [[ "$DOCKER_IP" == *:* ]]; then
-        echo "IPv6 address detected ($DOCKER_IP), using localhost instead"
-        DOCKER_IP="127.0.0.1"
+        echo "IPv6 address detected ($DOCKER_IP), trying Docker bridge gateway..."
+        BRIDGE_IP=$(docker network inspect bridge 2>/dev/null | grep -oP '"Gateway":\s*"\K[^"]+' | head -1)
+        if [[ -n "$BRIDGE_IP" ]]; then
+          echo "Using Docker bridge gateway: $BRIDGE_IP"
+          DOCKER_IP="$BRIDGE_IP"
+        else
+          echo "Could not get bridge gateway, keeping IPv6 address"
+        fi
       fi
 
       WAITED=0
