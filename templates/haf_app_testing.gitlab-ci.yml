@@ -1395,7 +1395,11 @@ include:
       else
         # In DinD, curl may resolve 'docker' hostname to wrong IP.
         # Use getent to get the correct IP for reliable connections.
-        DOCKER_IP=$(getent hosts docker 2>/dev/null | awk '{print $1}' | head -1)
+        # Prefer IPv4 over IPv6 (IPv6 causes connectivity issues in some DinD configs)
+        DOCKER_IP=$(getent hosts docker 2>/dev/null | awk '/^[0-9]+\./{print $1; exit}')
+        if [[ -z "$DOCKER_IP" ]]; then
+          DOCKER_IP=$(getent hosts docker 2>/dev/null | awk '{print $1}' | head -1)
+        fi
         if [[ -n "$DOCKER_IP" ]]; then
           PGRST_URL="http://${DOCKER_IP}:3000"
           echo "Using resolved Docker IP: $DOCKER_IP"
@@ -1714,7 +1718,11 @@ include:
 
       # Wait for PostgREST with DNS resolution fix
       # In DinD, curl may resolve 'docker' to wrong IP - use getent for reliable resolution
-      DOCKER_IP=$(getent hosts docker 2>/dev/null | awk '{print $1}' | head -1)
+      # Prefer IPv4 over IPv6 (IPv6 causes connectivity issues in some DinD configs)
+      DOCKER_IP=$(getent hosts docker 2>/dev/null | awk '/^[0-9]+\./{print $1; exit}')
+      if [[ -z "$DOCKER_IP" ]]; then
+        DOCKER_IP=$(getent hosts docker 2>/dev/null | awk '{print $1}' | head -1)
+      fi
       if [[ -z "$DOCKER_IP" ]]; then
         DOCKER_IP="${DOCKER_HOST:-docker}"
         DOCKER_IP="${DOCKER_IP#tcp://}"
