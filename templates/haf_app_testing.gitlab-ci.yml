@@ -1401,19 +1401,15 @@ include:
           DOCKER_IP=$(getent hosts docker 2>/dev/null | awk '{print $1}' | head -1)
         fi
         if [[ -n "$DOCKER_IP" ]]; then
-          # IPv6 addresses often don't work in DinD - try Docker bridge gateway
+          # Format URL based on IP version
           if [[ "$DOCKER_IP" == *:* ]]; then
-            echo "IPv6 address detected ($DOCKER_IP), trying Docker bridge gateway..."
-            BRIDGE_IP=$(docker network inspect bridge 2>/dev/null | grep -o '"Gateway": "[^"]*"' | head -1 | cut -d'"' -f4)
-            if [[ -n "$BRIDGE_IP" ]]; then
-              echo "Using Docker bridge gateway: $BRIDGE_IP"
-              DOCKER_IP="$BRIDGE_IP"
-            else
-              echo "Could not get bridge gateway, keeping IPv6 address"
-            fi
+            # IPv6 address - use brackets in URL
+            PGRST_URL="http://[${DOCKER_IP}]:3000"
+            echo "Using IPv6 URL: $PGRST_URL"
+          else
+            PGRST_URL="http://${DOCKER_IP}:3000"
+            echo "Using Docker IP: $DOCKER_IP"
           fi
-          PGRST_URL="http://${DOCKER_IP}:3000"
-          echo "Using Docker IP: $DOCKER_IP"
         else
           PGRST_URL="http://docker:3000"
         fi
@@ -1421,7 +1417,7 @@ include:
       echo "PostgREST URL: $PGRST_URL"
 
       while [[ $ELAPSED -lt $MAX_WAIT ]]; do
-        if curl -sf --max-time 5 "${PGRST_URL}/" >/dev/null 2>&1; then
+        if curl -gsf --max-time 5 "${PGRST_URL}/" >/dev/null 2>&1; then
           echo "PostgREST ready after ${ELAPSED}s at ${PGRST_URL}"
           break
         fi
@@ -1741,21 +1737,19 @@ include:
       fi
       echo "Using Docker host IP: $DOCKER_IP for PostgREST"
 
-      # IPv6 addresses often don't work in DinD - try Docker bridge gateway
+      # Format URL based on IP version
+      PORT="${POSTGREST_PORT:-3000}"
       if [[ "$DOCKER_IP" == *:* ]]; then
-        echo "IPv6 address detected ($DOCKER_IP), trying Docker bridge gateway..."
-        BRIDGE_IP=$(docker network inspect bridge 2>/dev/null | grep -o '"Gateway": "[^"]*"' | head -1 | cut -d'"' -f4)
-        if [[ -n "$BRIDGE_IP" ]]; then
-          echo "Using Docker bridge gateway: $BRIDGE_IP"
-          DOCKER_IP="$BRIDGE_IP"
-        else
-          echo "Could not get bridge gateway, keeping IPv6 address"
-        fi
+        # IPv6 address - use brackets in URL
+        PGRST_URL="http://[${DOCKER_IP}]:${PORT}"
+        echo "Using IPv6 URL: $PGRST_URL"
+      else
+        PGRST_URL="http://${DOCKER_IP}:${PORT}"
       fi
 
       WAITED=0
-      until curl -sf --max-time 5 "http://${DOCKER_IP}:${POSTGREST_PORT:-3000}/" >/dev/null 2>&1; do
-        echo "Waiting for PostgREST at ${DOCKER_IP}:${POSTGREST_PORT:-3000}... ($WAITED/$MAX_WAIT seconds)"
+      until curl -gsf --max-time 5 "${PGRST_URL}/" >/dev/null 2>&1; do
+        echo "Waiting for PostgREST at ${PGRST_URL}... ($WAITED/$MAX_WAIT seconds)"
         sleep 5
         WAITED=$((WAITED + 5))
         if [[ $WAITED -ge $MAX_WAIT ]]; then
@@ -1764,7 +1758,7 @@ include:
           exit 1
         fi
       done
-      echo "PostgREST ready at ${DOCKER_IP}:${POSTGREST_PORT:-3000}"
+      echo "PostgREST ready at ${PGRST_URL}"
 
       # Export for test scripts
       export POSTGREST_HOST="${DOCKER_IP}"
