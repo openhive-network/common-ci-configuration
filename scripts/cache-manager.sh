@@ -430,7 +430,7 @@ _validate_pgdata_integrity() {
         return 1
     fi
 
-    # Also check for critical files
+    # Also check for critical files (using sudo for same permission reasons)
     local required_files=(
         "PG_VERSION"
         "postgresql.auto.conf"
@@ -438,7 +438,7 @@ _validate_pgdata_integrity() {
 
     local missing_files=()
     for file in "${required_files[@]}"; do
-        if [[ ! -f "${pgdata_path}/${file}" ]]; then
+        if ! sudo test -f "${pgdata_path}/${file}" 2>/dev/null; then
             missing_files+=("$file")
         fi
     done
