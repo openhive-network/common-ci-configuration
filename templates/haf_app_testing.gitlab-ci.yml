@@ -1025,7 +1025,8 @@ include:
       docker compose "${COMPOSE_OPTIONS[@]}" logs backend-postgrest > backend-postgrest.log || true
 
       # Now stop containers - PostgreSQL should already be stopped cleanly
-      docker compose "${COMPOSE_OPTIONS[@]}" down --volumes --timeout "${COMPOSE_DOWN_TIMEOUT:-60}"
+      # Note: Don't use --volumes as it can interfere with bind-mount data persistence
+      docker compose "${COMPOSE_OPTIONS[@]}" down --timeout "${COMPOSE_DOWN_TIMEOUT:-60}"
       popd
 
       # Archive logs
