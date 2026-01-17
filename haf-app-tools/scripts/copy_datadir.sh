@@ -174,7 +174,8 @@ then
         echo "Creating copy of ${DATA_SOURCE}/datadir inside ${DATADIR}"
         sudo -Enu hived mkdir -p "${DATADIR}"
         # Use cp without -p to avoid "Operation not supported" errors when copying from NFS
-        flock "${DATA_SOURCE}/datadir" sudo -En cp -r --no-preserve=mode,ownership "${DATA_SOURCE}/datadir"/*  "${DATADIR}"
+        # Use shared lock (-s) since source data is immutable after extraction - allows parallel reads
+        flock -s "${DATA_SOURCE}/datadir" sudo -En cp -r --no-preserve=mode,ownership "${DATA_SOURCE}/datadir"/*  "${DATADIR}"
 
         # Fix pg_tblspc symlinks after copying to DATADIR
         fix_pg_tblspc_symlinks "${DATADIR}"
@@ -213,7 +214,8 @@ then
             echo "Creating copy of ${DATA_SOURCE}/shm_dir inside ${SHM_DIR}"
             sudo -Enu hived mkdir -p "${SHM_DIR}"
             # Use cp without -p to avoid "Operation not supported" errors when copying from NFS
-            flock "${DATA_SOURCE}/datadir" sudo -En cp -r --no-preserve=mode,ownership "${DATA_SOURCE}/shm_dir"/* "${SHM_DIR}"
+            # Use shared lock (-s) since source data is immutable after extraction - allows parallel reads
+            flock -s "${DATA_SOURCE}/datadir" sudo -En cp -r --no-preserve=mode,ownership "${DATA_SOURCE}/shm_dir"/* "${SHM_DIR}"
             sudo chmod -R a+w "${SHM_DIR}"
             ls -al "${SHM_DIR}"
         else
