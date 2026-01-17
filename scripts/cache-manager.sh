@@ -9,6 +9,7 @@
 #   cache-manager.sh get <cache-type> <cache-key> <local-dest>
 #   cache-manager.sh put <cache-type> <cache-key> <local-source>
 #   cache-manager.sh cleanup <cache-type> [--max-size-gb N] [--max-age-days N]
+#   cache-manager.sh cleanup-local [--max-size-gb N]   # Clean local cache only
 #   cache-manager.sh list <cache-type>
 #   cache-manager.sh status
 #   cache-manager.sh is-fast-builder    # Check if current host is a fast builder
@@ -23,6 +24,7 @@
 #   CACHE_NFS_PATH        - NFS mount point (default: /nfs/ci-cache)
 #   CACHE_LOCAL_PATH      - Local cache directory (default: /cache)
 #   CACHE_MAX_SIZE_GB     - Max total NFS cache size (default: 2000)
+#   CACHE_LOCAL_MAX_GB    - Max local cache size (default: 4000, ~55% of 7.3TB disk)
 #   CACHE_MAX_AGE_DAYS    - Max cache age (default: 30)
 #   CACHE_LOCK_TIMEOUT    - Lock timeout in seconds (default: 3600)
 #   CACHE_QUIET           - Suppress verbose output (default: false)
@@ -59,6 +61,7 @@ _flock_with_timeout() {
 CACHE_NFS_PATH="${CACHE_NFS_PATH:-/nfs/ci-cache}"
 CACHE_LOCAL_PATH="${CACHE_LOCAL_PATH:-/cache}"
 CACHE_MAX_SIZE_GB="${CACHE_MAX_SIZE_GB:-2000}"
+CACHE_LOCAL_MAX_GB="${CACHE_LOCAL_MAX_GB:-4000}"
 CACHE_MAX_AGE_DAYS="${CACHE_MAX_AGE_DAYS:-30}"
 CACHE_LOCK_TIMEOUT="${CACHE_LOCK_TIMEOUT:-120}"  # 2 minutes (NFS writes take ~10s, 12x margin)
 CACHE_STALE_LOCK_MINUTES="${CACHE_STALE_LOCK_MINUTES:-10}"  # Break locks older than this (writes take ~10s)
@@ -992,8 +995,125 @@ cmd_cleanup() {
     _log "Cleanup complete, removed $removed entries"
 }
 
-# Maybe trigger cleanup if size is getting large
+# Cleanup local cache when it exceeds size limit
+# Removes oldest tar files (by mtime) until under threshold
+_cleanup_local_cache() {
+    local max_size_gb="${1:-$CACHE_LOCAL_MAX_GB}"
+
+    # Skip if local cache directory doesn't exist
+    if [[ ! -d "$CACHE_LOCAL_PATH" ]]; then
+        return 0
+    fi
+
+    # Skip on NFS host (local IS NFS, managed by cmd_cleanup)
+    if _is_nfs_host; then
+        return 0
+    fi
+
+    local max_size_bytes=$((max_size_gb * 1024 * 1024 * 1024))
+
+    # Calculate current total size
+    local total_size
+    total_size=$(du -sb "$CACHE_LOCAL_PATH" 2>/dev/null | awk '{print $1}') || total_size=0
+    [[ -z "$total_size" || ! "$total_size" =~ ^[0-9]+$ ]] && total_size=0
+
+    local total_size_gb=$((total_size / 1024 / 1024 / 1024))
+    _log "Local cache size: ${total_size_gb}GB (max: ${max_size_gb}GB)"
+
+    if [[ $total_size -le $max_size_bytes ]]; then
+        _log "Local cache under limit, no cleanup needed"
+        return 0
+    fi
+
+    _log "Local cache over limit, starting cleanup"
+
+    # Find all tar files, sorted by mtime (oldest first)
+    local removed=0
+    while IFS= read -r tarfile; do
+        [[ -f "$tarfile" ]] || continue
+
+        # Skip files currently being written (.tmp suffix)
+        if [[ -f "${tarfile}.tmp" ]]; then
+            _log "Skipping $tarfile - write in progress (.tmp exists)"
+            continue
+        fi
+
+        # Skip if copylock exists (another job is copying from NFS)
+        if [[ -f "${tarfile}.copylock" ]]; then
+            local lock_file="${tarfile}.copylock"
+            # Check if lock is actually held
+            if ! flock -n "$lock_file" -c "true" 2>/dev/null; then
+                _log "Skipping $tarfile - copy in progress"
+                continue
+            fi
+        fi
+
+        # Skip if lock exists and is held (extraction in progress)
+        if [[ -f "${tarfile}.lock" ]]; then
+            local lock_file="${tarfile}.lock"
+            if ! flock -n "$lock_file" -c "true" 2>/dev/null; then
+                _log "Skipping $tarfile - currently locked (extraction in progress)"
+                continue
+            fi
+        fi
+
+        local file_size=$(stat -c %s "$tarfile" 2>/dev/null || echo 0)
+        local file_size_gb=$((file_size / 1024 / 1024 / 1024))
+        local filename=$(basename "$tarfile")
+
+        _log "Removing oldest local cache: $filename (${file_size_gb}GB)"
+        rm -f "$tarfile" "${tarfile}.lock" "${tarfile}.copylock"
+        total_size=$((total_size - file_size))
+        removed=$((removed + 1))
+
+        # Stop if under limit
+        if [[ $total_size -le $max_size_bytes ]]; then
+            break
+        fi
+
+    done < <(find "$CACHE_LOCAL_PATH" -maxdepth 1 -name "*.tar" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | cut -d' ' -f2-)
+
+    local final_size_gb=$((total_size / 1024 / 1024 / 1024))
+    _log "Local cleanup complete: removed $removed files, new size: ${final_size_gb}GB"
+}
+
+# Command wrapper for manual local cleanup
+cmd_cleanup_local() {
+    local max_size_gb="$CACHE_LOCAL_MAX_GB"
+
+    # Parse options
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --max-size-gb)
+                max_size_gb="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    _cleanup_local_cache "$max_size_gb"
+}
+
+# Maybe trigger cleanup if size is getting large (both local and NFS)
 _maybe_cleanup() {
+    # Check local cache first (independent of NFS)
+    if [[ -d "$CACHE_LOCAL_PATH" ]] && ! _is_nfs_host; then
+        local local_size
+        local_size=$(du -sb "$CACHE_LOCAL_PATH" 2>/dev/null | awk '{print $1}') || local_size=0
+        [[ -z "$local_size" || ! "$local_size" =~ ^[0-9]+$ ]] && local_size=0
+        local local_max_bytes=$((CACHE_LOCAL_MAX_GB * 1024 * 1024 * 1024))
+        local local_threshold=$((local_max_bytes * 90 / 100))  # 90% threshold
+
+        if [[ $local_size -gt $local_threshold ]]; then
+            _log "Local cache at 90% capacity, triggering local cleanup"
+            _cleanup_local_cache "$CACHE_LOCAL_MAX_GB"
+        fi
+    fi
+
+    # Check NFS cache
     if ! _nfs_available; then
         return 0
     fi
@@ -1005,7 +1125,7 @@ _maybe_cleanup() {
     local threshold=$((max_bytes * 90 / 100))  # 90% threshold
 
     if [[ "$total_size" =~ ^[0-9]+$ ]] && [[ $total_size -gt $threshold ]]; then
-        _log "Cache size at 90% capacity, triggering cleanup"
+        _log "NFS cache at 90% capacity, triggering cleanup"
         cmd_cleanup "" --max-size-gb "$CACHE_MAX_SIZE_GB" --max-age-days "$CACHE_MAX_AGE_DAYS"
     fi
 }
@@ -1080,11 +1200,12 @@ cmd_is_fast_builder() {
 cmd_status() {
     echo "Cache Manager Status"
     echo "===================="
-    echo "NFS Path:     $CACHE_NFS_PATH"
-    echo "Local Path:   $CACHE_LOCAL_PATH"
-    echo "Max Size:     ${CACHE_MAX_SIZE_GB}GB"
-    echo "Max Age:      ${CACHE_MAX_AGE_DAYS} days"
-    echo "NFS Host:     $(_is_nfs_host && echo "YES (local storage)" || echo "NO (NFS client)")"
+    echo "NFS Path:       $CACHE_NFS_PATH"
+    echo "Local Path:     $CACHE_LOCAL_PATH"
+    echo "NFS Max Size:   ${CACHE_MAX_SIZE_GB}GB"
+    echo "Local Max Size: ${CACHE_LOCAL_MAX_GB}GB"
+    echo "Max Age:        ${CACHE_MAX_AGE_DAYS} days"
+    echo "NFS Host:       $(_is_nfs_host && echo "YES (local storage)" || echo "NO (NFS client)")"
     echo ""
 
     local lru_index="${CACHE_NFS_PATH}/.lru_index"
@@ -1092,7 +1213,7 @@ cmd_status() {
     if _nfs_available; then
         echo "NFS Status:   AVAILABLE"
         local total=$(du -sh "$CACHE_NFS_PATH" 2>/dev/null | cut -f1 || echo "?")
-        echo "NFS Usage:    $total"
+        echo "NFS Usage:    $total / ${CACHE_MAX_SIZE_GB}GB"
 
         if [[ -f "$lru_index" ]]; then
             local count=$(wc -l < "$lru_index")
@@ -1103,8 +1224,20 @@ cmd_status() {
     fi
 
     echo ""
-    echo "Local Usage:"
-    du -sh "${CACHE_LOCAL_PATH}"/* 2>/dev/null | head -10 || echo "  (empty)"
+    echo "Local Cache:"
+    if [[ -d "$CACHE_LOCAL_PATH" ]]; then
+        local local_size=$(du -sb "$CACHE_LOCAL_PATH" 2>/dev/null | awk '{print $1}') || local_size=0
+        local local_size_gb=$((local_size / 1024 / 1024 / 1024))
+        local local_count=$(find "$CACHE_LOCAL_PATH" -maxdepth 1 -name "*.tar" -type f 2>/dev/null | wc -l)
+        echo "  Usage: ${local_size_gb}GB / ${CACHE_LOCAL_MAX_GB}GB (${local_count} files)"
+        if _is_nfs_host; then
+            echo "  (Local cleanup disabled - NFS host)"
+        fi
+        echo "  Files:"
+        du -sh "${CACHE_LOCAL_PATH}"/*.tar 2>/dev/null | head -10 || echo "    (none)"
+    else
+        echo "  (directory not found)"
+    fi
 }
 
 # Main
@@ -1132,6 +1265,9 @@ case "$cmd" in
     cleanup)
         _check_flock_support
         cmd_cleanup "$@"
+        ;;
+    cleanup-local)
+        cmd_cleanup_local "$@"
         ;;
     list)
         cmd_list "$@"
