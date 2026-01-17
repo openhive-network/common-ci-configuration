@@ -403,9 +403,11 @@ _validate_pgdata_integrity() {
         "pg_wal"         # Write-ahead log
     )
 
+    # Note: pgdata is owned by postgres, so we need sudo to check directories
+    # The -d test fails without execute permission on the parent directory
     local missing_dirs=()
     for dir in "${required_dirs[@]}"; do
-        if [[ ! -d "${pgdata_path}/${dir}" ]]; then
+        if ! sudo test -d "${pgdata_path}/${dir}" 2>/dev/null; then
             missing_dirs+=("$dir")
         fi
     done
