@@ -1010,13 +1010,17 @@ _cleanup_local_cache() {
         return 0
     fi
 
+    # Resolve symlinks - du on a symlink returns symlink size, not target size
+    local real_cache_path
+    real_cache_path=$(readlink -f "$CACHE_LOCAL_PATH")
+
     local max_size_bytes=$((max_size_gb * 1024 * 1024 * 1024))
 
     # Calculate current total size
     # Note: du may return non-zero exit code due to permission errors while still
     # outputting valid size. Don't use || pattern with pipefail - just validate result.
     local total_size
-    total_size=$(du -sb "$CACHE_LOCAL_PATH" 2>/dev/null | awk '{print $1}') || true
+    total_size=$(du -sb "$real_cache_path" 2>/dev/null | awk '{print $1}') || true
     [[ -z "$total_size" || ! "$total_size" =~ ^[0-9]+$ ]] && total_size=0
 
     local total_size_gb=$((total_size / 1024 / 1024 / 1024))
@@ -1073,7 +1077,7 @@ _cleanup_local_cache() {
             break
         fi
 
-    done < <(find "$CACHE_LOCAL_PATH" -maxdepth 1 -name "*.tar" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | cut -d' ' -f2-)
+    done < <(find "$real_cache_path" -maxdepth 1 -name "*.tar" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | cut -d' ' -f2-)
 
     local final_size_gb=$((total_size / 1024 / 1024 / 1024))
     _log "Local cleanup complete: removed $removed files, new size: ${final_size_gb}GB"
@@ -1228,9 +1232,14 @@ cmd_status() {
     echo ""
     echo "Local Cache:"
     if [[ -d "$CACHE_LOCAL_PATH" ]]; then
-        local local_size=$(du -sb "$CACHE_LOCAL_PATH" 2>/dev/null | awk '{print $1}') || local_size=0
+        # Resolve symlinks - du on a symlink returns symlink size, not target size
+        local real_cache_path
+        real_cache_path=$(readlink -f "$CACHE_LOCAL_PATH")
+        # Note: du may return non-zero due to permission errors while still outputting valid size
+        local local_size=$(du -sb "$real_cache_path" 2>/dev/null | awk '{print $1}') || true
+        [[ -z "$local_size" || ! "$local_size" =~ ^[0-9]+$ ]] && local_size=0
         local local_size_gb=$((local_size / 1024 / 1024 / 1024))
-        local local_count=$(find "$CACHE_LOCAL_PATH" -maxdepth 1 -name "*.tar" -type f 2>/dev/null | wc -l)
+        local local_count=$(find "$real_cache_path" -maxdepth 1 -name "*.tar" -type f 2>/dev/null | wc -l)
         echo "  Usage: ${local_size_gb}GB / ${CACHE_LOCAL_MAX_GB}GB (${local_count} files)"
         if _is_nfs_host; then
             echo "  (Local cleanup disabled - NFS host)"
