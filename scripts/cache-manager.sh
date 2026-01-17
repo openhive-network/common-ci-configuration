@@ -1013,8 +1013,10 @@ _cleanup_local_cache() {
     local max_size_bytes=$((max_size_gb * 1024 * 1024 * 1024))
 
     # Calculate current total size
+    # Note: du may return non-zero exit code due to permission errors while still
+    # outputting valid size. Don't use || pattern with pipefail - just validate result.
     local total_size
-    total_size=$(du -sb "$CACHE_LOCAL_PATH" 2>/dev/null | awk '{print $1}') || total_size=0
+    total_size=$(du -sb "$CACHE_LOCAL_PATH" 2>/dev/null | awk '{print $1}') || true
     [[ -z "$total_size" || ! "$total_size" =~ ^[0-9]+$ ]] && total_size=0
 
     local total_size_gb=$((total_size / 1024 / 1024 / 1024))
