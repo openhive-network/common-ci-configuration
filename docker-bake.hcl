@@ -20,8 +20,12 @@ variable "PYTHON_RUNTIME_VERSION" {
   default = "3.12-u24.04-1"
 }
 
-variable "CI_BASE_IMAGE_VERSION" {
-  default = "ubuntu24.04-py3.14-5"
+variable "CI_BASE_IMAGE_PY312_VERSION" {
+  default = "ubuntu24.04-py3.12-1"
+}
+
+variable "CI_BASE_IMAGE_PY314_VERSION" {
+  default = "ubuntu24.04-py3.14-6"
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
@@ -175,11 +179,29 @@ target "python_development" {
   cache-to = generate-cache-to("python_development", "${PYTHON_RUNTIME_VERSION}")
 }
 
-target "ci-base-image" {
+target "ci-base-image-py312" {
   dockerfile = "Dockerfile.ci-base-image"
-  tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
-  cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
-  cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
+  tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_PY312_VERSION}")
+  cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_PY312_VERSION}")
+  cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_PY312_VERSION}")
+  args = {
+    PYTHON_VERSION = "3.12"
+  }
+}
+
+target "ci-base-image-py314" {
+  dockerfile = "Dockerfile.ci-base-image"
+  tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_PY314_VERSION}")
+  cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_PY314_VERSION}")
+  cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_PY314_VERSION}")
+  args = {
+    PYTHON_VERSION = "3.14"
+  }
+}
+
+# Group target to build both ci-base-image variants
+group "ci-base-image" {
+  targets = ["ci-base-image-py312", "ci-base-image-py314"]
 }
 
 target "haf-app-test-runner" {
