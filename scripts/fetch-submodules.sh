@@ -46,6 +46,11 @@ if [[ ${#PATHS[@]} -eq 0 ]]; then
     exit 1
 fi
 
+# Git 2.36+ refuses to work in directories not owned by current user.
+# In CI, the workspace is often owned by a different user (e.g., root vs gitlab-runner).
+# This must be set before any git commands run.
+git config --global --add safe.directory '*' 2>/dev/null || true
+
 # Get submodule commit from main repo
 get_submodule_ref() {
     local path="$1"
