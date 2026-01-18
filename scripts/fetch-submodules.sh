@@ -135,13 +135,13 @@ fetch_or_clone_submodule() {
             echo "[$path] Shallow fetch of ref failed, trying regular fetch..."
             git -C "$path" fetch origin || {
                 echo "[$path] Fetch failed, re-cloning..."
-                rm -rf "$path"
+                sudo rm -rf "$path" 2>/dev/null || rm -rf "$path" 2>/dev/null || true
                 git clone --no-checkout "$url" "$path"
             }
         fi
     else
         echo "[$path] Cloning fresh..."
-        rm -rf "$path"
+        sudo rm -rf "$path" 2>/dev/null || rm -rf "$path" 2>/dev/null || true
         # Clone with depth=1, then fetch specific ref if needed
         git clone --no-checkout --depth=1 "$url" "$path"
         # Fetch the specific commit if shallow clone doesn't have it
