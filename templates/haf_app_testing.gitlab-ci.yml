@@ -436,6 +436,26 @@ include:
   before_script:
     - !reference [.docker_image_builder_job_template, before_script]
     - |
+      # Clean up stale data directories from previous runs (may be root-owned from Docker)
+      # Docker-builder is Alpine-based without sudo, so use Docker to clean up as root
+      # Wait for Docker daemon with timeout, then use alpine container to remove directories
+      echo "Cleaning up stale data directories..."
+      CLEANUP_TIMEOUT=30
+      CLEANUP_START=$(date +%s)
+      while ! docker info >/dev/null 2>&1; do
+        ELAPSED=$(($(date +%s) - CLEANUP_START))
+        if [[ $ELAPSED -ge $CLEANUP_TIMEOUT ]]; then
+          echo "Docker not available for cleanup, trying fallback..."
+          rm -rf "${HAF_DATA_DIRECTORY}" 2>/dev/null || true
+          break
+        fi
+        sleep 1
+      done
+      if docker info >/dev/null 2>&1; then
+        docker run --rm -v "${CI_PROJECT_DIR}:/workspace" alpine:latest \
+          sh -c "rm -rf /workspace/.haf-data" 2>/dev/null || true
+      fi
+    - |
       echo -e "\e[0Ksection_start:$(date +%s):cache_setup[collapsed=true]\r\e[0KSetting up HAF cache..."
 
       # Fetch cache-manager
@@ -496,6 +516,12 @@ include:
         # Cleanup
         docker compose -f "${COMPOSE_FILE:-docker/docker-compose-test.yml}" -p "${COMPOSE_PROJECT_NAME:-haf-test}" down -v --remove-orphans || true
       fi
+
+      # Clean up data directories to prevent permission issues for next job
+      # Use Docker to remove as root since docker-builder doesn't have sudo
+      docker run --rm -v "${CI_PROJECT_DIR}:/workspace" alpine:latest \
+        sh -c "rm -rf /workspace/.haf-data" 2>/dev/null || \
+        rm -rf "${HAF_DATA_DIRECTORY:-${CI_PROJECT_DIR}/.haf-data}" 2>/dev/null || true
 
       echo -e "\e[0Ksection_end:$(date +%s):compose_cleanup\r\e[0K"
 
