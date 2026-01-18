@@ -28,7 +28,12 @@ done
 
 if [[ -z "$CACHE_MANAGER" ]]; then
     CACHE_MANAGER="/tmp/cache-manager.sh"
-    curl -fsSL "${COMMON_CI_URL}/scripts/cache-manager.sh" -o "$CACHE_MANAGER" 2>/dev/null || true
+    # Use wget (available in HAF containers) with curl as fallback
+    if command -v wget &>/dev/null; then
+        wget -q "${COMMON_CI_URL}/scripts/cache-manager.sh" -O "$CACHE_MANAGER" 2>/dev/null || true
+    elif command -v curl &>/dev/null; then
+        curl -fsSL "${COMMON_CI_URL}/scripts/cache-manager.sh" -o "$CACHE_MANAGER" 2>/dev/null || true
+    fi
     chmod +x "$CACHE_MANAGER" 2>/dev/null || true
 fi
 
@@ -113,12 +118,24 @@ extract_nfs_cache_if_needed() {
             return 1
         fi
     else
-        # Fallback: direct NFS tar extraction (for environments without cache-manager)
+        # Fallback: direct tar extraction (for environments without cache-manager)
+        # Check local tar first (fast), then NFS tar (slow)
+        local local_tar="${data_source}.tar"
         local nfs_tar="${CACHE_NFS_PATH}/${cache_type}/${cache_key}.tar"
-        echo "Cache-manager not found, checking NFS directly: $nfs_tar"
+        local tar_file=""
 
-        if [[ -f "$nfs_tar" ]]; then
-            echo "Found NFS cache, extracting to $data_source"
+        echo "Cache-manager not found, checking for tar files..."
+
+        if [[ -f "$local_tar" ]]; then
+            echo "Found local cache tar: $local_tar"
+            tar_file="$local_tar"
+        elif [[ -f "$nfs_tar" ]]; then
+            echo "Local tar not found, using NFS tar: $nfs_tar"
+            tar_file="$nfs_tar"
+        fi
+
+        if [[ -n "$tar_file" ]]; then
+            echo "Extracting $tar_file to $data_source"
             mkdir -p "$data_source"
             chmod 777 "$data_source" 2>/dev/null || true
 
@@ -129,9 +146,9 @@ extract_nfs_cache_if_needed() {
                     echo 'Cache already extracted by another job'
                     exit 0
                 fi
-                tar xf \"$nfs_tar\" -C \"$data_source\"
+                tar xf \"$tar_file\" -C \"$data_source\"
             "; then
-                echo "NFS cache extracted successfully"
+                echo "Cache extracted successfully from $tar_file"
 
                 # Restore pgdata permissions for PostgreSQL
                 local pgdata="${data_source}/datadir/haf_db_store/pgdata"
@@ -148,11 +165,11 @@ extract_nfs_cache_if_needed() {
                 fix_pg_tblspc_symlinks "${data_source}/datadir"
                 return 0
             else
-                echo "ERROR: Failed to extract NFS cache"
+                echo "ERROR: Failed to extract cache from $tar_file"
                 return 1
             fi
         else
-            echo "NFS cache not found at $nfs_tar"
+            echo "No cache tar found (checked $local_tar and $nfs_tar)"
             return 1
         fi
     fi
