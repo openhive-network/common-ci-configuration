@@ -127,8 +127,8 @@ Removes orphaned directories from local cache. Orphans are extracted cache direc
 # Preview what would be cleaned up
 cache-manager.sh cleanup-orphans --dry-run --max-age-days 3
 
-# Actually clean up orphans older than 7 days
-cache-manager.sh cleanup-orphans --max-age-days 7
+# Actually clean up orphans older than 4 days
+cache-manager.sh cleanup-orphans --max-age-days 4
 ```
 
 **What it skips:**
@@ -141,7 +141,7 @@ cache-manager.sh cleanup-orphans --max-age-days 7
 **Cron job:** A daily cron job runs at 3:00 AM on all builders:
 ```bash
 # /etc/cron.d/cache-orphan-cleanup
-0 3 * * * root /usr/local/bin/cache-manager.sh cleanup-orphans --max-age-days 7 >> /var/log/cache-orphan-cleanup.log 2>&1
+0 3 * * * root /usr/local/bin/cache-manager.sh cleanup-orphans --max-age-days 4 >> /var/log/cache-orphan-cleanup.log 2>&1
 ```
 
 ### list / status
