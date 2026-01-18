@@ -18,6 +18,15 @@ include:
   before_script:
     - |
       echo -e "\e[0Ksection_start:$(date +%s):buildkit_config[collapsed=true]\r\e[0KConfiguring Docker BuildKit..."
+      # Wait for docker daemon to be fully ready (up to 60 seconds)
+      for i in $(seq 1 30); do
+        if docker info >/dev/null 2>&1; then
+          echo "Docker daemon ready"
+          break
+        fi
+        echo "Waiting for docker daemon... ($i/30)"
+        sleep 2
+      done
       docker context create builder-context
       docker buildx create --driver docker-container --name docker-container-builder --use builder-context
       echo -e "\e[0Ksection_end:$(date +%s):buildkit_config\r\e[0K"
