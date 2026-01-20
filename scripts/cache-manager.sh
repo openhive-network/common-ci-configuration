@@ -653,19 +653,36 @@ cmd_get() {
         return 1
     fi
 
-    # 2. Clean up stale extraction and extract from LOCAL tar
-    # Previous runs may have left directories with postgres ownership (UID 105, mode 700)
-    # that the current user can't write to - clean those up first
-    _cleanup_stale_extraction "$local_dest"
-    mkdir -p "$local_dest"
+    # 2. Extract from LOCAL tar with exclusive locking on destination
+    # Use exclusive lock on destination directory to prevent race conditions where multiple
+    # jobs on the same builder try to extract to the same location simultaneously.
+    # This was causing "Cannot open: File exists" errors when concurrent extractions collided.
 
-    local tar_lock="${LOCAL_TAR_FILE}.lock"
-    _touch_lock "$tar_lock"
+    local dest_lock="${local_dest}.lock"
+    _touch_lock "$dest_lock"
 
     local get_start_time=$(date +%s.%N)
-    if _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -s "$tar_lock" -c "
+    if _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$dest_lock" -c "
         lock_acquired=\$(date +%s.%N)
-        echo \"[cache-manager] Shared lock acquired in \$(echo \"\$lock_acquired - $get_start_time\" | bc)s\" >&2
+        echo \"[cache-manager] Exclusive lock acquired in \$(echo \"\$lock_acquired - $get_start_time\" | bc)s\" >&2
+
+        # Re-check inside lock: another job may have finished extraction while we waited
+        if [[ -d '${local_dest}/datadir' ]]; then
+            echo '[cache-manager] Cache already extracted by another job, skipping extraction' >&2
+            exit 0
+        fi
+
+        # Clean up stale extraction if present (with permission issues from previous runs)
+        # Previous runs may have left directories with postgres ownership (UID 105, mode 700)
+        if [[ -d '${local_dest}' ]]; then
+            if ! touch '${local_dest}/.write_test' 2>/dev/null; then
+                echo '[cache-manager] Stale extraction with permission issues, cleaning up' >&2
+                sudo rm -rf '${local_dest}' 2>/dev/null || rm -rf '${local_dest}' 2>/dev/null || true
+            else
+                rm -f '${local_dest}/.write_test'
+            fi
+        fi
+        mkdir -p '${local_dest}'
 
         tar_size=\$(stat -c %s '$LOCAL_TAR_FILE' 2>/dev/null || echo 0)
         tar_size_gb=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / 1024\" | bc)
@@ -678,9 +695,9 @@ cmd_get() {
         throughput=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / \$extract_duration\" | bc 2>/dev/null || echo '?')
         echo \"[cache-manager] Extraction completed in \${extract_duration}s (\${throughput} MB/s)\" >&2
     "; then
-        _log "Extracted successfully"
+        _log "Cache ready"
     else
-        _error "Failed to extract tar archive"
+        _error "Failed to acquire lock or extract tar archive"
         return 1
     fi
 
