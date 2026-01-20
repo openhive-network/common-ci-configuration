@@ -719,9 +719,93 @@ cmd_get() {
 
 # PUT: Store cache as tar archive (NFS primary, local as fallback)
 cmd_put() {
-    local cache_type="$1"
-    local cache_key="$2"
-    local local_source="$3"
+    local cache_type=""
+    local cache_key=""
+    local local_source=""
+    local copy_from=""
+    local shm_dir=""
+
+    # Parse positional arguments and flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --copy-from)
+                copy_from="$2"
+                shift 2
+                ;;
+            --shm-dir)
+                shm_dir="$2"
+                shift 2
+                ;;
+            *)
+                # Positional arguments: cache_type, cache_key, local_source
+                if [[ -z "$cache_type" ]]; then
+                    cache_type="$1"
+                elif [[ -z "$cache_key" ]]; then
+                    cache_key="$1"
+                elif [[ -z "$local_source" ]]; then
+                    local_source="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$cache_type" ]] || [[ -z "$cache_key" ]] || [[ -z "$local_source" ]]; then
+        _error "Usage: cache-manager put <cache_type> <cache_key> <local_dest> [--copy-from <datadir>] [--shm-dir <shm_dir>]"
+        return 1
+    fi
+
+    # If --copy-from is provided, do a locked copy to local_source before tarring
+    # This prevents race conditions when multiple jobs try to save to the same local cache
+    if [[ -n "$copy_from" ]]; then
+        if [[ ! -d "$copy_from" ]]; then
+            _error "Copy source does not exist: $copy_from"
+            return 1
+        fi
+
+        local dest_lock="${local_source}.lock"
+        mkdir -p "$local_source"
+        _touch_lock "$dest_lock"
+
+        _log "Acquiring exclusive lock for local cache copy..."
+        local copy_start=$(date +%s.%N)
+
+        if ! _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$dest_lock" -c "
+            lock_acquired=\$(date +%s.%N)
+            echo \"[cache-manager] Exclusive lock acquired in \$(echo \"\$lock_acquired - $copy_start\" | bc)s\" >&2
+
+            # Re-check inside lock: another job may have finished the copy while we waited
+            if [[ -d '${local_source}/datadir/haf_db_store/pgdata' ]]; then
+                echo '[cache-manager] Cache already saved by another job, skipping copy' >&2
+                exit 0
+            fi
+
+            # Clean up any partial/stale data from previous failed runs
+            sudo rm -rf '${local_source}/datadir' '${local_source}/shm_dir' 2>/dev/null || rm -rf '${local_source}/datadir' '${local_source}/shm_dir' 2>/dev/null || true
+
+            echo '[cache-manager] Copying datadir to local cache...' >&2
+            sudo cp -aT '$copy_from' '${local_source}/datadir'
+
+            # Copy shm_dir if provided
+            if [[ -n '$shm_dir' ]] && [[ -d '$shm_dir' ]]; then
+                echo '[cache-manager] Copying shm_dir to local cache...' >&2
+                sudo cp -aT '$shm_dir' '${local_source}/shm_dir'
+            fi
+
+            # Remove empty blockchain directory to trigger symlink on test runners
+            if [[ -d '${local_source}/datadir/blockchain' ]] && [[ -z \"\$(ls -A '${local_source}/datadir/blockchain' 2>/dev/null)\" ]]; then
+                echo '[cache-manager] Removing empty blockchain directory from local cache' >&2
+                rmdir '${local_source}/datadir/blockchain' 2>/dev/null || true
+            fi
+        "; then
+            _error "Failed to acquire lock or copy data to local cache"
+            return 1
+        fi
+
+        local copy_end=$(date +%s.%N)
+        local copy_duration=$(echo "$copy_end - $copy_start" | bc)
+        _log "Local cache copy completed in ${copy_duration}s"
+    fi
 
     if [[ ! -d "$local_source" ]]; then
         _error "Source directory does not exist: $local_source"
