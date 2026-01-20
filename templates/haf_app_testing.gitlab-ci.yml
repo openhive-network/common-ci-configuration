@@ -49,6 +49,98 @@ variables:
 include:
   - local: templates/base.gitlab-ci.yml
   - local: templates/docker_image_jobs.gitlab-ci.yml
+  - local: templates/source_change_detection.gitlab-ci.yml
+
+# =============================================================================
+# HAF IMAGE LOOKUP TEMPLATE
+# =============================================================================
+# Parameterizable template for finding pre-built HAF images.
+# HAF builds images on every develop commit and publishes them to:
+#   - Mainnet:   registry.gitlab.syncad.com/hive/haf:<commit>
+#   - Testnet:   registry.gitlab.syncad.com/hive/haf/testnet:<commit>
+#   - Mirrornet: registry.gitlab.syncad.com/hive/haf/mirrornet:<commit>
+#
+# Configuration Variables:
+#   HAF_IMAGE_TYPE    - Image type: "" (mainnet), "testnet", or "mirrornet"
+#   HAF_VAR_PREFIX    - Output variable prefix (default: "HAF" for mainnet)
+#   HAF_PATTERNS_REF  - Git ref for fetching source patterns (default: "develop")
+#
+# Usage - Mainnet (default):
+#   find_haf_image:
+#     extends: .find_haf_image
+#
+# Usage - Testnet:
+#   find_haf_testnet_image:
+#     extends: .find_haf_image
+#     variables:
+#       HAF_IMAGE_TYPE: "testnet"
+#       HAF_VAR_PREFIX: "HAF_TESTNET"
+#
+# Usage - Mirrornet:
+#   find_haf_mirrornet_image:
+#     extends: .find_haf_image
+#     variables:
+#       HAF_IMAGE_TYPE: "mirrornet"
+#       HAF_VAR_PREFIX: "HAF_MIRRORNET"
+#
+# Output Variables (in dotenv artifact):
+#   ${HAF_VAR_PREFIX}_UPSTREAM_IMAGE  - Full image path with tag
+#   ${HAF_VAR_PREFIX}_UPSTREAM_COMMIT - HAF commit SHA
+#   ${HAF_VAR_PREFIX}_UPSTREAM_TAG    - Image tag (short commit)
+# =============================================================================
+.find_haf_image:
+  extends: .find_upstream_image
+  stage: .pre
+  variables:
+    UPSTREAM_REPO_URL: "https://gitlab.syncad.com/hive/haf.git"
+    UPSTREAM_REGISTRY: "registry.gitlab.syncad.com/hive/haf"
+    UPSTREAM_BRANCH: "develop"
+    # Configurable parameters
+    HAF_IMAGE_TYPE: ""        # "", "testnet", or "mirrornet"
+    HAF_VAR_PREFIX: "HAF"     # Output variable prefix
+    HAF_PATTERNS_REF: "develop"
+  before_script:
+    # Fetch source patterns from HAF's single source of truth
+    - |
+      PATTERNS_URL="https://gitlab.syncad.com/hive/haf/-/raw/${HAF_PATTERNS_REF}/scripts/ci-helpers/source-patterns.sh"
+      echo "Fetching HAF source patterns from: $PATTERNS_URL"
+      if UPSTREAM_PATTERNS=$(curl -sf "$PATTERNS_URL" | sh); then
+        echo "Loaded patterns: $UPSTREAM_PATTERNS"
+        export UPSTREAM_PATTERNS
+      else
+        echo "ERROR: Could not fetch source-patterns.sh from HAF"
+        exit 1
+      fi
+    # Set UPSTREAM_IMAGE based on HAF_IMAGE_TYPE
+    - |
+      if [[ -n "$HAF_IMAGE_TYPE" ]]; then
+        export UPSTREAM_IMAGE="$HAF_IMAGE_TYPE"
+        echo "Looking for HAF $HAF_IMAGE_TYPE image"
+      else
+        echo "Looking for HAF mainnet image"
+      fi
+    # Set output filename based on image type
+    - |
+      if [[ -n "$HAF_IMAGE_TYPE" ]]; then
+        export UPSTREAM_OUTPUT="haf_${HAF_IMAGE_TYPE}_image.env"
+      else
+        export UPSTREAM_OUTPUT="haf_image.env"
+      fi
+  script:
+    - !reference [.find_upstream_image, script]
+    # Rename UPSTREAM_* to ${HAF_VAR_PREFIX}_UPSTREAM_*
+    - |
+      if [ -f "$UPSTREAM_OUTPUT" ]; then
+        sed -i "s/^UPSTREAM_/${HAF_VAR_PREFIX}_UPSTREAM_/" "$UPSTREAM_OUTPUT"
+        echo "Variables in $UPSTREAM_OUTPUT:"
+        cat "$UPSTREAM_OUTPUT"
+      fi
+  artifacts:
+    reports:
+      dotenv: haf_image.env
+    expire_in: 1 day
+  tags:
+    - public-runner-docker
 
 # =============================================================================
 # FETCH STRATEGY SUPPORT
