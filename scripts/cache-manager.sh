@@ -779,6 +779,13 @@ cmd_put() {
         return 0
     fi
 
+    # Defense-in-depth: check if local tar already exists (concurrent job may have created it)
+    if [[ -f "$LOCAL_TAR_FILE" ]]; then
+        _log "Local cache already exists: $LOCAL_TAR_FILE"
+        _update_lru "$cache_type" "$cache_key"
+        return 0
+    fi
+
     # Build exclusions - exclude block_log files but preserve RocksDB directories
     local tar_excludes=""
     if [[ "$cache_type" == "hive" ]] || [[ "$cache_type" == haf* ]]; then

@@ -222,6 +222,8 @@ echo "HIVED_UID=$(id -u)" > "$DATA_CACHE/datadir/hived_uid.env"
 
 echo "$status" > "$DATA_CACHE/datadir/status"
 
-rm "$DATA_CACHE/replay_running" -f
+# NOTE: Do NOT remove replay_running here - the CI template's after_script handles it
+# AFTER cache-manager.sh has finished creating the cache. Removing it here creates a
+# race condition where concurrent jobs can start tar operations on the same directory.
 
 exit "$status"
