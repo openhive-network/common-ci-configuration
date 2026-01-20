@@ -1035,35 +1035,26 @@ include:
       else
         echo -e "\e[0Ksection_start:$(date +%s):save_cache[collapsed=true]\r\e[0KSaving sync data to cache..."
 
-        # Save to local cache - keep datadir and shm_dir as siblings (matching HAF cache structure)
+        # Local cache path (used for both local copy and NFS push)
         LOCAL_APP_CACHE="${DATA_CACHE_HAF_PREFIX}_${APP_SYNC_CACHE_TYPE}_${EFFECTIVE_CACHE_KEY}"
-        mkdir -p "${LOCAL_APP_CACHE}"
-        # Clean existing directories (removes orphaned files) and copy fresh
-        # Use -T to ensure correct copy even if directory somehow still exists
-        sudo rm -rf "${LOCAL_APP_CACHE}/datadir" "${LOCAL_APP_CACHE}/shm_dir"
-        sudo cp -aT "${DATADIR}" "${LOCAL_APP_CACHE}/datadir"
-        sudo cp -aT "${SHM_DIR}" "${LOCAL_APP_CACHE}/shm_dir"
 
-        # Remove empty blockchain dir to trigger symlink on test runners
-        if [[ -d "${LOCAL_APP_CACHE}/datadir/blockchain" ]] && [[ -z "$(ls -A "${LOCAL_APP_CACHE}/datadir/blockchain" 2>/dev/null)" ]]; then
-          echo "Removing empty blockchain directory from local cache"
-          rmdir "${LOCAL_APP_CACHE}/datadir/blockchain" 2>/dev/null || true
-        fi
-
-        ls -lah "${LOCAL_APP_CACHE}"
-        ls -lah "${LOCAL_APP_CACHE}/datadir" || true
-
-        # Push to NFS cache
+        # Ensure cache-manager is available
         if [[ ! -x "$CACHE_MANAGER" ]]; then
           curl -fsSL "https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${CACHE_MANAGER_REF:-develop}/scripts/cache-manager.sh" -o "$CACHE_MANAGER"
           chmod +x "$CACHE_MANAGER"
         fi
 
-        echo "Pushing sync data to NFS: ${APP_SYNC_CACHE_TYPE}/${EFFECTIVE_CACHE_KEY}"
-        if CACHE_HANDLING=haf "$CACHE_MANAGER" put "${APP_SYNC_CACHE_TYPE}" "${EFFECTIVE_CACHE_KEY}" "${LOCAL_APP_CACHE}"; then
-          echo "Successfully pushed cache to NFS"
+        # Use cache-manager put with --copy-from to do a locked copy + NFS push
+        # The --copy-from flag makes put acquire an exclusive lock before copying,
+        # preventing race conditions when multiple jobs save to the same cache
+        echo "Saving sync data to local cache and NFS: ${APP_SYNC_CACHE_TYPE}/${EFFECTIVE_CACHE_KEY}"
+        if CACHE_HANDLING=haf "$CACHE_MANAGER" put "${APP_SYNC_CACHE_TYPE}" "${EFFECTIVE_CACHE_KEY}" "${LOCAL_APP_CACHE}" \
+            --copy-from "${DATADIR}" --shm-dir "${SHM_DIR}"; then
+          echo "Successfully saved cache"
+          ls -lah "${LOCAL_APP_CACHE}" || true
+          ls -lah "${LOCAL_APP_CACHE}/datadir" || true
         else
-          echo "WARNING: Failed to push to NFS cache"
+          echo "WARNING: Failed to save cache"
         fi
         echo -e "\e[0Ksection_end:$(date +%s):save_cache\r\e[0K"
       fi
