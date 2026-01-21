@@ -1057,7 +1057,8 @@ include:
           ls -lah "${LOCAL_APP_CACHE}" || true
           ls -lah "${LOCAL_APP_CACHE}/datadir" || true
         else
-          echo "WARNING: Failed to save cache"
+          echo "ERROR: Failed to save cache - downstream test jobs will fail without cache"
+          exit 1
         fi
         echo -e "\e[0Ksection_end:$(date +%s):save_cache\r\e[0K"
       fi
