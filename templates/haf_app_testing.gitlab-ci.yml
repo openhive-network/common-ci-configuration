@@ -1012,6 +1012,9 @@ include:
         sudo mv "${JOB_DATA_DIR}/datadir/shm_dir" "${JOB_DATA_DIR}/shm_dir"
       fi
 
+      # Ensure shm_dir exists (may not be in cache if HAF didn't create it during sync)
+      mkdir -p "${JOB_DATA_DIR}/shm_dir"
+
       # Export state for script section
       echo "$CACHE_HIT" > /tmp/cache_hit
       echo "$EFFECTIVE_CACHE_KEY" > /tmp/effective_cache_key
