@@ -225,7 +225,7 @@ _update_lru() {
     _touch_lock "$GLOBAL_LOCK"
     _flock_with_timeout 30 -x "$GLOBAL_LOCK" -c "
         # Create or update LRU index (simple format: timestamp|path per line)
-        if [[ -f '$LRU_INDEX' ]]; then
+        if [ -f '$LRU_INDEX' ]; then
             # Remove old entry and add new one
             grep -v '^[0-9]*|${entry}\$' '$LRU_INDEX' > '${LRU_INDEX}.tmp' 2>/dev/null || true
             echo '${timestamp}|${entry}' >> '${LRU_INDEX}.tmp'
@@ -622,7 +622,7 @@ cmd_get() {
         # Try to acquire exclusive lock (wait up to 60s for another job to finish copying)
         if _flock_with_timeout 60 -x "$local_copy_lock" -c "
             # Re-check if file appeared while waiting (another job finished copying)
-            if [[ -f '$LOCAL_TAR_FILE' ]]; then
+            if [ -f '$LOCAL_TAR_FILE' ]; then
                 echo '[cache-manager] Local cache appeared while waiting for lock' >&2
                 exit 0
             fi
@@ -667,14 +667,14 @@ cmd_get() {
         echo \"[cache-manager] Exclusive lock acquired in \$(echo \"\$lock_acquired - $get_start_time\" | bc)s\" >&2
 
         # Re-check inside lock: another job may have finished extraction while we waited
-        if [[ -d '${local_dest}/datadir' ]]; then
+        if [ -d '${local_dest}/datadir' ]; then
             echo '[cache-manager] Cache already extracted by another job, skipping extraction' >&2
             exit 0
         fi
 
         # Clean up stale extraction if present (with permission issues from previous runs)
         # Previous runs may have left directories with postgres ownership (UID 105, mode 700)
-        if [[ -d '${local_dest}' ]]; then
+        if [ -d '${local_dest}' ]; then
             if ! touch '${local_dest}/.write_test' 2>/dev/null; then
                 echo '[cache-manager] Stale extraction with permission issues, cleaning up' >&2
                 sudo rm -rf '${local_dest}' 2>/dev/null || rm -rf '${local_dest}' 2>/dev/null || true
@@ -706,50 +706,56 @@ cmd_get() {
     # See: https://gitlab.syncad.com/hive/HAfAH/-/pipelines/150169 for the failure mode.
     if _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$dest_lock" -c "
         # Link shared block_log for both hive and haf* caches (block_log files excluded from tar)
-        if [[ '$cache_type' == 'hive' ]] || [[ '$cache_type' == haf* ]]; then
-            # Create block_log symlinks if blockchain dir exists but is empty
-            blockchain_dir='${local_dest}/datadir/blockchain'
-            if [[ -d \"\$blockchain_dir\" ]] && [[ -z \"\$(ls -A \"\$blockchain_dir\" 2>/dev/null)\" ]]; then
-                for block_file in \"${SHARED_BLOCK_LOG_DIR:-/blockchain/block_log_5m}\"/block_log* ; do
-                    if [[ -f \"\$block_file\" ]]; then
-                        ln -sf \"\$block_file\" \"\$blockchain_dir/\$(basename \"\$block_file\")\" 2>/dev/null || true
-                    fi
-                done
-                echo '[cache-manager] Linked shared block_log files' >&2
-            fi
-        fi
+        case '$cache_type' in
+            hive|haf*)
+                # Create block_log symlinks if blockchain dir exists but is empty
+                blockchain_dir='${local_dest}/datadir/blockchain'
+                if [ -d \"\$blockchain_dir\" ] && [ -z \"\$(ls -A \"\$blockchain_dir\" 2>/dev/null)\" ]; then
+                    for block_file in \"${SHARED_BLOCK_LOG_DIR:-/blockchain/block_log_5m}\"/block_log* ; do
+                        if [ -f \"\$block_file\" ]; then
+                            ln -sf \"\$block_file\" \"\$blockchain_dir/\$(basename \"\$block_file\")\" 2>/dev/null || true
+                        fi
+                    done
+                    echo '[cache-manager] Linked shared block_log files' >&2
+                fi
+                ;;
+        esac
 
         # Fix PostgreSQL permissions and symlinks for HAF caches
-        if [[ '$cache_type' == haf* ]]; then
-            pgdata_path='${local_dest}/datadir/haf_db_store/pgdata'
-            tablespace_path='${local_dest}/datadir/haf_db_store/tablespace'
-            pg_tblspc='${local_dest}/datadir/haf_db_store/pgdata/pg_tblspc'
+        case '$cache_type' in
+            haf*)
+                pgdata_path='${local_dest}/datadir/haf_db_store/pgdata'
+                tablespace_path='${local_dest}/datadir/haf_db_store/tablespace'
+                pg_tblspc='${local_dest}/datadir/haf_db_store/pgdata/pg_tblspc'
 
-            # Fix pg_tblspc symlinks to use relative paths
-            if [[ -d \"\$pg_tblspc\" ]]; then
-                for link in \"\$pg_tblspc\"/*; do
-                    if [[ -L \"\$link\" ]]; then
-                        target=\$(readlink \"\$link\")
-                        # Only fix if absolute path (relative paths are already correct)
-                        if [[ \"\$target\" == /* ]] && [[ \"\$target\" == *tablespace* ]]; then
-                            echo \"[cache-manager] Fixing pg_tblspc symlink: \$(basename \"\$link\")\" >&2
-                            sudo rm -f \"\$link\" 2>/dev/null || rm -f \"\$link\"
-                            sudo ln -s '../../tablespace' \"\$link\" 2>/dev/null || ln -s '../../tablespace' \"\$link\"
+                # Fix pg_tblspc symlinks to use relative paths
+                if [ -d \"\$pg_tblspc\" ]; then
+                    for link in \"\$pg_tblspc\"/*; do
+                        if [ -L \"\$link\" ]; then
+                            target=\$(readlink \"\$link\")
+                            # Only fix if absolute path (relative paths are already correct)
+                            case \"\$target\" in
+                                /*tablespace*)
+                                    echo \"[cache-manager] Fixing pg_tblspc symlink: \$(basename \"\$link\")\" >&2
+                                    sudo rm -f \"\$link\" 2>/dev/null || rm -f \"\$link\"
+                                    sudo ln -s '../../tablespace' \"\$link\" 2>/dev/null || ln -s '../../tablespace' \"\$link\"
+                                    ;;
+                            esac
                         fi
-                    fi
-                done
-            fi
+                    done
+                fi
 
-            # Restore pgdata permissions
-            if [[ -d \"\$pgdata_path\" ]]; then
-                sudo chmod 700 \"\$pgdata_path\" 2>/dev/null || chmod 700 \"\$pgdata_path\" 2>/dev/null || true
-                sudo chown -R 105:105 \"\$pgdata_path\" 2>/dev/null || true
-            fi
-            if [[ -d \"\$tablespace_path\" ]]; then
-                sudo chmod 700 \"\$tablespace_path\" 2>/dev/null || chmod 700 \"\$tablespace_path\" 2>/dev/null || true
-                sudo chown -R 105:105 \"\$tablespace_path\" 2>/dev/null || true
-            fi
-        fi
+                # Restore pgdata permissions
+                if [ -d \"\$pgdata_path\" ]; then
+                    sudo chmod 700 \"\$pgdata_path\" 2>/dev/null || chmod 700 \"\$pgdata_path\" 2>/dev/null || true
+                    sudo chown -R 105:105 \"\$pgdata_path\" 2>/dev/null || true
+                fi
+                if [ -d \"\$tablespace_path\" ]; then
+                    sudo chmod 700 \"\$tablespace_path\" 2>/dev/null || chmod 700 \"\$tablespace_path\" 2>/dev/null || true
+                    sudo chown -R 105:105 \"\$tablespace_path\" 2>/dev/null || true
+                fi
+                ;;
+        esac
     "; then
         : # Post-extraction fixes completed
     else
@@ -819,7 +825,7 @@ cmd_put() {
             echo \"[cache-manager] Exclusive lock acquired in \$(echo \"\$lock_acquired - $copy_start\" | bc)s\" >&2
 
             # Re-check inside lock: another job may have finished the copy while we waited
-            if [[ -d '${local_source}/datadir/haf_db_store/pgdata' ]]; then
+            if [ -d '${local_source}/datadir/haf_db_store/pgdata' ]; then
                 echo '[cache-manager] Cache already saved by another job, skipping copy' >&2
                 exit 0
             fi
@@ -831,13 +837,13 @@ cmd_put() {
             sudo cp -aT '$copy_from' '${local_source}/datadir'
 
             # Copy shm_dir if provided
-            if [[ -n '$shm_dir' ]] && [[ -d '$shm_dir' ]]; then
+            if [ -n '$shm_dir' ] && [ -d '$shm_dir' ]; then
                 echo '[cache-manager] Copying shm_dir to local cache...' >&2
                 sudo cp -aT '$shm_dir' '${local_source}/shm_dir'
             fi
 
             # Remove empty blockchain directory to trigger symlink on test runners
-            if [[ -d '${local_source}/datadir/blockchain' ]] && [[ -z \"\$(ls -A '${local_source}/datadir/blockchain' 2>/dev/null)\" ]]; then
+            if [ -d '${local_source}/datadir/blockchain' ] && [ -z \"\$(ls -A '${local_source}/datadir/blockchain' 2>/dev/null)\" ]; then
                 echo '[cache-manager] Removing empty blockchain directory from local cache' >&2
                 rmdir '${local_source}/datadir/blockchain' 2>/dev/null || true
             fi
@@ -983,7 +989,7 @@ pipeline_id=${CI_PIPELINE_ID:-unknown}
 LOCKINFO
 
         # Double-check after acquiring lock (another job may have pushed while we waited)
-        if [[ -f '$NFS_TAR_FILE' ]]; then
+        if [ -f '$NFS_TAR_FILE' ]; then
             echo '[cache-manager] Cache was created while waiting for lock' >&2
             exit 0
         fi
@@ -1129,12 +1135,12 @@ cmd_cleanup() {
             local global_lock="${CACHE_NFS_PATH}/.global_lock"
             _touch_lock "$global_lock"
             _flock_with_timeout 30 -x "$global_lock" -c "
-                if [[ -f '$lru_index' ]]; then
+                if [ -f '$lru_index' ]; then
                     grep -v '|${entry}\$' '$lru_index' > '${lru_index}.tmp' 2>/dev/null || true
                     # Only mv if tmp file exists and has content (avoid clobbering with empty file)
-                    if [[ -s '${lru_index}.tmp' ]]; then
+                    if [ -s '${lru_index}.tmp' ]; then
                         mv '${lru_index}.tmp' '$lru_index'
-                    elif [[ -f '${lru_index}.tmp' ]]; then
+                    elif [ -f '${lru_index}.tmp' ]; then
                         # tmp is empty, meaning we removed the last entry
                         mv '${lru_index}.tmp' '$lru_index'
                     fi
