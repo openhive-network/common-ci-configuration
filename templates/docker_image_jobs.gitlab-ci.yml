@@ -132,7 +132,22 @@ include:
       if [[ -n "${HIVE_BLOG_IMAGE_SOURCE:-}" && -n "${HIVE_BLOG_IMAGE_TARGET:-}" ]]; then
         echo "Pushing to hive.blog registry: ${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}"
         docker tag "$HIVE_BLOG_IMAGE_SOURCE" "${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}"
-        docker push "${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}"
+
+        # Retry push with exponential backoff (handles transient registry issues)
+        MAX_RETRIES=3
+        RETRY_DELAY=5
+        for attempt in $(seq 1 $MAX_RETRIES); do
+          if docker push "${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}"; then
+            break
+          fi
+          if [ $attempt -eq $MAX_RETRIES ]; then
+            echo "ERROR: Push failed after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          echo "Push attempt $attempt failed, retrying in ${RETRY_DELAY}s..."
+          sleep $RETRY_DELAY
+          RETRY_DELAY=$((RETRY_DELAY * 2))
+        done
       fi
 
 # =============================================================================
@@ -335,7 +350,22 @@ include:
 
         docker pull "$SOURCE"
         docker tag "$SOURCE" "$TARGET"
-        docker push "$TARGET"
+
+        # Retry push with exponential backoff (handles transient registry issues)
+        MAX_RETRIES=3
+        RETRY_DELAY=5
+        for attempt in $(seq 1 $MAX_RETRIES); do
+          if docker push "$TARGET"; then
+            break
+          fi
+          if [ $attempt -eq $MAX_RETRIES ]; then
+            echo "ERROR: Push failed after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          echo "Push attempt $attempt failed, retrying in ${RETRY_DELAY}s..."
+          sleep $RETRY_DELAY
+          RETRY_DELAY=$((RETRY_DELAY * 2))
+        done
 
         echo "  ✓ Published successfully"
       done
