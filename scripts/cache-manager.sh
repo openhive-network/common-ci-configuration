@@ -701,16 +701,60 @@ cmd_get() {
         return 1
     fi
 
-    # Post-extraction fixes
-    # Link shared block_log for both hive and haf* caches (block_log files excluded from tar)
-    if [[ "$cache_type" == "hive" ]] || [[ "$cache_type" == haf* ]]; then
-        _link_shared_block_log "$local_dest"
-    fi
+    # Post-extraction fixes - run inside exclusive lock to prevent race conditions
+    # where symlink modifications interfere with concurrent cp operations.
+    # See: https://gitlab.syncad.com/hive/HAfAH/-/pipelines/150169 for the failure mode.
+    if _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$dest_lock" -c "
+        # Link shared block_log for both hive and haf* caches (block_log files excluded from tar)
+        if [[ '$cache_type' == 'hive' ]] || [[ '$cache_type' == haf* ]]; then
+            # Create block_log symlinks if blockchain dir exists but is empty
+            blockchain_dir='${local_dest}/datadir/blockchain'
+            if [[ -d \"\$blockchain_dir\" ]] && [[ -z \"\$(ls -A \"\$blockchain_dir\" 2>/dev/null)\" ]]; then
+                for block_file in '${SHARED_BLOCK_LOG_DIR:-/blockchain/block_log_5m}'/block_log* ; do
+                    if [[ -f \"\$block_file\" ]]; then
+                        ln -sf \"\$block_file\" \"\$blockchain_dir/\$(basename \"\$block_file\")\" 2>/dev/null || true
+                    fi
+                done
+                echo '[cache-manager] Linked shared block_log files' >&2
+            fi
+        fi
 
-    # Additional fixes for HAF caches (PostgreSQL permissions)
-    # Covers: haf, haf_sync, haf_pipeline, haf_filtered, haf_hafbe_sync, etc.
-    if [[ "$cache_type" == haf* ]]; then
-        _restore_pgdata_permissions "$local_dest"
+        # Fix PostgreSQL permissions and symlinks for HAF caches
+        if [[ '$cache_type' == haf* ]]; then
+            pgdata_path='${local_dest}/datadir/haf_db_store/pgdata'
+            tablespace_path='${local_dest}/datadir/haf_db_store/tablespace'
+            pg_tblspc='${local_dest}/datadir/haf_db_store/pgdata/pg_tblspc'
+
+            # Fix pg_tblspc symlinks to use relative paths
+            if [[ -d \"\$pg_tblspc\" ]]; then
+                for link in \"\$pg_tblspc\"/*; do
+                    if [[ -L \"\$link\" ]]; then
+                        target=\$(readlink \"\$link\")
+                        # Only fix if absolute path (relative paths are already correct)
+                        if [[ \"\$target\" == /* ]] && [[ \"\$target\" == *tablespace* ]]; then
+                            echo \"[cache-manager] Fixing pg_tblspc symlink: \$(basename \"\$link\")\" >&2
+                            sudo rm -f \"\$link\" 2>/dev/null || rm -f \"\$link\"
+                            sudo ln -s '../../tablespace' \"\$link\" 2>/dev/null || ln -s '../../tablespace' \"\$link\"
+                        fi
+                    fi
+                done
+            fi
+
+            # Restore pgdata permissions
+            if [[ -d \"\$pgdata_path\" ]]; then
+                sudo chmod 700 \"\$pgdata_path\" 2>/dev/null || chmod 700 \"\$pgdata_path\" 2>/dev/null || true
+                sudo chown -R 105:105 \"\$pgdata_path\" 2>/dev/null || true
+            fi
+            if [[ -d \"\$tablespace_path\" ]]; then
+                sudo chmod 700 \"\$tablespace_path\" 2>/dev/null || chmod 700 \"\$tablespace_path\" 2>/dev/null || true
+                sudo chown -R 105:105 \"\$tablespace_path\" 2>/dev/null || true
+            fi
+        fi
+    "; then
+        : # Post-extraction fixes completed
+    else
+        _error "Failed to apply post-extraction fixes"
+        # Non-fatal - cache may still be usable
     fi
 
     _update_lru "$cache_type" "$cache_key"
