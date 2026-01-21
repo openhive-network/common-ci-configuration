@@ -1417,8 +1417,12 @@ cmd_cleanup_orphans() {
 _maybe_cleanup() {
     # Check local cache first (independent of NFS)
     if [[ -d "$CACHE_LOCAL_PATH" ]] && ! _is_nfs_host; then
+        # Resolve symlinks - du on a symlink returns symlink size, not target size
+        local real_local_path
+        real_local_path=$(readlink -f "$CACHE_LOCAL_PATH")
+
         local local_size
-        local_size=$(du -sb "$CACHE_LOCAL_PATH" 2>/dev/null | awk '{print $1}') || local_size=0
+        local_size=$(du -sb "$real_local_path" 2>/dev/null | awk '{print $1}') || local_size=0
         [[ -z "$local_size" || ! "$local_size" =~ ^[0-9]+$ ]] && local_size=0
         local local_max_bytes=$((CACHE_LOCAL_MAX_GB * 1024 * 1024 * 1024))
         local local_threshold=$((local_max_bytes * 90 / 100))  # 90% threshold
