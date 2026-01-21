@@ -86,6 +86,70 @@ include:
       fi
       echo -e "\e[0Ksection_end:$(date +%s):registry_login\r\e[0K"
 
+# Vault authentication script for fetching external registry credentials.
+# Requires id_tokens with VAULT_ID_TOKEN and variables VAULT_ADDR, VAULT_AUTH_ROLE.
+# Sets BLOG_REGISTRY_USER, BLOG_REGISTRY_PASSWORD (and optionally DOCKER_HUB_USER/PASSWORD).
+.script_vault_auth:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):vault_auth[collapsed=true]\r\e[0KAuthenticating with Vault..."
+      # Helper function to parse JSON using Python (available in docker-builder image)
+      json_get() { python3 -c "import sys,json; print(json.load(sys.stdin)$1)"; }
+      # Authenticate with Vault using JWT and retrieve secrets
+      echo "Authenticating with Vault at $VAULT_ADDR using role $VAULT_AUTH_ROLE"
+      VAULT_RESPONSE=$(curl -s --request POST --data "{\"jwt\": \"$VAULT_ID_TOKEN\", \"role\": \"$VAULT_AUTH_ROLE\"}" "$VAULT_ADDR/v1/auth/jwt/login")
+      if [[ -z "$VAULT_RESPONSE" ]]; then
+        echo "ERROR: Empty response from Vault - curl may have failed"
+        exit 1
+      fi
+      echo "Got response from Vault (token hidden)"
+      VAULT_TOKEN=$(echo "$VAULT_RESPONSE" | json_get "['auth']['client_token']")
+      if [[ -z "$VAULT_TOKEN" || "$VAULT_TOKEN" == "None" ]]; then
+        echo "ERROR: Failed to authenticate with Vault"
+        echo "Response: $VAULT_RESPONSE"
+        exit 1
+      fi
+      # Fetch blog registry credentials
+      set +x  # Disable debug output if enabled, to prevent echoing passwords
+      BLOG_REGISTRY_DATA=$(curl -s --header "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/ci-secrets/data/production/blog-registry")
+      export BLOG_REGISTRY_USER=$(echo "$BLOG_REGISTRY_DATA" | json_get "['data']['data']['username']")
+      export BLOG_REGISTRY_PASSWORD=$(echo "$BLOG_REGISTRY_DATA" | json_get "['data']['data']['password']")
+      echo "Successfully retrieved secrets from Vault"
+      echo -e "\e[0Ksection_end:$(date +%s):vault_auth\r\e[0K"
+
+# Vault authentication with Docker Hub credentials (for templates that publish to Docker Hub)
+.script_vault_auth_with_dockerhub:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):vault_auth[collapsed=true]\r\e[0KAuthenticating with Vault..."
+      # Helper function to parse JSON using Python (available in docker-builder image)
+      json_get() { python3 -c "import sys,json; print(json.load(sys.stdin)$1)"; }
+      # Authenticate with Vault using JWT and retrieve secrets
+      echo "Authenticating with Vault at $VAULT_ADDR using role $VAULT_AUTH_ROLE"
+      VAULT_RESPONSE=$(curl -s --request POST --data "{\"jwt\": \"$VAULT_ID_TOKEN\", \"role\": \"$VAULT_AUTH_ROLE\"}" "$VAULT_ADDR/v1/auth/jwt/login")
+      if [[ -z "$VAULT_RESPONSE" ]]; then
+        echo "ERROR: Empty response from Vault - curl may have failed"
+        exit 1
+      fi
+      echo "Got response from Vault (token hidden)"
+      VAULT_TOKEN=$(echo "$VAULT_RESPONSE" | json_get "['auth']['client_token']")
+      if [[ -z "$VAULT_TOKEN" || "$VAULT_TOKEN" == "None" ]]; then
+        echo "ERROR: Failed to authenticate with Vault"
+        echo "Response: $VAULT_RESPONSE"
+        exit 1
+      fi
+      # Fetch Docker Hub credentials
+      set +x  # Disable debug output if enabled, to prevent echoing passwords
+      DOCKER_HUB_DATA=$(curl -s --header "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/ci-secrets/data/production/docker-hub")
+      export DOCKER_HUB_USER=$(echo "$DOCKER_HUB_DATA" | json_get "['data']['data']['username']")
+      export DOCKER_HUB_PASSWORD=$(echo "$DOCKER_HUB_DATA" | json_get "['data']['data']['password']")
+      # Fetch blog registry credentials
+      BLOG_REGISTRY_DATA=$(curl -s --header "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/ci-secrets/data/production/blog-registry")
+      export BLOG_REGISTRY_USER=$(echo "$BLOG_REGISTRY_DATA" | json_get "['data']['data']['username']")
+      export BLOG_REGISTRY_PASSWORD=$(echo "$BLOG_REGISTRY_DATA" | json_get "['data']['data']['password']")
+      echo "Successfully retrieved secrets from Vault"
+      echo -e "\e[0Ksection_end:$(date +%s):vault_auth\r\e[0K"
+
 # =============================================================================
 # JOB TEMPLATES
 # =============================================================================
@@ -152,6 +216,10 @@ include:
 # IMPORTANT: This template publishes to the PUBLIC Docker Hub registry!
 # By default, only runs on protected tags.
 #
+# Secrets are fetched from Vault using JWT auth. Access is restricted to:
+#   - ref_type: tag (must be a tag, not a branch)
+#   - ref_protected: true (must be a protected tag)
+#
 # Skip variables (set to "true" to skip this job):
 #   - QUICK_TEST: Skip during quick test pipelines
 #   - SKIP_PRODUCTION_DEPLOY: Skip all production deployments
@@ -159,16 +227,19 @@ include:
 .publish_docker_image_template:
   extends: .docker_image_builder_job_template
   needs: []
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.syncad.com
   variables:
-    # Note: DOCKER_HUB_USER, DOCKER_HUB_PASSWORD, BLOG_REGISTRY_USER, BLOG_REGISTRY_PASSWORD
-    # must be set as CI/CD variables in the project/group settings. Do NOT re-declare them
-    # here as `VAR: $VAR` - GitLab CI doesn't properly expand protected variables in that pattern.
+    VAULT_ADDR: https://vault.syncad.com
+    VAULT_AUTH_ROLE: hive-release
     HIVE_BLOG_REGISTRY: registry-upload.hive.blog
   before_script:
     # Flat composition - each fragment returns a single script block, avoiding nested arrays
     - !reference [.script_docker_setup_buildkit, script]
     - !reference [.script_docker_fix_workspace, script]
     - !reference [.script_git_safe_directory, script]
+    - !reference [.script_vault_auth_with_dockerhub, script]
     - !reference [.script_registry_login_all, script]
   rules:
     - if: $QUICK_TEST == "true"
@@ -350,6 +421,10 @@ include:
 # IMPORTANT: This job only runs on protected tags. Images must already exist
 # in GitLab registry with the version tag from the build phase.
 #
+# Secrets are fetched from Vault using JWT auth. Access is restricted to:
+#   - ref_type: tag (must be a tag, not a branch)
+#   - ref_protected: true (must be a protected tag)
+#
 # Required variables:
 #   PUBLISH_IMAGES: Space-separated list of images to publish
 #                   e.g., "myapp postgrest-rewriter" or just "myapp"
@@ -374,10 +449,21 @@ include:
 .docker_publish_job_template:
   extends: .docker_image_builder_job_template
   stage: publish
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.syncad.com
   variables:
+    VAULT_ADDR: https://vault.syncad.com
+    VAULT_AUTH_ROLE: hive-release
     PUBLISH_IMAGES: ""
     HIVE_BLOG_REGISTRY: "registry-upload.hive.blog"
     PUBLISH_PROJECT_NAME: "${CI_PROJECT_NAME}"
+  before_script:
+    # Flat composition - each fragment returns a single script block, avoiding nested arrays
+    - !reference [.script_docker_setup_buildkit, script]
+    - !reference [.script_docker_fix_workspace, script]
+    - !reference [.script_git_safe_directory, script]
+    - !reference [.script_vault_auth, script]
   script:
     - |
       echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to registries..."
