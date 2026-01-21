@@ -179,6 +179,14 @@ default:
     - |
       (
       cd "${CI_PROJECT_DIR:-/builds}" 2>/dev/null || exit 0
+
+      # Always fix workspace root directory (required for dotenv artifacts like haf_image.env)
+      # Different jobs may run as different users, making the root non-writable
+      if [ -d "." ] && [ ! -w "." ]; then
+        echo "pre_get_sources: fixing workspace root permissions (currently not writable)"
+        chmod a+w . 2>/dev/null || true
+      fi
+
       # Default paths that commonly need permission fixes
       fix_paths="${PERMISSION_FIX_PATHS:-}"
       if [ -z "$fix_paths" ]; then
