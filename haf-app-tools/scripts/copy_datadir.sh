@@ -110,8 +110,8 @@ extract_nfs_cache_if_needed() {
         echo "Using cache-manager for NFS fallback"
         if "$CACHE_MANAGER" get "$cache_type" "$cache_key" "$data_source"; then
             echo "Cache-manager retrieved cache successfully"
-            # Fix pg_tblspc symlinks after extraction (cache-manager handles pgdata perms)
-            fix_pg_tblspc_symlinks "${data_source}/datadir"
+            # Note: cache-manager handles pg_tblspc symlinks and pgdata permissions
+            # inside its exclusive lock to prevent race conditions
             return 0
         else
             echo "Cache-manager could not retrieve cache"
@@ -140,29 +140,44 @@ extract_nfs_cache_if_needed() {
             chmod 777 "$data_source" 2>/dev/null || true
 
             # Use flock to prevent race conditions when multiple jobs extract to the same cache dir
-            # Check again inside lock - another job may have just finished extracting
+            # All post-extraction fixes (permissions, symlinks) must be inside the lock to prevent
+            # race conditions with concurrent readers. See: HAfAH pipeline 150169 failure.
             if flock "$data_source" bash -c "
                 if [[ -d \"${data_source}/datadir\" ]]; then
                     echo 'Cache already extracted by another job'
                     exit 0
                 fi
                 tar xf \"$tar_file\" -C \"$data_source\"
+
+                # Restore pgdata permissions for PostgreSQL (inside lock)
+                pgdata=\"${data_source}/datadir/haf_db_store/pgdata\"
+                tablespace=\"${data_source}/datadir/haf_db_store/tablespace\"
+                pg_tblspc=\"${data_source}/datadir/haf_db_store/pgdata/pg_tblspc\"
+
+                if [[ -d \"\$pgdata\" ]]; then
+                    chmod 700 \"\$pgdata\" 2>/dev/null || true
+                    chown -R 105:105 \"\$pgdata\" 2>/dev/null || true
+                fi
+                if [[ -d \"\$tablespace\" ]]; then
+                    chmod 700 \"\$tablespace\" 2>/dev/null || true
+                    chown -R 105:105 \"\$tablespace\" 2>/dev/null || true
+                fi
+
+                # Fix pg_tblspc symlinks - only if absolute paths (inside lock)
+                if [[ -d \"\$pg_tblspc\" ]]; then
+                    for link in \"\$pg_tblspc\"/*; do
+                        if [[ -L \"\$link\" ]]; then
+                            target=\$(readlink \"\$link\")
+                            if [[ \"\$target\" == /* ]] && [[ \"\$target\" == *tablespace* ]]; then
+                                echo \"Fixing pg_tblspc symlink: \$(basename \"\$link\")\"
+                                sudo rm -f \"\$link\" 2>/dev/null || rm -f \"\$link\"
+                                sudo ln -s '../../tablespace' \"\$link\" 2>/dev/null || ln -s '../../tablespace' \"\$link\"
+                            fi
+                        fi
+                    done
+                fi
             "; then
                 echo "Cache extracted successfully from $tar_file"
-
-                # Restore pgdata permissions for PostgreSQL
-                local pgdata="${data_source}/datadir/haf_db_store/pgdata"
-                local tablespace="${data_source}/datadir/haf_db_store/tablespace"
-                if [[ -d "$pgdata" ]]; then
-                    chmod 700 "$pgdata" 2>/dev/null || true
-                    chown -R 105:105 "$pgdata" 2>/dev/null || true
-                fi
-                if [[ -d "$tablespace" ]]; then
-                    chmod 700 "$tablespace" 2>/dev/null || true
-                    chown -R 105:105 "$tablespace" 2>/dev/null || true
-                fi
-                # Fix pg_tblspc symlinks after extraction
-                fix_pg_tblspc_symlinks "${data_source}/datadir"
                 return 0
             else
                 echo "ERROR: Failed to extract cache from $tar_file"
