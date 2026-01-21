@@ -21,6 +21,7 @@
 #   HIVE_NETWORK_TYPE               Network type (mainnet/testnet/mirrornet)
 #   HAF_CI_MODE                     Set to 1 for HAF CI mode
 #   COMMON_CI_CONFIG_REF            Git ref for fetching scripts (default: develop)
+#   MAX_LOCK_WAIT                   Max seconds to wait for lock (default: 3600)
 
 set -xeuo pipefail
 
@@ -61,6 +62,7 @@ print_help () {
     echo "  HIVE_NETWORK_TYPE             Network type: mainnet, testnet, or mirrornet"
     echo "  HAF_CI_MODE                   Set to 1 to enable HAF CI mode"
     echo "  COMMON_CI_CONFIG_REF          Git ref for common-ci-configuration (default: develop)"
+    echo "  MAX_LOCK_WAIT                 Max seconds to wait for lock file (default: 3600)"
     echo
 }
 
@@ -153,10 +155,31 @@ if [[ -z "$RUN_SCRIPT" ]]; then
     fi
 fi
 
-# Wait for any other replay to finish
-while [[ -f "$DATA_CACHE/replay_running" ]]; do
-  echo "Another replay is running in $DATA_CACHE. Waiting for it to end..."
-  sleep 60
+# Wait for any other replay to finish (with timeout and stale detection)
+MAX_WAIT_SECONDS=${MAX_LOCK_WAIT:-3600}  # Default 60 minutes
+WAIT_INTERVAL=60
+WAITED=0
+LOCK_FILE="$DATA_CACHE/replay_running"
+
+while [[ -f "$LOCK_FILE" ]]; do
+  # Check for stale lock (older than 2 hours)
+  LOCK_AGE=$(($(date +%s) - $(stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0)))
+  if [[ $LOCK_AGE -gt 7200 ]]; then
+    echo "WARNING: Stale lock file detected (age: ${LOCK_AGE}s). Removing and proceeding..."
+    rm -f "$LOCK_FILE"
+    break
+  fi
+
+  echo "Another replay is running in $DATA_CACHE. Waiting for it to end... (waited ${WAITED}s, lock age ${LOCK_AGE}s)"
+  sleep "$WAIT_INTERVAL"
+  WAITED=$((WAITED + WAIT_INTERVAL))
+
+  if [[ $WAITED -ge $MAX_WAIT_SECONDS ]]; then
+    echo "ERROR: Timeout waiting for lock file after ${WAITED}s. Lock file age: ${LOCK_AGE}s"
+    echo "Removing potentially stale lock and proceeding..."
+    rm -f "$LOCK_FILE"
+    break
+  fi
 done
 
 # Check if previous replay is valid
