@@ -198,7 +198,36 @@ then
     # Try NFS fallback if local DATA_SOURCE doesn't exist
     if [[ ! -d "${DATA_SOURCE}/datadir" ]]; then
         echo "Local DATA_SOURCE not found, attempting NFS fallback..."
-        extract_nfs_cache_if_needed "${DATA_SOURCE}" || true
+        if ! extract_nfs_cache_if_needed "${DATA_SOURCE}"; then
+            echo "ERROR: Failed to retrieve cache and no local data exists"
+            exit 1
+        fi
+    fi
+
+    # Staleness check: verify datadir is recent to catch stale extractions from failed jobs
+    # Stale data can cause PostgreSQL tablespace conflicts and other integrity issues
+    # See: HAF pipeline 150882 failure analysis
+    if [[ -d "${DATA_SOURCE}/datadir" ]]; then
+        datadir_mtime=$(stat -c %Y "${DATA_SOURCE}/datadir" 2>/dev/null || echo 0)
+        current_time=$(date +%s)
+        datadir_age=$((current_time - datadir_mtime))
+        # Consider stale if older than 1 hour (3600 seconds)
+        # Normal CI runs extract fresh data; old data indicates a previous failed extraction
+        if [[ $datadir_age -gt 3600 ]]; then
+            echo "WARNING: DATA_SOURCE appears stale (${datadir_age}s old, >1 hour), re-extracting..."
+            sudo rm -rf "${DATA_SOURCE}/datadir" "${DATA_SOURCE}/shm_dir" 2>/dev/null || \
+                rm -rf "${DATA_SOURCE}/datadir" "${DATA_SOURCE}/shm_dir" 2>/dev/null || true
+            if ! extract_nfs_cache_if_needed "${DATA_SOURCE}"; then
+                echo "ERROR: Failed to re-extract stale cache"
+                exit 1
+            fi
+        fi
+    fi
+
+    # Final validation: ensure datadir exists after all extraction attempts
+    if [[ ! -d "${DATA_SOURCE}/datadir" ]]; then
+        echo "ERROR: DATA_SOURCE/datadir does not exist after extraction attempts"
+        exit 1
     fi
 
     if [ "$(realpath "${DATA_SOURCE}/datadir")" != "$(realpath "${DATADIR}")" ]
