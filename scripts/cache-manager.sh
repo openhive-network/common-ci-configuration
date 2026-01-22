@@ -661,6 +661,10 @@ cmd_get() {
     local dest_lock="${local_dest}.lock"
     _touch_lock "$dest_lock"
 
+    # Check for stale locks before attempting to acquire
+    # Note: _check_stale_lock returns 1 if not stale, which would trigger errexit
+    _check_stale_lock "$dest_lock" || true
+
     local get_start_time=$(date +%s.%N)
     if _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$dest_lock" -c "
         lock_acquired=\$(date +%s.%N)
@@ -825,6 +829,10 @@ cmd_put() {
         mkdir -p "$local_source"
         _touch_lock "$dest_lock"
 
+        # Check for stale locks before attempting to acquire
+        # Note: _check_stale_lock returns 1 if not stale, which would trigger errexit
+        _check_stale_lock "$dest_lock" || true
+
         _log "Acquiring exclusive lock for local cache copy..."
         local copy_start=$(date +%s.%N)
 
@@ -905,6 +913,10 @@ cmd_put() {
         _log "Storing cache on NFS host: $NFS_TAR_FILE"
         mkdir -p "$(dirname "$NFS_TAR_FILE")"
         _touch_lock "$NFS_TAR_LOCK"
+
+        # Check for stale locks before attempting to acquire
+        # Note: _check_stale_lock returns 1 if not stale, which would trigger errexit
+        _check_stale_lock "$NFS_TAR_LOCK" || true
 
         # shellcheck disable=SC2086
         if ! _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$NFS_TAR_LOCK" -c "
