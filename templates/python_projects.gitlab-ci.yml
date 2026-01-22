@@ -207,6 +207,11 @@ variables:
 
 .deploy_wheel_to_gitlab_template:
   extends: .deploy_wheel_base
+  rules:
+    - if: '$CI_COMMIT_REF_PROTECTED == "true"'
+      when: on_success
+    - when: manual
+      allow_failure: true
   script:
     - echo -e "${TXT_BLUE}Deploying python wheel to the GitLab PyPI registry...${TXT_CLEAR}"
     - ls -al
