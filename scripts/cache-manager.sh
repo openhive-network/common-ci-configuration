@@ -698,6 +698,14 @@ cmd_get() {
         _log "Cache ready"
     else
         _error "Failed to acquire lock or extract tar archive"
+        # Clean up any partial/stale extraction to prevent downstream corruption
+        # This is critical: if extraction fails, stale data from previous runs can cause
+        # PostgreSQL tablespace conflicts and other data integrity issues.
+        # See: HAF pipeline 150882 failure analysis
+        if [[ -d "$local_dest" ]]; then
+            _log "Cleaning up stale/partial extraction directory: $local_dest"
+            sudo rm -rf "$local_dest" 2>/dev/null || rm -rf "$local_dest" 2>/dev/null || true
+        fi
         return 1
     fi
 
