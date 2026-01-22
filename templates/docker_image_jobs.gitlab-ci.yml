@@ -38,6 +38,13 @@ include:
   extends: .pure_docker_image_builder_job_template
   before_script:
     - !reference [.pure_docker_image_builder_job_template, before_script]
+    # Fix workspace permissions for cross-user CI jobs (fetch strategy can leave
+    # directories owned by runner user, making them non-writable by container user)
+    - |
+      if [ ! -w "${CI_PROJECT_DIR}" ]; then
+        echo "Workspace not writable by container user, fixing permissions via docker..."
+        docker run --rm -v "${CI_PROJECT_DIR}:/workspace" alpine:latest chmod -R a+w /workspace
+      fi
     - |
       echo -e "\e[0Ksection_start:$(date +%s):git[collapsed=true]\r\e[0KDisabling Git directory permission check"
       git config --global --add safe.directory '*'
