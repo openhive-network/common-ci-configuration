@@ -102,7 +102,21 @@ include:
       echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to Docker registries..."
       echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
       if [[ -n "${BLOG_REGISTRY_USER:-}" && -n "${BLOG_REGISTRY_PASSWORD:-}" ]]; then
-        echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"
+        # Retry login with exponential backoff (external registry can be flaky)
+        MAX_RETRIES=3
+        RETRY_DELAY=5
+        for attempt in $(seq 1 $MAX_RETRIES); do
+          if echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"; then
+            break
+          fi
+          if [ $attempt -eq $MAX_RETRIES ]; then
+            echo "ERROR: Login to $HIVE_BLOG_REGISTRY failed after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          echo "Login attempt $attempt failed, retrying in ${RETRY_DELAY}s..."
+          sleep $RETRY_DELAY
+          RETRY_DELAY=$((RETRY_DELAY * 2))
+        done
       fi
       echo -e "\e[0Ksection_end:$(date +%s):registry_login\r\e[0K"
   rules:
@@ -317,7 +331,21 @@ include:
       echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to registries..."
       echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
       if [[ -n "${BLOG_REGISTRY_USER:-}" && -n "${BLOG_REGISTRY_PASSWORD:-}" ]]; then
-        echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"
+        # Retry login with exponential backoff (external registry can be flaky)
+        MAX_RETRIES=3
+        RETRY_DELAY=5
+        for attempt in $(seq 1 $MAX_RETRIES); do
+          if echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"; then
+            break
+          fi
+          if [ $attempt -eq $MAX_RETRIES ]; then
+            echo "ERROR: Login to $HIVE_BLOG_REGISTRY failed after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          echo "Login attempt $attempt failed, retrying in ${RETRY_DELAY}s..."
+          sleep $RETRY_DELAY
+          RETRY_DELAY=$((RETRY_DELAY * 2))
+        done
       else
         echo "WARNING: BLOG_REGISTRY_USER or BLOG_REGISTRY_PASSWORD not set, skipping hive.blog login"
       fi
