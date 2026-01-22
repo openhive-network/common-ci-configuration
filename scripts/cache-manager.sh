@@ -631,7 +631,7 @@ cmd_get() {
             # Use atomic rename: copy to .tmp first, then mv to final name
             if cp '$NFS_TAR_FILE' '${LOCAL_TAR_FILE}.tmp' && mv '${LOCAL_TAR_FILE}.tmp' '$LOCAL_TAR_FILE'; then
                 copy_end=\$(date +%s.%N)
-                copy_duration=\$(echo \"\$copy_end - \$copy_start\" | bc)
+                copy_duration=\$(echo \"\$copy_end - \$copy_start\" | bc 2>/dev/null || echo '?')
                 tar_size=\$(stat -c %s '$LOCAL_TAR_FILE' 2>/dev/null || echo 0)
                 throughput=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / \$copy_duration\" | bc 2>/dev/null || echo '?')
                 echo \"[cache-manager] Copied to local cache in \${copy_duration}s (\${throughput} MB/s)\" >&2
@@ -664,7 +664,7 @@ cmd_get() {
     local get_start_time=$(date +%s.%N)
     if _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$dest_lock" -c "
         lock_acquired=\$(date +%s.%N)
-        echo \"[cache-manager] Exclusive lock acquired in \$(echo \"\$lock_acquired - $get_start_time\" | bc)s\" >&2
+        echo \"[cache-manager] Exclusive lock acquired in \$(echo \"\$lock_acquired - $get_start_time\" | bc 2>/dev/null || echo '?')s\" >&2
 
         # Re-check inside lock: another job may have finished extraction while we waited
         if [ -d '${local_dest}/datadir' ]; then
@@ -685,13 +685,13 @@ cmd_get() {
         mkdir -p '${local_dest}'
 
         tar_size=\$(stat -c %s '$LOCAL_TAR_FILE' 2>/dev/null || echo 0)
-        tar_size_gb=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / 1024\" | bc)
+        tar_size_gb=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / 1024\" | bc 2>/dev/null || echo '?')
         echo \"[cache-manager] Extracting (\${tar_size_gb}GB) to: $local_dest\" >&2
 
         extract_start=\$(date +%s.%N)
         tar xf '$LOCAL_TAR_FILE' -C '$local_dest'
         extract_end=\$(date +%s.%N)
-        extract_duration=\$(echo \"\$extract_end - \$extract_start\" | bc)
+        extract_duration=\$(echo \"\$extract_end - \$extract_start\" | bc 2>/dev/null || echo '?')
         throughput=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / \$extract_duration\" | bc 2>/dev/null || echo '?')
         echo \"[cache-manager] Extraction completed in \${extract_duration}s (\${throughput} MB/s)\" >&2
     "; then
@@ -822,7 +822,7 @@ cmd_put() {
 
         if ! _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$dest_lock" -c "
             lock_acquired=\$(date +%s.%N)
-            echo \"[cache-manager] Exclusive lock acquired in \$(echo \"\$lock_acquired - $copy_start\" | bc)s\" >&2
+            echo \"[cache-manager] Exclusive lock acquired in \$(echo \"\$lock_acquired - $copy_start\" | bc 2>/dev/null || echo '?')s\" >&2
 
             # Re-check inside lock: another job may have finished the copy while we waited
             if [ -d '${local_source}/datadir/haf_db_store/pgdata' ]; then
@@ -853,7 +853,7 @@ cmd_put() {
         fi
 
         local copy_end=$(date +%s.%N)
-        local copy_duration=$(echo "$copy_end - $copy_start" | bc)
+        local copy_duration=$(echo "$copy_end - $copy_start" | bc 2>/dev/null || echo "?")
         _log "Local cache copy completed in ${copy_duration}s"
     fi
 
@@ -943,24 +943,41 @@ cmd_put() {
         tar_excludes=$(_build_blockchain_tar_excludes "$local_source")
     fi
 
-    # Step 1: Create local tar (always, this is our primary cache)
+    # Step 1: Create local tar with exclusive lock to prevent race conditions
+    # Race condition: two concurrent jobs can both pass the above check, then collide
+    # on the .tmp file. Solution: use flock with double-check inside the lock.
     _log "Creating local cache: $LOCAL_TAR_FILE"
     mkdir -p "$(dirname "$LOCAL_TAR_FILE")"
 
-    local tar_start=$(date +%s.%N)
+    local tar_lock="${LOCAL_TAR_FILE}.lock"
+    _touch_lock "$tar_lock"
+
+    local tar_start=$(date +%s.%N 2>/dev/null || date +%s)
     # shellcheck disable=SC2086
-    if ! tar cf "$LOCAL_TAR_FILE.tmp" $tar_excludes -C "$local_source" .; then
+    if ! _flock_with_timeout 600 -x "$tar_lock" -c "
+        # Double-check inside lock: another job may have finished while we waited
+        if [ -f '$LOCAL_TAR_FILE' ]; then
+            echo '[cache-manager] Cache created by concurrent job while waiting for lock' >&2
+            exit 0
+        fi
+
+        # Create tar with atomic rename
+        tar cf '$LOCAL_TAR_FILE.tmp' $tar_excludes -C '$local_source' . || exit 1
+        mv '$LOCAL_TAR_FILE.tmp' '$LOCAL_TAR_FILE' || exit 1
+    "; then
         _error "Failed to create local tar"
         rm -f "$LOCAL_TAR_FILE.tmp"
         return 1
     fi
-    mv "$LOCAL_TAR_FILE.tmp" "$LOCAL_TAR_FILE"
 
-    local tar_end=$(date +%s.%N)
-    local tar_duration=$(echo "$tar_end - $tar_start" | bc)
-    local tar_size=$(stat -c %s "$LOCAL_TAR_FILE" 2>/dev/null || echo 0)
-    local tar_size_gb=$(echo "scale=2; $tar_size / 1024 / 1024 / 1024" | bc)
-    _log "Local tar created: ${tar_size_gb}GB in ${tar_duration}s"
+    # Log completion (if tar exists - we may have created it or another job did)
+    if [[ -f "$LOCAL_TAR_FILE" ]]; then
+        local tar_end=$(date +%s.%N 2>/dev/null || date +%s)
+        local tar_duration=$(echo "$tar_end - $tar_start" | bc 2>/dev/null || echo "?")
+        local tar_size=$(stat -c %s "$LOCAL_TAR_FILE" 2>/dev/null || echo 0)
+        local tar_size_gb=$(echo "scale=2; $tar_size / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "?")
+        _log "Local tar ready: ${tar_size_gb}GB (${tar_duration}s)"
+    fi
 
     # Step 2: Push to NFS (if available)
     if ! _nfs_available; then
@@ -1000,7 +1017,7 @@ LOCKINFO
         mv '$NFS_TAR_FILE.tmp' '$NFS_TAR_FILE'
         copy_end=\$(date +%s.%N)
 
-        copy_duration=\$(echo \"\$copy_end - \$copy_start\" | bc)
+        copy_duration=\$(echo \"\$copy_end - \$copy_start\" | bc 2>/dev/null || echo '?')
         throughput=\$(echo \"scale=2; $tar_size / 1024 / 1024 / \$copy_duration\" | bc 2>/dev/null || echo '?')
         echo \"[cache-manager] NFS push completed in \${copy_duration}s (\${throughput} MB/s)\" >&2
 
