@@ -603,7 +603,7 @@ build_emsdk_image:
   rules:
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH # for branch main run if there were changes on the branch
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH # for branch `develop` run if there were changes on the branch
       exists:
         - Dockerfile.emscripten
       changes:
@@ -612,7 +612,8 @@ build_emsdk_image:
           - scripts/bash/npm-helpers/*
           - scripts/bash/emscripten/*
           - scripts/bash/emscripten/**/*
-    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH # for other branches compare to develop and run if there are differences
+          - scripts/bash/build_emscripten_image.sh
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH # for other branches compare to `develop` and run if there are differences
       exists:
         - Dockerfile.emscripten
       changes:
@@ -621,6 +622,7 @@ build_emsdk_image:
           - scripts/bash/npm-helpers/*
           - scripts/bash/emscripten/*
           - scripts/bash/emscripten/**/*
+          - scripts/bash/build_emscripten_image.sh
         compare_to: 'refs/heads/develop'
 
 build_psql_image:
