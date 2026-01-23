@@ -32,10 +32,11 @@ RUN <<EOF
   # Install Python packages needed by HAF app tests
   pip3 install --no-cache-dir psycopg2-binary
 
-  # Create hived user for compatibility (ci-base-image has hived_admin)
+  # Create hived user for compatibility with NFS cache permissions
+  # (ci-base-image has hived_admin, but HAF app CI expects hived user)
   id hived 2>/dev/null || useradd -ms /bin/bash hived
   echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 EOF
 
-USER hived_admin
+USER hived
 CMD ["/bin/bash"]

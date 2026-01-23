@@ -29,7 +29,7 @@ variable "CI_BASE_IMAGE_PY314_VERSION" {
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
-  default = "2.1"
+  default = "2.2"
 }
 
 variable "PAAS_PSQL_VERSION" {
