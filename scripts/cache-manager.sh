@@ -97,6 +97,16 @@ _touch_lock() {
     fi
 }
 
+# Create cache type directory with world-writable permissions
+# This ensures different container UIDs can write to the shared NFS cache
+_ensure_cache_dir() {
+    local dir="$1"
+    mkdir -p "$dir" 2>/dev/null || sudo mkdir -p "$dir" 2>/dev/null || true
+    # Make directory world-writable so any UID can create files
+    # Try without sudo first, then with sudo if that fails
+    chmod 777 "$dir" 2>/dev/null || sudo chmod 777 "$dir" 2>/dev/null || true
+}
+
 # Write lock holder info for debugging stale locks
 _write_lock_info() {
     local lockfile="$1"
@@ -911,7 +921,7 @@ cmd_put() {
 
         # Create tar archive (local I/O on NFS host, still fast)
         _log "Storing cache on NFS host: $NFS_TAR_FILE"
-        mkdir -p "$(dirname "$NFS_TAR_FILE")"
+        _ensure_cache_dir "$(dirname "$NFS_TAR_FILE")"
         _touch_lock "$NFS_TAR_LOCK"
 
         # Check for stale locks before attempting to acquire
@@ -1005,7 +1015,7 @@ cmd_put() {
         return 0
     fi
 
-    mkdir -p "$(dirname "$NFS_TAR_FILE")"
+    _ensure_cache_dir "$(dirname "$NFS_TAR_FILE")"
     _touch_lock "$NFS_TAR_LOCK"
 
     # Check for stale locks before attempting to acquire
