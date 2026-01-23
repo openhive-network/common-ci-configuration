@@ -1,0 +1,79 @@
+# =============================================================================
+# Submodule Reference Verification Templates
+# =============================================================================
+# Templates for verifying that GitLab CI include refs match submodule commits.
+#
+# Usage:
+#   include:
+#     - project: 'hive/common-ci-configuration'
+#       ref: <commit>
+#       file:
+#         - '/templates/verify_submodule_ref.gitlab-ci.yml'
+#
+#   verify_my_submodule:
+#     extends: .verify_submodule_ref_template
+#     variables:
+#       SUBMODULE_PATH: "my-submodule"
+#       PROJECT_PATTERN: "hive/my-project"
+#
+# For multiple submodules, create multiple jobs or use .verify_multiple_refs_template:
+#
+#   verify_all_refs:
+#     extends: .verify_multiple_refs_template
+#     variables:
+#       VERIFY_REFS: "hive:hive/hive ts/npm-common-config:hive/common-ci-configuration"
+#
+
+# -----------------------------------------------------------------------------
+# Single submodule verification template
+# -----------------------------------------------------------------------------
+# Variables:
+#   SUBMODULE_PATH      - Path to submodule directory (e.g., "hive")
+#   PROJECT_PATTERN     - Project pattern in CI include (e.g., "hive/hive")
+#   GITLAB_CI_FILE      - Path to GitLab CI file (default: ".gitlab-ci.yml")
+#   VERIFY_SCRIPT_REF   - Branch/ref to fetch script from (default: "develop")
+#
+.verify_submodule_ref_template:
+  stage: static_code_analysis
+  variables:
+    GITLAB_CI_FILE: ".gitlab-ci.yml"
+    VERIFY_SCRIPT_REF: "develop"
+  script:
+    - |
+      SCRIPT_URL="${CI_SERVER_URL}/hive/common-ci-configuration/-/raw/${VERIFY_SCRIPT_REF}/scripts/bash/verify_submodule_ref.sh"
+      curl -fsSL "${SCRIPT_URL}" -o /tmp/verify_submodule_ref.sh
+      chmod +x /tmp/verify_submodule_ref.sh
+      /tmp/verify_submodule_ref.sh "${SUBMODULE_PATH}" "${GITLAB_CI_FILE}" "${PROJECT_PATTERN}"
+  tags:
+    - public-runner-docker
+
+# -----------------------------------------------------------------------------
+# Multiple submodules verification template
+# -----------------------------------------------------------------------------
+# Variables:
+#   VERIFY_REFS         - Space-separated list of "submodule_path:project_pattern" pairs
+#   GITLAB_CI_FILE      - Path to GitLab CI file (default: ".gitlab-ci.yml")
+#   VERIFY_SCRIPT_REF   - Branch/ref to fetch script from (default: "develop")
+#
+# Example:
+#   VERIFY_REFS: "hive:hive/hive ts/npm-common-config:hive/common-ci-configuration"
+#
+.verify_multiple_refs_template:
+  stage: static_code_analysis
+  variables:
+    GITLAB_CI_FILE: ".gitlab-ci.yml"
+    VERIFY_SCRIPT_REF: "develop"
+  script:
+    - |
+      SCRIPT_URL="${CI_SERVER_URL}/hive/common-ci-configuration/-/raw/${VERIFY_SCRIPT_REF}/scripts/bash/verify_submodule_ref.sh"
+      curl -fsSL "${SCRIPT_URL}" -o /tmp/verify_submodule_ref.sh
+      chmod +x /tmp/verify_submodule_ref.sh
+
+      for ref_pair in ${VERIFY_REFS}; do
+        SUBMODULE_PATH="${ref_pair%%:*}"
+        PROJECT_PATTERN="${ref_pair##*:}"
+        echo "Verifying ${SUBMODULE_PATH} against ${PROJECT_PATTERN}..."
+        /tmp/verify_submodule_ref.sh "${SUBMODULE_PATH}" "${GITLAB_CI_FILE}" "${PROJECT_PATTERN}"
+      done
+  tags:
+    - public-runner-docker
