@@ -1,0 +1,174 @@
+# Hived Image Lookup Template
+#
+# Provides a reusable template for finding pre-built hived images from the hive repository.
+# Hive builds images on every develop commit and publishes them to the GitLab registry.
+#
+# Include this file in your .gitlab-ci.yml:
+#   include:
+#     - project: 'hive/common-ci-configuration'
+#       ref: develop
+#       file: '/templates/hived_image.gitlab-ci.yml'
+#
+# This template extends .find_upstream_image from source_change_detection.gitlab-ci.yml
+# to provide hive-specific configuration and source pattern fetching.
+
+include:
+  - local: '/templates/source_change_detection.gitlab-ci.yml'
+
+# =============================================================================
+# HIVED IMAGE LOOKUP TEMPLATE
+# =============================================================================
+# Parameterizable template for finding pre-built hived images.
+# Hive builds images on every develop commit and publishes them to:
+#   - Mainnet:  registry.gitlab.syncad.com/hive/hive:<commit>
+#   - Testnet:  registry.gitlab.syncad.com/hive/hive/testnet:<commit>
+#
+# Configuration Variables:
+#   HIVED_IMAGE_TYPE    - Image type: "" (mainnet) or "testnet"
+#   HIVED_VAR_PREFIX    - Output variable prefix (default: "HIVED" for mainnet)
+#   HIVED_PATTERNS_REF  - Git ref for fetching source patterns (default: "develop")
+#   HIVED_OVERRIDE_TAG  - Skip dynamic lookup and use this specific tag/commit
+#
+# Usage - Mainnet (default):
+#   find_hived_image:
+#     extends: .find_hived_image
+#
+# Usage - Testnet:
+#   find_hived_testnet_image:
+#     extends: .find_hived_image
+#     variables:
+#       HIVED_IMAGE_TYPE: "testnet"
+#       HIVED_VAR_PREFIX: "HIVED_TESTNET"
+#
+# Usage - Override (specific tag):
+#   find_hived_image:
+#     extends: .find_hived_image
+#     variables:
+#       HIVED_OVERRIDE_TAG: "v1.27.0"
+#
+# Output Variables (in dotenv artifact):
+#   ${HIVED_VAR_PREFIX}_UPSTREAM_IMAGE  - Full image path with tag
+#   ${HIVED_VAR_PREFIX}_UPSTREAM_COMMIT - Hive commit SHA
+#   ${HIVED_VAR_PREFIX}_UPSTREAM_TAG    - Image tag (short commit)
+# =============================================================================
+.find_hived_image:
+  extends: .find_upstream_image
+  stage: .pre
+  variables:
+    UPSTREAM_REPO_URL: "https://gitlab.syncad.com/hive/hive.git"
+    UPSTREAM_REGISTRY: "registry.gitlab.syncad.com/hive/hive"
+    UPSTREAM_BRANCH: "develop"
+    # Configurable parameters
+    HIVED_IMAGE_TYPE: ""        # "" (mainnet) or "testnet"
+    HIVED_VAR_PREFIX: "HIVED"   # Output variable prefix
+    HIVED_PATTERNS_REF: "develop"
+    HIVED_OVERRIDE_TAG: ""      # Set to skip dynamic lookup
+  before_script:
+    # Check for override - skip dynamic lookup if specified
+    - |
+      if [[ -n "$HIVED_OVERRIDE_TAG" ]]; then
+        echo "Using override tag: $HIVED_OVERRIDE_TAG (skipping pattern fetch)"
+        export UPSTREAM_OVERRIDE_TAG="$HIVED_OVERRIDE_TAG"
+      else
+        # Fetch source patterns from hive's single source of truth
+        PATTERNS_URL="https://gitlab.syncad.com/hive/hive/-/raw/${HIVED_PATTERNS_REF}/scripts/ci-helpers/source-patterns.sh"
+        echo "Fetching hive source patterns from: $PATTERNS_URL"
+        if UPSTREAM_PATTERNS=$(curl -sf "$PATTERNS_URL" | bash); then
+          echo "Loaded patterns: $UPSTREAM_PATTERNS"
+          export UPSTREAM_PATTERNS
+        else
+          echo "ERROR: Could not fetch source-patterns.sh from hive"
+          exit 1
+        fi
+      fi
+    # Set UPSTREAM_IMAGE based on HIVED_IMAGE_TYPE
+    - |
+      if [[ -n "$HIVED_IMAGE_TYPE" ]]; then
+        export UPSTREAM_IMAGE="$HIVED_IMAGE_TYPE"
+        echo "Looking for hived $HIVED_IMAGE_TYPE image"
+      else
+        echo "Looking for hived mainnet image"
+      fi
+    # Set output filename based on image type
+    - |
+      if [[ -n "$HIVED_IMAGE_TYPE" ]]; then
+        export UPSTREAM_OUTPUT="hived_${HIVED_IMAGE_TYPE}_image.env"
+      else
+        export UPSTREAM_OUTPUT="hived_image.env"
+      fi
+  script:
+    - !reference [.find_upstream_image, script]
+    # Rename UPSTREAM_* to ${HIVED_VAR_PREFIX}_UPSTREAM_*
+    - |
+      if [ -f "$UPSTREAM_OUTPUT" ]; then
+        sed -i "s/^UPSTREAM_/${HIVED_VAR_PREFIX}_UPSTREAM_/" "$UPSTREAM_OUTPUT"
+        echo "Variables in $UPSTREAM_OUTPUT:"
+        cat "$UPSTREAM_OUTPUT"
+      fi
+  artifacts:
+    reports:
+      dotenv: hived_image.env
+    expire_in: 1 day
+  tags:
+    - public-runner-docker
+
+# =============================================================================
+# CONVENIENCE TEMPLATES FOR COMMON USE CASES
+# =============================================================================
+# The following templates pre-configure .find_hived_image for the most common
+# scenarios: mainnet and testnet image lookups. Downstream projects can extend
+# these templates and only need to override project-specific variables like
+# HIVED_OVERRIDE_TAG and HIVED_PATTERNS_REF.
+#
+# Example usage in downstream project (e.g., clive):
+#
+#   find_hived_image:
+#     extends: .find_mainnet_hived_image_template
+#     variables:
+#       HIVED_PATTERNS_REF: "develop"  # Optional: defaults to develop
+#
+#   find_hived_testnet_image:
+#     extends: .find_testnet_hived_image_template
+#     variables:
+#       HIVED_OVERRIDE_TAG: "v1.27.0"  # Optional: use specific tag
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Mainnet Hived Image Template
+# -----------------------------------------------------------------------------
+# Pre-configured template for finding mainnet hived images.
+# Outputs variables prefixed with HIVED_UPSTREAM_* to hived_image.env
+#
+# Downstream projects only need to override:
+#   - HIVED_PATTERNS_REF: Git ref for source patterns (default: develop)
+#   - HIVED_OVERRIDE_TAG: Skip lookup and use specific tag (optional)
+# -----------------------------------------------------------------------------
+.find_mainnet_hived_image_template:
+  extends: .find_hived_image
+  variables:
+    HIVED_IMAGE_TYPE: ""
+    HIVED_VAR_PREFIX: "HIVED"
+  artifacts:
+    reports:
+      dotenv: hived_image.env
+    expire_in: 1 day
+
+# -----------------------------------------------------------------------------
+# Testnet Hived Image Template
+# -----------------------------------------------------------------------------
+# Pre-configured template for finding testnet hived images.
+# Outputs variables prefixed with HIVED_TESTNET_UPSTREAM_* to hived_testnet_image.env
+#
+# Downstream projects only need to override:
+#   - HIVED_PATTERNS_REF: Git ref for source patterns (default: develop)
+#   - HIVED_OVERRIDE_TAG: Skip lookup and use specific tag (optional)
+# -----------------------------------------------------------------------------
+.find_testnet_hived_image_template:
+  extends: .find_hived_image
+  variables:
+    HIVED_IMAGE_TYPE: "testnet"
+    HIVED_VAR_PREFIX: "HIVED_TESTNET"
+  artifacts:
+    reports:
+      dotenv: hived_testnet_image.env
+    expire_in: 1 day
