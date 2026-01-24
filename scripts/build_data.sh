@@ -161,6 +161,11 @@ WAIT_INTERVAL=60
 WAITED=0
 LOCK_FILE="$DATA_CACHE/replay_running"
 
+# Register interest in this cache directory
+# This prevents other jobs from cleaning it up while we're waiting or using it
+mkdir -p "$DATA_CACHE/consumers"
+touch "$DATA_CACHE/consumers/${CI_JOB_ID:-$$}"
+
 while [[ -f "$LOCK_FILE" ]]; do
   # Check for stale lock (older than 2 hours)
   LOCK_AGE=$(($(date +%s) - $(stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0)))
@@ -189,6 +194,8 @@ if [[ -f "$DATA_CACHE/datadir/status" ]]; then
     echo "$status"
     if [ "$status" -eq 0 ]; then
         echo "Previous replay datadir is valid, exiting"
+        # Touch our marker to show we're actively using the data
+        touch "$DATA_CACHE/consumers/${CI_JOB_ID:-$$}"
         exit 0
     fi
 fi
