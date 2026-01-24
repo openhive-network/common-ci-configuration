@@ -137,6 +137,17 @@ The `templates/haf_app_testing.gitlab-ci.yml` provides composable building block
 
 ### Available Templates
 
+**HAF Image Lookup:**
+- `.find_haf_image` - Finds pre-built HAF images, outputs HAF_UPSTREAM_*, HAF_IMAGE_NAME, HAF_COMMIT
+
+**App Configuration:**
+- `.haf_app_config_variables` - Derives APP_SYNC_CACHE_TYPE, APP_CACHE_KEY from HAF_APP_NAME
+
+**Skip Pattern Presets:**
+- `.haf_app_skip_patterns_standard` - Standard patterns (tests/, docs/, *.md, etc.)
+- `.haf_app_skip_patterns_with_gui` - Standard + gui/ directory
+- `.haf_app_skip_patterns_with_postgrest_only` - Standard + postgrest/ directory
+
 **Change Detection:**
 - `.haf_app_detect_changes` - Detects if only tests/docs changed, enabling skip of heavy sync jobs
 
