@@ -220,6 +220,10 @@ then
         # Use shared lock (-s) since source data is immutable after extraction - allows parallel reads
         flock -s "${DATA_SOURCE}/datadir" sudo -En cp -r --no-preserve=mode,ownership "${DATA_SOURCE}/datadir"/*  "${DATADIR}"
 
+        # Ensure all writes are flushed to disk before PostgreSQL starts
+        # Prevents DataCorrupted errors from unflushed write buffers
+        sync
+
         # Fix pg_tblspc symlinks after copying to DATADIR
         fix_pg_tblspc_symlinks "${DATADIR}"
 
@@ -259,6 +263,7 @@ then
             # Use cp without -p to avoid "Operation not supported" errors when copying from NFS
             # Use shared lock (-s) since source data is immutable after extraction - allows parallel reads
             flock -s "${DATA_SOURCE}/datadir" sudo -En cp -r --no-preserve=mode,ownership "${DATA_SOURCE}/shm_dir"/* "${SHM_DIR}"
+            sync
             sudo chmod -R a+w "${SHM_DIR}"
             ls -al "${SHM_DIR}"
         else
