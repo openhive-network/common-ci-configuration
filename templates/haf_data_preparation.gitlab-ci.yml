@@ -246,14 +246,69 @@
     - cp "${DATA_CACHE_DIR}/datadir/docker_entrypoint.log" "${CI_PROJECT_DIR}/docker_entrypoint.log" 2>/dev/null || true
     - ls -la "${DATA_CACHE_DIR}/datadir/"
   after_script:
-    - rm "${DATA_CACHE_DIR}/replay_running" -f
     - |
-      # Clean up extracted directory if tar cache exists
-      # The tar file is the actual cache - directory is just a working copy
+      # Remove our consumer registration
+      rm -f "${DATA_CACHE_DIR}/consumers/${CI_JOB_ID}" 2>/dev/null || true
+
+      # Function to check if a job is still alive via GitLab API
+      job_is_alive() {
+        local job_id="$1"
+        local marker_file="$2"
+        local status
+
+        # First check: Is the marker older than 4 hours? (fallback for API failures)
+        local marker_age=$(($(date +%s) - $(stat -c %Y "$marker_file" 2>/dev/null || echo 0)))
+        if [[ $marker_age -gt 14400 ]]; then
+          echo "Marker $job_id is stale (age: ${marker_age}s > 4h)"
+          return 1
+        fi
+
+        # Primary check: Query GitLab API for job status
+        # Active statuses: created, pending, running
+        status=$(curl -sf -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/jobs/${job_id}" 2>/dev/null \
+          | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+
+        case "$status" in
+          created|pending|running) return 0 ;;  # Still alive
+          success|failed|canceled|skipped) return 1 ;;  # Definitely finished
+          *) return 0 ;;  # Unknown/API error - assume alive to be safe
+        esac
+      }
+
+      # Remove stale consumer markers (jobs that are no longer running)
+      if [[ -d "${DATA_CACHE_DIR}/consumers" ]]; then
+        for marker in "${DATA_CACHE_DIR}/consumers"/*; do
+          [[ -f "$marker" ]] || continue
+          consumer_job_id=$(basename "$marker")
+          # Skip our own marker (already removed above)
+          [[ "$consumer_job_id" == "$CI_JOB_ID" ]] && continue
+          # Check if job is still alive
+          if ! job_is_alive "$consumer_job_id" "$marker"; then
+            echo "Removing stale consumer marker: $consumer_job_id (job no longer running)"
+            rm -f "$marker"
+          fi
+        done
+      fi
+
+      # Remove lock file
+      rm -f "${DATA_CACHE_DIR}/replay_running" 2>/dev/null || true
+
+      # Only cleanup extracted directory if:
+      # 1. A tar cache exists (data is preserved)
+      # 2. No other jobs are waiting for or using this data
       CACHE_TAR="/cache/haf_${HAF_COMMIT}.tar"
       if [[ -f "$CACHE_TAR" ]] && [[ -d "${DATA_CACHE_DIR}" ]]; then
-        echo "Cleaning up extracted cache directory: ${DATA_CACHE_DIR}"
-        sudo rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || true
+        # Check if any consumers remain
+        CONSUMER_COUNT=$(find "${DATA_CACHE_DIR}/consumers" -type f 2>/dev/null | wc -l)
+        if [[ "$CONSUMER_COUNT" -eq 0 ]]; then
+          echo "No consumers remaining, cleaning up: ${DATA_CACHE_DIR}"
+          rmdir "${DATA_CACHE_DIR}/consumers" 2>/dev/null || true
+          sudo rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || true
+        else
+          echo "Skipping cleanup: $CONSUMER_COUNT active consumer(s) still registered"
+          ls -la "${DATA_CACHE_DIR}/consumers/" 2>/dev/null || true
+        fi
       fi
   artifacts:
     reports:
@@ -406,14 +461,69 @@
     - cp "${DATA_CACHE_DIR}/datadir/docker_entrypoint.log" "${CI_PROJECT_DIR}/docker_entrypoint.log" 2>/dev/null || true
     - ls -la "${DATA_CACHE_DIR}/datadir/"
   after_script:
-    - rm "${DATA_CACHE_DIR}/replay_running" -f
     - |
-      # Clean up extracted directory if tar cache exists
-      # The tar file is the actual cache - directory is just a working copy
+      # Remove our consumer registration
+      rm -f "${DATA_CACHE_DIR}/consumers/${CI_JOB_ID}" 2>/dev/null || true
+
+      # Function to check if a job is still alive via GitLab API
+      job_is_alive() {
+        local job_id="$1"
+        local marker_file="$2"
+        local status
+
+        # First check: Is the marker older than 4 hours? (fallback for API failures)
+        local marker_age=$(($(date +%s) - $(stat -c %Y "$marker_file" 2>/dev/null || echo 0)))
+        if [[ $marker_age -gt 14400 ]]; then
+          echo "Marker $job_id is stale (age: ${marker_age}s > 4h)"
+          return 1
+        fi
+
+        # Primary check: Query GitLab API for job status
+        # Active statuses: created, pending, running
+        status=$(curl -sf -H "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/jobs/${job_id}" 2>/dev/null \
+          | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+
+        case "$status" in
+          created|pending|running) return 0 ;;  # Still alive
+          success|failed|canceled|skipped) return 1 ;;  # Definitely finished
+          *) return 0 ;;  # Unknown/API error - assume alive to be safe
+        esac
+      }
+
+      # Remove stale consumer markers (jobs that are no longer running)
+      if [[ -d "${DATA_CACHE_DIR}/consumers" ]]; then
+        for marker in "${DATA_CACHE_DIR}/consumers"/*; do
+          [[ -f "$marker" ]] || continue
+          consumer_job_id=$(basename "$marker")
+          # Skip our own marker (already removed above)
+          [[ "$consumer_job_id" == "$CI_JOB_ID" ]] && continue
+          # Check if job is still alive
+          if ! job_is_alive "$consumer_job_id" "$marker"; then
+            echo "Removing stale consumer marker: $consumer_job_id (job no longer running)"
+            rm -f "$marker"
+          fi
+        done
+      fi
+
+      # Remove lock file
+      rm -f "${DATA_CACHE_DIR}/replay_running" 2>/dev/null || true
+
+      # Only cleanup extracted directory if:
+      # 1. A tar cache exists (data is preserved)
+      # 2. No other jobs are waiting for or using this data
       CACHE_TAR="/cache/hive_${HIVE_COMMIT}.tar"
       if [[ -f "$CACHE_TAR" ]] && [[ -d "${DATA_CACHE_DIR}" ]]; then
-        echo "Cleaning up extracted cache directory: ${DATA_CACHE_DIR}"
-        sudo rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || true
+        # Check if any consumers remain
+        CONSUMER_COUNT=$(find "${DATA_CACHE_DIR}/consumers" -type f 2>/dev/null | wc -l)
+        if [[ "$CONSUMER_COUNT" -eq 0 ]]; then
+          echo "No consumers remaining, cleaning up: ${DATA_CACHE_DIR}"
+          rmdir "${DATA_CACHE_DIR}/consumers" 2>/dev/null || true
+          sudo rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || rm -rf "${DATA_CACHE_DIR}" 2>/dev/null || true
+        else
+          echo "Skipping cleanup: $CONSUMER_COUNT active consumer(s) still registered"
+          ls -la "${DATA_CACHE_DIR}/consumers/" 2>/dev/null || true
+        fi
       fi
   artifacts:
     reports:
