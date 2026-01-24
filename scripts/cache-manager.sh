@@ -10,7 +10,7 @@
 #   cache-manager.sh put <cache-type> <cache-key> <local-source>
 #   cache-manager.sh cleanup <cache-type> [--max-size-gb N] [--max-age-days N]
 #   cache-manager.sh cleanup-local [--max-size-gb N]   # Clean local cache only
-#   cache-manager.sh cleanup-orphans [--max-age-days N] [--dry-run]  # Clean orphan dirs
+#   cache-manager.sh cleanup-orphans [--max-age-days N] [--dry-run]  # Clean stale dirs (orphans + old extractions)
 #   cache-manager.sh list <cache-type>
 #   cache-manager.sh status
 #   cache-manager.sh is-fast-builder    # Check if current host is a fast builder
@@ -1173,8 +1173,10 @@ cmd_cleanup() {
 
             local entry_size=$(stat -c %s "$entry_tar" 2>/dev/null || echo 0)
             _log "Removing: $entry (${entry_size} bytes)"
-            rm -f "$entry_tar" "$entry_tar_lock" "${entry_tar_lock}.info"
-            rm -rf "$entry_dir"  # Remove metadata directory if exists
+            # Use sudo to remove files owned by different container UIDs
+            sudo rm -f "$entry_tar" "$entry_tar_lock" "${entry_tar_lock}.info" 2>/dev/null || \
+                rm -f "$entry_tar" "$entry_tar_lock" "${entry_tar_lock}.info" 2>/dev/null || true
+            sudo rm -rf "$entry_dir" 2>/dev/null || rm -rf "$entry_dir" 2>/dev/null || true
             total_size=$((total_size - entry_size))
             removed=$((removed + 1))
 
@@ -1276,7 +1278,9 @@ _cleanup_local_cache() {
         local filename=$(basename "$tarfile")
 
         _log "Removing oldest local cache: $filename (${file_size_gb}GB)"
-        rm -f "$tarfile" "${tarfile}.lock" "${tarfile}.copylock"
+        # Use sudo to remove files owned by different container UIDs (4000, 2000, etc.)
+        sudo rm -f "$tarfile" "${tarfile}.lock" "${tarfile}.copylock" 2>/dev/null || \
+            rm -f "$tarfile" "${tarfile}.lock" "${tarfile}.copylock" 2>/dev/null || true
         total_size=$((total_size - file_size))
         removed=$((removed + 1))
 
@@ -1291,9 +1295,11 @@ _cleanup_local_cache() {
     _log "Local cleanup complete: removed $removed files, new size: ${final_size_gb}GB"
 }
 
-# Clean up orphaned directories in local cache
-# Orphans are directories without corresponding .tar files that are older than max_age_days.
-# These are created when CI jobs extract caches but fail/cancel before cleanup runs.
+# Clean up stale directories in local cache
+# Removes directories older than max_age_days. This includes:
+#   - Orphan directories (no corresponding tar file)
+#   - Stale extracted directories (have tar file but are old working copies)
+# The tar file is the source of truth; directories are just working copies.
 # Returns number of directories removed (or that would be removed in dry-run mode).
 _cleanup_orphan_directories() {
     local max_age_days="${1:-7}"
@@ -1311,7 +1317,7 @@ _cleanup_orphan_directories() {
     local real_cache_path
     real_cache_path=$(readlink -f "$cache_path")
 
-    _log "Scanning for orphan directories in: $real_cache_path (older than ${max_age_days} days)"
+    _log "Scanning for stale directories in: $real_cache_path (older than ${max_age_days} days)"
 
     # Find directories older than max_age_days
     # Using -mtime +N finds files modified MORE than N days ago
@@ -1323,41 +1329,33 @@ _cleanup_orphan_directories() {
 
         # Skip known non-cache directories
         case "$base" in
-            blockchain|block_log_5m|logs|tmp|.*)
+            blockchain|block_log_5m|block_log_5m_mirrornet|logs|tmp|.*)
                 continue
                 ;;
         esac
 
-        # Skip if corresponding tar file exists (this is a valid extracted cache)
-        # Check both local naming (type_key.tar) and the directory name as-is
-        if [[ -f "${real_cache_path}/${base}.tar" ]]; then
-            continue
-        fi
+        # Note: We intentionally do NOT skip directories with tar files.
+        # The tar file is the source of truth. Old extracted directories should
+        # be cleaned up regardless - they can be re-extracted from the tar if needed.
+        # This is critical for preventing disk space exhaustion on builders.
 
-        # For directories like "haf_filtered_12345_filtered", check if tar exists
-        # Also check NFS for haf_ prefixed caches
-        local skip=false
-
-        # Check if any matching tar file exists
-        for pattern in "${real_cache_path}/${base}.tar" "${CACHE_NFS_PATH}/haf/${base}.tar" "${CACHE_NFS_PATH}/haf_sync/${base}.tar"; do
-            if [[ -f "$pattern" ]]; then
-                skip=true
-                break
-            fi
-        done
-        [[ "$skip" == "true" ]] && continue
-
-        # Get directory size
+        # Get directory size (use sudo to read postgres-owned subdirectories)
         local dir_size
-        dir_size=$(du -sb "$dir" 2>/dev/null | awk '{print $1}') || dir_size=0
+        dir_size=$(sudo du -sb "$dir" 2>/dev/null | awk '{print $1}') || dir_size=0
         local dir_size_gb
         dir_size_gb=$(echo "scale=2; ${dir_size:-0} / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "?")
 
+        # Check if tar file exists (for logging purposes)
+        local has_tar="orphan"
+        if [[ -f "${real_cache_path}/${base}.tar" ]]; then
+            has_tar="stale extraction"
+        fi
+
         if [[ "$dry_run" == "true" ]]; then
-            echo "Would remove orphan directory: $base (${dir_size_gb}GB)" >&2
+            echo "Would remove ${has_tar}: $base (${dir_size_gb}GB)" >&2
         else
-            _log "Removing orphan directory: $base (${dir_size_gb}GB)"
-            # Use sudo for directories that may be owned by postgres (UID 105)
+            _log "Removing ${has_tar}: $base (${dir_size_gb}GB)"
+            # Use sudo for directories that may be owned by postgres (UID 105) or other container UIDs
             if sudo rm -rf "$dir" 2>/dev/null || rm -rf "$dir" 2>/dev/null; then
                 _log "Removed: $base"
             else
@@ -1370,9 +1368,9 @@ _cleanup_orphan_directories() {
     done < <(find "$real_cache_path" -maxdepth 1 -type d -mtime "+${max_age_days}" 2>/dev/null)
 
     if [[ "$dry_run" == "true" ]]; then
-        echo "Would remove $removed orphan directories" >&2
+        echo "Would remove $removed stale directories" >&2
     else
-        _log "Removed $removed orphan directories"
+        _log "Removed $removed stale directories"
     fi
 
     # Return count on stdout (for capture by caller)
@@ -1399,7 +1397,8 @@ cmd_cleanup_local() {
     _cleanup_local_cache "$max_size_gb"
 }
 
-# Command wrapper for orphan directory cleanup
+# Command wrapper for stale directory cleanup (renamed from orphan cleanup)
+# Removes both orphan directories AND old extracted directories with tar files.
 # Usage: cache-manager.sh cleanup-orphans [--max-age-days N] [--dry-run]
 cmd_cleanup_orphans() {
     local max_age_days=7
@@ -1426,16 +1425,16 @@ cmd_cleanup_orphans() {
     local real_cache_path
     real_cache_path=$(readlink -f "$CACHE_LOCAL_PATH" 2>/dev/null || echo "$CACHE_LOCAL_PATH")
 
-    echo "=== Orphan Directory Cleanup ==="
+    echo "=== Stale Directory Cleanup ==="
     echo "Cache path:    $CACHE_LOCAL_PATH"
     [[ "$real_cache_path" != "$CACHE_LOCAL_PATH" ]] && echo "Resolved path: $real_cache_path"
     echo "Max age:       $max_age_days days"
     echo "Dry run:       $dry_run"
     echo ""
 
-    # Get initial size (use resolved path for accurate size)
+    # Get initial size (use sudo to read postgres-owned directories accurately)
     local initial_size
-    initial_size=$(du -sb "$real_cache_path" 2>/dev/null | awk '{print $1}') || initial_size=0
+    initial_size=$(sudo du -sb "$real_cache_path" 2>/dev/null | awk '{print $1}') || initial_size=0
     [[ -z "$initial_size" || ! "$initial_size" =~ ^[0-9]+$ ]] && initial_size=0
     local initial_size_gb
     initial_size_gb=$(echo "scale=2; ${initial_size:-0} / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "?")
@@ -1448,9 +1447,9 @@ cmd_cleanup_orphans() {
     echo ""
 
     if [[ "$dry_run" != "true" ]] && [[ "$removed" -gt 0 ]]; then
-        # Get final size (use resolved path for accurate size)
+        # Get final size (use sudo for accurate size)
         local final_size
-        final_size=$(du -sb "$real_cache_path" 2>/dev/null | awk '{print $1}') || final_size=0
+        final_size=$(sudo du -sb "$real_cache_path" 2>/dev/null | awk '{print $1}') || final_size=0
         [[ -z "$final_size" || ! "$final_size" =~ ^[0-9]+$ ]] && final_size=0
         local final_size_gb
         final_size_gb=$(echo "scale=2; ${final_size:-0} / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "?")
