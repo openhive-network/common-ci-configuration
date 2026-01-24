@@ -611,56 +611,86 @@ cmd_get() {
 
     # 1. Ensure we have a local tar file (copy from NFS if needed)
     # Always extract from local for faster I/O
+    local use_local_cache=false
     if [[ -f "$LOCAL_TAR_FILE" ]]; then
-        _log "Local cache hit: $LOCAL_TAR_FILE"
-    elif [[ "$is_nfs_host" == "true" ]]; then
-        # On NFS host, local and NFS are the same - if local miss, it's a miss
-        _log "NFS host cache miss: $NFS_TAR_FILE"
-        return 1
-    elif ! _nfs_available; then
-        _log "NFS not available, cache miss"
-        return 1
-    elif [[ -f "$NFS_TAR_FILE" ]]; then
-        # Copy NFS tar to local FIRST, then extract from local (faster)
-        # Use locking + atomic rename to prevent concurrent jobs from reading incomplete files
-        _log "NFS cache hit: $NFS_TAR_FILE - copying to local cache"
-        mkdir -p "$(dirname "$LOCAL_TAR_FILE")"
+        # Local tar exists - but validate it's complete before using
+        local tar_lock="${LOCAL_TAR_FILE}.lock"
+        use_local_cache=true
 
-        local local_copy_lock="${LOCAL_TAR_FILE}.copylock"
-        _touch_lock "$local_copy_lock"
-
-        # Try to acquire exclusive lock (wait up to 60s for another job to finish copying)
-        if _flock_with_timeout 60 -x "$local_copy_lock" -c "
-            # Re-check if file appeared while waiting (another job finished copying)
-            if [ -f '$LOCAL_TAR_FILE' ]; then
-                echo '[cache-manager] Local cache appeared while waiting for lock' >&2
-                exit 0
+        # Check 1: Is a concurrent PUT in progress? (exclusive lock held on .lock file)
+        # If the lock file exists and we can't acquire a shared lock instantly, PUT is writing
+        if [[ -f "$tar_lock" ]] && ! _flock_with_timeout 0 -s "$tar_lock" -c "exit 0" 2>/dev/null; then
+            _log "Local tar exists but PUT is in progress (lock held) - will fetch from NFS"
+            use_local_cache=false
+        # Check 2: If NFS tar exists, verify local size matches (detect truncated/stale files)
+        elif [[ "$is_nfs_host" != "true" ]] && _nfs_available && [[ -f "$NFS_TAR_FILE" ]]; then
+            local local_size nfs_size
+            local_size=$(stat -c %s "$LOCAL_TAR_FILE" 2>/dev/null || echo 0)
+            nfs_size=$(stat -c %s "$NFS_TAR_FILE" 2>/dev/null || echo 0)
+            if [[ "$local_size" -lt "$nfs_size" ]]; then
+                _log "Local tar (${local_size} bytes) smaller than NFS (${nfs_size} bytes) - stale/incomplete"
+                _log "Removing stale local tar and fetching from NFS"
+                rm -f "$LOCAL_TAR_FILE"
+                use_local_cache=false
             fi
-
-            copy_start=\$(date +%s.%N)
-            # Use atomic rename: copy to .tmp first, then mv to final name
-            if cp '$NFS_TAR_FILE' '${LOCAL_TAR_FILE}.tmp' && mv '${LOCAL_TAR_FILE}.tmp' '$LOCAL_TAR_FILE'; then
-                copy_end=\$(date +%s.%N)
-                copy_duration=\$(echo \"\$copy_end - \$copy_start\" | bc 2>/dev/null || echo '?')
-                tar_size=\$(stat -c %s '$LOCAL_TAR_FILE' 2>/dev/null || echo 0)
-                throughput=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / \$copy_duration\" | bc 2>/dev/null || echo '?')
-                echo \"[cache-manager] Copied to local cache in \${copy_duration}s (\${throughput} MB/s)\" >&2
-            else
-                echo '[cache-manager] ERROR: Failed to copy NFS tar to local cache' >&2
-                rm -f '${LOCAL_TAR_FILE}.tmp'
-                exit 1
-            fi
-        "; then
-            : # Success - file is now in local cache (either we copied it or another job did)
-        else
-            _error "Lock timeout or copy failed, falling back to direct NFS extraction"
-            rm -f "${LOCAL_TAR_FILE}.tmp"
-            # Fall back to extracting directly from NFS tar
-            LOCAL_TAR_FILE="$NFS_TAR_FILE"
         fi
-    else
-        _log "Cache miss: $NFS_TAR_FILE"
-        return 1
+
+        if [[ "$use_local_cache" == "true" ]]; then
+            _log "Local cache hit: $LOCAL_TAR_FILE"
+        fi
+    fi
+
+    if [[ "$use_local_cache" != "true" ]]; then
+        # No valid local cache - try NFS
+        if [[ "$is_nfs_host" == "true" ]]; then
+            # On NFS host, local and NFS are the same - if local miss, it's a miss
+            _log "NFS host cache miss: $NFS_TAR_FILE"
+            return 1
+        elif ! _nfs_available; then
+            _log "NFS not available, cache miss"
+            return 1
+        elif [[ -f "$NFS_TAR_FILE" ]]; then
+            # Copy NFS tar to local FIRST, then extract from local (faster)
+            # Use locking + atomic rename to prevent concurrent jobs from reading incomplete files
+            _log "NFS cache hit: $NFS_TAR_FILE - copying to local cache"
+            mkdir -p "$(dirname "$LOCAL_TAR_FILE")"
+
+            local local_copy_lock="${LOCAL_TAR_FILE}.copylock"
+            _touch_lock "$local_copy_lock"
+
+            # Try to acquire exclusive lock (wait up to 60s for another job to finish copying)
+            if _flock_with_timeout 60 -x "$local_copy_lock" -c "
+                # Re-check if file appeared while waiting (another job finished copying)
+                if [ -f '$LOCAL_TAR_FILE' ]; then
+                    echo '[cache-manager] Local cache appeared while waiting for lock' >&2
+                    exit 0
+                fi
+
+                copy_start=\$(date +%s.%N)
+                # Use atomic rename: copy to .tmp first, then mv to final name
+                if cp '$NFS_TAR_FILE' '${LOCAL_TAR_FILE}.tmp' && mv '${LOCAL_TAR_FILE}.tmp' '$LOCAL_TAR_FILE'; then
+                    copy_end=\$(date +%s.%N)
+                    copy_duration=\$(echo \"\$copy_end - \$copy_start\" | bc 2>/dev/null || echo '?')
+                    tar_size=\$(stat -c %s '$LOCAL_TAR_FILE' 2>/dev/null || echo 0)
+                    throughput=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / \$copy_duration\" | bc 2>/dev/null || echo '?')
+                    echo \"[cache-manager] Copied to local cache in \${copy_duration}s (\${throughput} MB/s)\" >&2
+                else
+                    echo '[cache-manager] ERROR: Failed to copy NFS tar to local cache' >&2
+                    rm -f '${LOCAL_TAR_FILE}.tmp'
+                    exit 1
+                fi
+            "; then
+                : # Success - file is now in local cache (either we copied it or another job did)
+            else
+                _error "Lock timeout or copy failed, falling back to direct NFS extraction"
+                rm -f "${LOCAL_TAR_FILE}.tmp"
+                # Fall back to extracting directly from NFS tar
+                LOCAL_TAR_FILE="$NFS_TAR_FILE"
+            fi
+        else
+            _log "Cache miss: $NFS_TAR_FILE"
+            return 1
+        fi
     fi
 
     # 2. Extract from LOCAL tar with exclusive locking on destination
