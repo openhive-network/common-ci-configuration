@@ -14,14 +14,44 @@ include:
     ref: develop
     file: '/templates/haf_app_testing.gitlab-ci.yml'
 
+# Find HAF image in detect stage (provides HAF_COMMIT and HAF_IMAGE_NAME)
+find_haf_image:
+  extends: .find_haf_image
+  stage: detect
+
+# Option 1: Use the unified config template (recommended)
 variables:
-  # Required aliases for templates
-  APP_SYNC_CACHE_TYPE: "${MY_APP_SYNC_CACHE_TYPE}"
+  HAF_APP_NAME: "myapp"
+  HAF_APP_ROLE_PREFIX: "myapp"
+
+my_job:
+  extends: .haf_app_config_variables
+  # APP_SYNC_CACHE_TYPE="haf_myapp_sync" is now available
+
+# Option 2: Define variables manually (legacy)
+variables:
+  APP_SYNC_CACHE_TYPE: "haf_myapp_sync"
   APP_CACHE_KEY: "${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}"
-  HAF_APP_SCHEMA: "myapp"
+  HAF_APP_SCHEMA: "myapp_app"
 ```
 
 ## Available Templates
+
+### HAF Image Lookup
+- `.find_haf_image` - Finds pre-built HAF images from registry
+  - Outputs: `HAF_UPSTREAM_IMAGE`, `HAF_UPSTREAM_COMMIT`, `HAF_UPSTREAM_TAG`
+  - Also outputs aliases: `HAF_IMAGE_NAME`, `HAF_COMMIT` (for backward compatibility)
+  - Apps can remove their `prepare_haf_image` mapping jobs
+
+### App Configuration
+- `.haf_app_config_variables` - Unified configuration that derives variables from `HAF_APP_NAME`
+  - Input: `HAF_APP_NAME`, `HAF_APP_ROLE_PREFIX`
+  - Derives: `APP_SYNC_CACHE_TYPE`, `APP_CACHE_KEY`, `HAF_APP_SCHEMA`
+
+### Skip Pattern Presets
+- `.haf_app_skip_patterns_standard` - Standard patterns (tests/, docs/, *.md, etc.)
+- `.haf_app_skip_patterns_with_gui` - Standard + gui/ directory
+- `.haf_app_skip_patterns_with_postgrest_only` - Standard + postgrest/ directory
 
 ### Change Detection
 - `.haf_app_detect_changes` - Detects if only tests/docs changed, enabling skip of heavy sync jobs
@@ -169,8 +199,19 @@ sync:
 
 ## Variable Reference
 
+### From find_haf_image job
+- `HAF_UPSTREAM_IMAGE` - Full HAF image path with tag
+- `HAF_UPSTREAM_COMMIT` - HAF commit SHA (40 char)
+- `HAF_UPSTREAM_TAG` - Image tag (short commit)
+- `HAF_IMAGE_NAME` - Alias for `HAF_UPSTREAM_IMAGE` (backward compat)
+- `HAF_COMMIT` - Alias for `HAF_UPSTREAM_COMMIT` (backward compat)
+
+### For .haf_app_config_variables template
+- `HAF_APP_NAME` - Short app name: "btracker", "reptracker", "hafbe", etc.
+- `HAF_APP_ROLE_PREFIX` - PostgreSQL role prefix (usually same as HAF_APP_NAME)
+
 ### Required for sync templates
-- `HAF_COMMIT` - HAF submodule commit SHA
+- `HAF_COMMIT` - HAF commit SHA (from find_haf_image)
 - `APP_SYNC_CACHE_TYPE` - App-specific cache type (e.g., "haf_btracker_sync")
 - `APP_CACHE_KEY` - Cache key (typically `${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}`)
 
@@ -188,6 +229,70 @@ sync:
 - `COMPOSE_OPTIONS_STRING` - Docker compose options
 - `WAIT_FOR_POSTGREST` - Set to "true" to wait for PostgREST
 
+## Migration: Removing prepare_haf_image Jobs
+
+The `.find_haf_image` template now outputs both `HAF_UPSTREAM_*` variables and convenience aliases (`HAF_IMAGE_NAME`, `HAF_COMMIT`). Apps can remove their `prepare_haf_image` mapping jobs.
+
+**Before (with prepare_haf_image job):**
+```yaml
+find_haf_image:
+  extends: .find_haf_image
+  stage: detect
+
+# This job can now be removed
+prepare_haf_image:
+  stage: build
+  needs: [find_haf_image]
+  script:
+    - echo "HAF_IMAGE_NAME=${HAF_UPSTREAM_IMAGE}" > docker_image_name.env
+    - echo "HAF_COMMIT=${HAF_UPSTREAM_COMMIT}" >> docker_image_name.env
+  artifacts:
+    reports:
+      dotenv: docker_image_name.env
+
+sync:
+  needs: [prepare_haf_image]
+  variables:
+    HAF_IMAGE_NAME: "${HAF_IMAGE_NAME}"  # From prepare_haf_image
+```
+
+**After (aliases provided automatically):**
+```yaml
+find_haf_image:
+  extends: .find_haf_image
+  stage: detect
+
+sync:
+  needs: [find_haf_image]
+  # HAF_IMAGE_NAME and HAF_COMMIT are now available directly
+  # No prepare_haf_image job needed
+```
+
+## Migration: Using .haf_app_config_variables
+
+Instead of defining cache variables manually in each app, use the unified config template.
+
+**Before (manual variables):**
+```yaml
+variables:
+  BTRACKER_SYNC_CACHE_TYPE: "haf_btracker_sync"
+  BTRACKER_CACHE_KEY: "${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}"
+  APP_SYNC_CACHE_TYPE: "${BTRACKER_SYNC_CACHE_TYPE}"
+  APP_CACHE_KEY: "${BTRACKER_CACHE_KEY}"
+  HAF_APP_SCHEMA: "btracker_app"
+```
+
+**After (derived from HAF_APP_NAME):**
+```yaml
+variables:
+  HAF_APP_NAME: "btracker"
+  HAF_APP_ROLE_PREFIX: "btracker"
+
+sync:
+  extends: .haf_app_config_variables
+  # APP_SYNC_CACHE_TYPE, APP_CACHE_KEY, HAF_APP_SCHEMA are derived
+```
+
 ## Best Practices
 
 1. **Use consistent cache type prefixes**: Prefix with `haf_` for automatic pgdata permission handling
@@ -196,4 +301,6 @@ sync:
 
 3. **Use `!reference` for composability**: Build before_script from template components
 
-4. **Add variable aliases**: Define `APP_SYNC_CACHE_TYPE`, `APP_CACHE_KEY`, `HAF_APP_SCHEMA` at the global level for template compatibility
+4. **Use skip pattern presets**: Extend `.haf_app_skip_patterns_standard` or variants instead of copying patterns
+
+5. **Remove prepare_haf_image jobs**: The `.find_haf_image` template now provides `HAF_IMAGE_NAME` and `HAF_COMMIT` aliases directly

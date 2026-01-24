@@ -87,6 +87,13 @@ include:
 #   ${HAF_VAR_PREFIX}_UPSTREAM_IMAGE  - Full image path with tag
 #   ${HAF_VAR_PREFIX}_UPSTREAM_COMMIT - HAF commit SHA
 #   ${HAF_VAR_PREFIX}_UPSTREAM_TAG    - Image tag (short commit)
+#   ${HAF_VAR_PREFIX}_IMAGE_NAME      - Alias for UPSTREAM_IMAGE (backward compat)
+#   ${HAF_VAR_PREFIX}_COMMIT          - Alias for UPSTREAM_COMMIT (backward compat)
+#
+# For mainnet (default), this outputs: HAF_UPSTREAM_IMAGE, HAF_UPSTREAM_COMMIT,
+# HAF_UPSTREAM_TAG, HAF_IMAGE_NAME, HAF_COMMIT
+#
+# The aliases allow apps to remove their prepare_haf_image mapping jobs.
 # =============================================================================
 .find_haf_image:
   extends: .find_upstream_image
@@ -128,10 +135,19 @@ include:
       fi
   script:
     - !reference [.find_upstream_image, script]
-    # Rename UPSTREAM_* to ${HAF_VAR_PREFIX}_UPSTREAM_*
+    # Rename UPSTREAM_* to ${HAF_VAR_PREFIX}_UPSTREAM_* and add convenience aliases
     - |
       if [ -f "$UPSTREAM_OUTPUT" ]; then
         sed -i "s/^UPSTREAM_/${HAF_VAR_PREFIX}_UPSTREAM_/" "$UPSTREAM_OUTPUT"
+
+        # Add convenience aliases for backward compatibility
+        # Apps can use either HAF_IMAGE_NAME or HAF_UPSTREAM_IMAGE (same values)
+        # This allows apps to remove their prepare_haf_image mapping jobs
+        UPSTREAM_IMAGE_VAL=$(grep "^${HAF_VAR_PREFIX}_UPSTREAM_IMAGE=" "$UPSTREAM_OUTPUT" | cut -d= -f2-)
+        UPSTREAM_COMMIT_VAL=$(grep "^${HAF_VAR_PREFIX}_UPSTREAM_COMMIT=" "$UPSTREAM_OUTPUT" | cut -d= -f2-)
+        echo "${HAF_VAR_PREFIX}_IMAGE_NAME=${UPSTREAM_IMAGE_VAL}" >> "$UPSTREAM_OUTPUT"
+        echo "${HAF_VAR_PREFIX}_COMMIT=${UPSTREAM_COMMIT_VAL}" >> "$UPSTREAM_OUTPUT"
+
         echo "Variables in $UPSTREAM_OUTPUT:"
         cat "$UPSTREAM_OUTPUT"
       fi
@@ -847,6 +863,52 @@ include:
 .haf_app_skip_patterns_with_gui:
   variables:
     HAF_APP_SKIP_PATTERNS: '^tests/|^docs/|^gui/|\.md$|^README|^CHANGELOG|^LICENSE|^CLAUDE|^\.gitlab-ci'
+
+# HAF app with PostgREST-only changes (adds postgrest-specific patterns)
+# For apps like hivemind where PostgREST config changes don't need sync
+# Use: extends: .haf_app_skip_patterns_with_postgrest_only
+.haf_app_skip_patterns_with_postgrest_only:
+  variables:
+    HAF_APP_SKIP_PATTERNS: '^tests/|^docs/|^postgrest/|\.md$|^README|^CHANGELOG|^LICENSE|^CLAUDE|^\.gitlab-ci'
+
+# =============================================================================
+# HAF APP CONFIGURATION TEMPLATE
+# =============================================================================
+# Unified app configuration that derives standard variables from HAF_APP_NAME.
+# This reduces boilerplate by automatically setting cache types and keys.
+#
+# Required variables (set by app):
+#   HAF_APP_NAME       - Short app name: "btracker", "reptracker", "hafbe", etc.
+#   HAF_APP_ROLE_PREFIX - PostgreSQL role prefix (usually same as HAF_APP_NAME)
+#
+# Derived variables (set automatically):
+#   APP_SYNC_CACHE_TYPE - Cache type: "haf_${HAF_APP_NAME}_sync"
+#   APP_CACHE_KEY       - Cache key: "${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}"
+#   HAF_APP_SCHEMA      - Default schema: "${HAF_APP_NAME}_app"
+#
+# Usage:
+#   variables:
+#     HAF_APP_NAME: "btracker"
+#     HAF_APP_ROLE_PREFIX: "btracker"
+#
+#   my_job:
+#     extends: .haf_app_config_variables
+#     # Now APP_SYNC_CACHE_TYPE="haf_btracker_sync" is available
+#
+# Note: HAF_COMMIT must be set (from find_haf_image job artifact) before
+# these variables are expanded in job execution.
+# =============================================================================
+.haf_app_config_variables:
+  variables:
+    # App identity (must be overridden by app)
+    HAF_APP_NAME: ""
+    HAF_APP_ROLE_PREFIX: ""
+    # Derived cache configuration
+    # Note: GitLab expands these at job start time, so HAF_COMMIT must be available
+    APP_SYNC_CACHE_TYPE: "haf_${HAF_APP_NAME}_sync"
+    APP_CACHE_KEY: "${HAF_COMMIT}_${CI_COMMIT_SHORT_SHA}"
+    # Default schema name convention
+    HAF_APP_SCHEMA: "${HAF_APP_NAME}_app"
 
 # =============================================================================
 # SYNC JOB COMPONENTS
