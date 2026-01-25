@@ -37,6 +37,9 @@ if [[ -z "$CACHE_MANAGER" ]]; then
     chmod +x "$CACHE_MANAGER" 2>/dev/null || true
 fi
 
+# Completion marker file name (must match cache-manager.sh)
+CACHE_COMPLETION_MARKER=".extraction_complete"
+
 # Validate that a HAF cache directory is complete (not just existing)
 # Returns 0 if valid, 1 if invalid/incomplete
 # This prevents using corrupted caches when the directory exists but files are missing
@@ -47,6 +50,12 @@ validate_cache_integrity() {
     # Basic check: datadir must exist
     if [[ ! -d "$datadir" ]]; then
         echo "Cache validation failed: $datadir does not exist"
+        return 1
+    fi
+
+    # Check for completion marker (written by cache-manager after successful extraction)
+    if [[ ! -f "${data_source}/${CACHE_COMPLETION_MARKER}" ]]; then
+        echo "Cache validation failed: completion marker missing (extraction was interrupted)"
         return 1
     fi
 

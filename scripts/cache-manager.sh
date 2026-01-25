@@ -72,6 +72,10 @@ CACHE_QUIET="${CACHE_QUIET:-false}"
 SHARED_BLOCK_LOG_LOCAL="${SHARED_BLOCK_LOG_LOCAL:-/blockchain/block_log_5m}"
 SHARED_BLOCK_LOG_NFS="${SHARED_BLOCK_LOG_NFS:-/nfs/ci-cache/hive/blockchain/block_log_5m}"
 
+# Completion marker - written after successful extraction to indicate cache is valid
+# If this file is missing, the extraction was interrupted and the cache is incomplete
+CACHE_COMPLETION_MARKER=".extraction_complete"
+
 # Logging
 _log() {
     if [[ "$CACHE_QUIET" != "true" ]]; then
@@ -81,6 +85,62 @@ _log() {
 
 _error() {
     echo "[cache-manager] ERROR: $1" >&2
+}
+
+# Check if an extraction is complete (has completion marker)
+# Returns 0 if complete, 1 if incomplete/missing
+_is_extraction_complete() {
+    local dest_dir="$1"
+    [[ -f "${dest_dir}/${CACHE_COMPLETION_MARKER}" ]]
+}
+
+# Write completion marker after successful extraction
+_write_completion_marker() {
+    local dest_dir="$1"
+    local marker_file="${dest_dir}/${CACHE_COMPLETION_MARKER}"
+
+    # Write marker with metadata for debugging
+    cat > "$marker_file" 2>/dev/null <<EOF || true
+timestamp=$(date -Iseconds)
+hostname=$(hostname)
+job_id=${CI_JOB_ID:-unknown}
+pipeline_id=${CI_PIPELINE_ID:-unknown}
+EOF
+    chmod 644 "$marker_file" 2>/dev/null || true
+}
+
+# Validate that an extracted cache is complete and usable
+# Checks both completion marker and basic structure
+_validate_extraction() {
+    local dest_dir="$1"
+    local cache_type="$2"
+
+    # Must have datadir
+    if [[ ! -d "${dest_dir}/datadir" ]]; then
+        return 1
+    fi
+
+    # Must have completion marker
+    if ! _is_extraction_complete "$dest_dir"; then
+        _log "Extraction incomplete (missing ${CACHE_COMPLETION_MARKER})"
+        return 1
+    fi
+
+    # For HAF caches, validate pgdata structure
+    if [[ "$cache_type" == haf* ]]; then
+        local pgdata="${dest_dir}/datadir/haf_db_store/pgdata"
+        if [[ ! -d "$pgdata" ]]; then
+            _log "HAF cache validation failed: pgdata missing"
+            return 1
+        fi
+        # Check for PG_VERSION as basic sanity check
+        if ! sudo test -f "${pgdata}/PG_VERSION" 2>/dev/null; then
+            _log "HAF cache validation failed: PG_VERSION missing"
+            return 1
+        fi
+    fi
+
+    return 0
 }
 
 # Create or update a lock file with world-writable permissions
@@ -711,19 +771,33 @@ cmd_get() {
         echo \"[cache-manager] Exclusive lock acquired in \$(echo \"\$lock_acquired - $get_start_time\" | bc 2>/dev/null || echo '?')s\" >&2
 
         # Re-check inside lock: another job may have finished extraction while we waited
-        if [ -d '${local_dest}/datadir' ]; then
-            echo '[cache-manager] Cache already extracted by another job, skipping extraction' >&2
+        # Must have BOTH datadir AND completion marker to be considered valid
+        if [ -d '${local_dest}/datadir' ] && [ -f '${local_dest}/${CACHE_COMPLETION_MARKER}' ]; then
+            echo '[cache-manager] Cache already extracted by another job (verified complete), skipping extraction' >&2
             exit 0
         fi
 
-        # Clean up stale extraction if present (with permission issues from previous runs)
-        # Previous runs may have left directories with postgres ownership (UID 105, mode 700)
+        # Clean up incomplete/stale extraction if present
+        # Cases: permission issues, missing completion marker, or interrupted extraction
         if [ -d '${local_dest}' ]; then
+            needs_cleanup=false
+
+            # Check for permission issues (can't write)
             if ! touch '${local_dest}/.write_test' 2>/dev/null; then
                 echo '[cache-manager] Stale extraction with permission issues, cleaning up' >&2
-                sudo rm -rf '${local_dest}' 2>/dev/null || rm -rf '${local_dest}' 2>/dev/null || true
+                needs_cleanup=true
             else
                 rm -f '${local_dest}/.write_test'
+            fi
+
+            # Check for incomplete extraction (datadir exists but no completion marker)
+            if [ -d '${local_dest}/datadir' ] && [ ! -f '${local_dest}/${CACHE_COMPLETION_MARKER}' ]; then
+                echo '[cache-manager] Incomplete extraction detected (missing completion marker), cleaning up' >&2
+                needs_cleanup=true
+            fi
+
+            if [ \"\$needs_cleanup\" = true ]; then
+                sudo rm -rf '${local_dest}' 2>/dev/null || rm -rf '${local_dest}' 2>/dev/null || true
             fi
         fi
         mkdir -p '${local_dest}'
@@ -808,11 +882,27 @@ cmd_get() {
                 fi
                 ;;
         esac
+
+        # Write completion marker to indicate extraction is fully complete
+        # This must be the LAST step - if we get here, the cache is valid
+        cat > '${local_dest}/${CACHE_COMPLETION_MARKER}' 2>/dev/null <<MARKER || true
+timestamp=\$(date -Iseconds)
+hostname=\$(hostname)
+job_id=${CI_JOB_ID:-unknown}
+pipeline_id=${CI_PIPELINE_ID:-unknown}
+MARKER
+        chmod 644 '${local_dest}/${CACHE_COMPLETION_MARKER}' 2>/dev/null || true
+        echo '[cache-manager] Wrote completion marker' >&2
     "; then
-        : # Post-extraction fixes completed
+        _log "Cache extraction complete and verified"
     else
         _error "Failed to apply post-extraction fixes"
-        # Non-fatal - cache may still be usable
+        # Clean up incomplete extraction since it's not marked as complete
+        if [[ -d "$local_dest" ]]; then
+            _log "Cleaning up incomplete extraction: $local_dest"
+            sudo rm -rf "$local_dest" 2>/dev/null || rm -rf "$local_dest" 2>/dev/null || true
+        fi
+        return 1
     fi
 
     _update_lru "$cache_type" "$cache_key"
