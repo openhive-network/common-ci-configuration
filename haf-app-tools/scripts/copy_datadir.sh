@@ -37,6 +37,58 @@ if [[ -z "$CACHE_MANAGER" ]]; then
     chmod +x "$CACHE_MANAGER" 2>/dev/null || true
 fi
 
+# Validate that a HAF cache directory is complete (not just existing)
+# Returns 0 if valid, 1 if invalid/incomplete
+# This prevents using corrupted caches when the directory exists but files are missing
+validate_cache_integrity() {
+    local data_source="$1"
+    local datadir="${data_source}/datadir"
+
+    # Basic check: datadir must exist
+    if [[ ! -d "$datadir" ]]; then
+        echo "Cache validation failed: $datadir does not exist"
+        return 1
+    fi
+
+    # For HAF caches: validate pgdata structure exists
+    local pgdata="${datadir}/haf_db_store/pgdata"
+    local tablespace="${datadir}/haf_db_store/tablespace"
+
+    # If this looks like a HAF cache (has haf_db_store), validate it properly
+    if [[ -d "${datadir}/haf_db_store" ]]; then
+        # pgdata must exist
+        if [[ ! -d "$pgdata" ]]; then
+            echo "Cache validation failed: pgdata directory missing at $pgdata"
+            return 1
+        fi
+
+        # tablespace must exist (PostgreSQL won't start without it)
+        if [[ ! -d "$tablespace" ]]; then
+            echo "Cache validation failed: tablespace directory missing at $tablespace"
+            return 1
+        fi
+
+        # Check for critical pgdata subdirectories (PostgreSQL requires these)
+        local required_dirs=("pg_wal" "pg_tblspc" "base" "global")
+        for dir in "${required_dirs[@]}"; do
+            if ! sudo test -d "${pgdata}/${dir}" 2>/dev/null; then
+                echo "Cache validation failed: required pgdata directory missing: ${dir}"
+                return 1
+            fi
+        done
+
+        # Check for PG_VERSION file (basic PostgreSQL sanity check)
+        if ! sudo test -f "${pgdata}/PG_VERSION" 2>/dev/null; then
+            echo "Cache validation failed: PG_VERSION file missing in pgdata"
+            return 1
+        fi
+
+        echo "Cache validation passed: pgdata structure is complete"
+    fi
+
+    return 0
+}
+
 # Fix pg_tblspc symlinks to point to the correct tablespace location
 # PostgreSQL stores tablespace symlinks with absolute paths, which break when data is copied
 # Uses relative symlinks so they work both on the host AND inside Docker containers
@@ -72,10 +124,17 @@ fix_pg_tblspc_symlinks() {
 extract_nfs_cache_if_needed() {
     local data_source="$1"
 
-    # Quick check without lock - if cache exists, skip entirely
-    if [[ -d "${data_source}/datadir" ]]; then
-        echo "Local cache exists at ${data_source}/datadir"
+    # Validate cache integrity, not just directory existence
+    # This catches corrupted caches where directory exists but files are missing
+    if validate_cache_integrity "$data_source"; then
+        echo "Local cache exists and is valid at ${data_source}/datadir"
         return 0
+    fi
+
+    # Cache is missing or incomplete - clean up any stale data before extracting
+    if [[ -d "${data_source}" ]]; then
+        echo "Removing incomplete/corrupted cache at ${data_source}"
+        sudo rm -rf "${data_source}" 2>/dev/null || rm -rf "${data_source}" 2>/dev/null || true
     fi
 
     # Parse DATA_SOURCE to derive cache type and key
@@ -195,20 +254,19 @@ then
     echo "DATA_SOURCE: ${DATA_SOURCE}"
     echo "DATADIR: ${DATADIR}"
 
-    # Try NFS fallback if local DATA_SOURCE doesn't exist
-    if [[ ! -d "${DATA_SOURCE}/datadir" ]]; then
-        echo "Local DATA_SOURCE not found, attempting NFS fallback..."
+    # Validate cache integrity - if incomplete/corrupted, try NFS fallback
+    # This catches cases where directory exists but files are missing
+    if ! validate_cache_integrity "${DATA_SOURCE}"; then
+        echo "Local DATA_SOURCE missing or incomplete, attempting NFS fallback..."
         if ! extract_nfs_cache_if_needed "${DATA_SOURCE}"; then
-            echo "ERROR: Failed to retrieve cache and no local data exists"
+            echo "ERROR: Failed to retrieve cache and no valid local data exists"
             exit 1
         fi
     fi
 
-    # Final validation: ensure datadir exists after all extraction attempts
-    # Note: We rely on cache-manager.sh to clean up on extraction failure (defense in depth)
-    # rather than time-based staleness checks which cause false positives
-    if [[ ! -d "${DATA_SOURCE}/datadir" ]]; then
-        echo "ERROR: DATA_SOURCE/datadir does not exist after extraction attempts"
+    # Final validation: ensure datadir is complete after all extraction attempts
+    if ! validate_cache_integrity "${DATA_SOURCE}"; then
+        echo "ERROR: DATA_SOURCE/datadir is incomplete or corrupted after extraction attempts"
         exit 1
     fi
 
