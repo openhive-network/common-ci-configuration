@@ -25,7 +25,7 @@ variable "CI_BASE_IMAGE_PY312_VERSION" {
 }
 
 variable "CI_BASE_IMAGE_PY314_VERSION" {
-  default = "ubuntu24.04-py3.14-6"
+  default = "ubuntu24.04-py3.14-7"
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
