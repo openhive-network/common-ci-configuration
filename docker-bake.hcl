@@ -21,11 +21,15 @@ variable "PYTHON_RUNTIME_VERSION" {
 }
 
 variable "CI_BASE_IMAGE_PY312_VERSION" {
-  default = "ubuntu24.04-py3.12-1"
+  default = "ubuntu24.04-py3.12-2"
 }
 
 variable "CI_BASE_IMAGE_PY314_VERSION" {
-  default = "ubuntu24.04-py3.14-7"
+  default = "ubuntu24.04-py3.14-8"
+}
+
+variable "CLANG_VERSION" {
+  default = "21"
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
@@ -186,6 +190,7 @@ target "ci-base-image-py312" {
   cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_PY312_VERSION}")
   args = {
     PYTHON_VERSION = "3.12"
+    CLANG_VERSION = "${CLANG_VERSION}"
   }
 }
 
@@ -196,6 +201,7 @@ target "ci-base-image-py314" {
   cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_PY314_VERSION}")
   args = {
     PYTHON_VERSION = "3.14"
+    CLANG_VERSION = "${CLANG_VERSION}"
   }
 }
 
