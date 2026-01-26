@@ -58,7 +58,7 @@ Full build environment for hive/HAF C++ compilation and Python testing.
 - PostgreSQL client libraries (libpq-dev)
 - Compression libraries (zstd, snappy)
 
-**Current version:** `ubuntu24.04-py3.14-5`
+**Current version:** `ubuntu24.04-py3.14-8`
 
 **Used by:** hive and HAF build/test pipelines that need the full toolchain.
 
