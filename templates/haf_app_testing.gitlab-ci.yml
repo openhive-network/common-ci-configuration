@@ -102,6 +102,10 @@ include:
     UPSTREAM_REPO_URL: "https://gitlab.syncad.com/hive/haf.git"
     UPSTREAM_REGISTRY: "registry.gitlab.syncad.com/hive/haf"
     UPSTREAM_BRANCH: "develop"
+    # Fail fast if no HAF image is available (rather than propagating bad values)
+    UPSTREAM_REQUIRE_HIT: "true"
+    # Check more commits in case of bulk pushes (e.g., squash merges)
+    UPSTREAM_MAX_SEARCH: "25"
     # Configurable parameters
     HAF_IMAGE_TYPE: ""        # "", "testnet", or "mirrornet"
     HAF_VAR_PREFIX: "HAF"     # Output variable prefix
