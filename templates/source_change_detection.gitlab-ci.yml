@@ -197,6 +197,8 @@ variables:
     UPSTREAM_DEPTH: "100"
     # Max commits to check when looking for existing image (fallback depth)
     UPSTREAM_MAX_SEARCH: "10"
+    # Fail the job if no image is found after checking all commits
+    UPSTREAM_REQUIRE_HIT: "false"
     # Set this to skip dynamic lookup and use a specific image tag
     # Example: "abc12345" or "v1.27.0" - will use UPSTREAM_REGISTRY:UPSTREAM_OVERRIDE_TAG
     UPSTREAM_OVERRIDE_TAG: ""
@@ -261,7 +263,8 @@ variables:
         ${UPSTREAM_IMAGE:+--image="$UPSTREAM_IMAGE"} \
         --depth="$UPSTREAM_DEPTH" \
         --max-search="$UPSTREAM_MAX_SEARCH" \
-        --output="$UPSTREAM_OUTPUT"
+        --output="$UPSTREAM_OUTPUT" \
+        ${UPSTREAM_REQUIRE_HIT:+$([ "$UPSTREAM_REQUIRE_HIT" = "true" ] && echo "--require-hit")}
   artifacts:
     reports:
       dotenv: $UPSTREAM_OUTPUT
