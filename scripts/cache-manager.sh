@@ -1245,13 +1245,11 @@ cmd_cleanup() {
     [[ -z "$total_size" || ! "$total_size" =~ ^[0-9]+$ ]] && total_size=0
     _log "Current cache size: $((total_size / 1024 / 1024 / 1024))GB"
 
-    if [[ ! -f "$lru_index" ]]; then
-        _log "No LRU index found, nothing to clean"
-        return 0
-    fi
-
-    # Sort by timestamp (oldest first) and process
+    # Sort by timestamp (oldest first) and process LRU entries
     local removed=0
+    if [[ ! -f "$lru_index" ]]; then
+        _log "No LRU index found, skipping LRU cleanup (will still check for orphans)"
+    else
     while IFS='|' read -r timestamp entry; do
         # Skip if filtering by type and doesn't match
         if [[ -n "$cache_type" && ! "$entry" =~ ^${cache_type}/ ]]; then
@@ -1322,7 +1320,85 @@ cmd_cleanup() {
 
     done < <(sort -t'|' -k1 -n "$lru_index")
 
-    _log "Cleanup complete, removed $removed entries"
+        _log "LRU cleanup complete, removed $removed entries"
+    fi
+
+    # Phase 2: Clean orphaned tar files not in LRU index
+    # These are files created before LRU tracking was implemented, or that failed to be indexed
+    _log "Scanning for orphaned tar files not in LRU index..."
+
+    local orphan_removed=0
+    local cutoff_mtime=$(($(date +%s) - max_age_days * 86400))
+
+    # Build list of LRU entries for fast lookup
+    local lru_entries_file
+    lru_entries_file=$(mktemp)
+    if [[ -f "$lru_index" ]]; then
+        grep -oP '\|.*$' "$lru_index" 2>/dev/null | sed 's/^|//' | sort > "$lru_entries_file"
+    fi
+
+    # Find all tar files and check if they're in the LRU index
+    while IFS= read -r tar_path; do
+        [[ -f "$tar_path" ]] || continue
+
+        # Extract cache_type/cache_key from path (e.g., ./haf_filtered/146072_filtered.tar -> haf_filtered/146072_filtered)
+        local entry
+        entry=$(echo "$tar_path" | sed "s|^${search_path}/||; s|\.tar$||")
+
+        # Skip if filtering by type and doesn't match
+        if [[ -n "$cache_type" && ! "$entry" =~ ^${cache_type}/ ]]; then
+            continue
+        fi
+
+        # Skip if in LRU index (already handled above)
+        if grep -qF "$entry" "$lru_entries_file" 2>/dev/null; then
+            continue
+        fi
+
+        # Get file mtime
+        local file_mtime
+        file_mtime=$(stat -c %Y "$tar_path" 2>/dev/null || echo 0)
+
+        # Skip files newer than max_age_days
+        if [[ $file_mtime -gt $cutoff_mtime ]]; then
+            continue
+        fi
+
+        # Skip if locked
+        local tar_lock="${tar_path}.lock"
+        if [[ -f "$tar_lock" ]] && ! flock -n "$tar_lock" -c "true" 2>/dev/null; then
+            _log "Skipping orphan $entry - currently locked"
+            continue
+        fi
+
+        # Remove the orphaned tar file
+        local file_size
+        file_size=$(stat -c %s "$tar_path" 2>/dev/null || echo 0)
+        local age_days=$(( ($(date +%s) - file_mtime) / 86400 ))
+        _log "Removing orphan: $entry (${age_days} days old, $((file_size / 1024 / 1024 / 1024))GB)"
+
+        sudo rm -f "$tar_path" "$tar_lock" "${tar_lock}.info" 2>/dev/null || \
+            rm -f "$tar_path" "$tar_lock" "${tar_lock}.info" 2>/dev/null || true
+
+        # Also remove metadata directory if exists
+        local meta_dir="${tar_path%.tar}"
+        [[ -d "$meta_dir" ]] && { sudo rm -rf "$meta_dir" 2>/dev/null || rm -rf "$meta_dir" 2>/dev/null || true; }
+
+        total_size=$((total_size - file_size))
+        orphan_removed=$((orphan_removed + 1))
+
+        # Stop if under size limit
+        [[ $total_size -le $max_size_bytes ]] && break
+
+    done < <(find "$search_path" -name "*.tar" -type f 2>/dev/null | sort)
+
+    rm -f "$lru_entries_file"
+
+    if [[ $orphan_removed -gt 0 ]]; then
+        _log "Orphan cleanup complete, removed $orphan_removed orphaned files"
+    fi
+
+    _log "Total cleanup: $((removed + orphan_removed)) entries removed"
 }
 
 # Cleanup local cache when it exceeds size limit
