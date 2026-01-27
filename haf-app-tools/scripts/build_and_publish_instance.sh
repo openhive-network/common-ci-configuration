@@ -132,12 +132,47 @@ fi
 # Push to hive.blog registry if credentials provided
 if [[ -n "$BLOG_REGISTRY_USER" && -n "$BLOG_REGISTRY_PASSWORD" ]]; then
     echo "Pushing to hive.blog registry..."
-    echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"
+
+    # Retry login with exponential backoff (external registry can be flaky under load)
+    # 5 retries with 10s initial delay: 10s, 20s, 40s, 80s = ~2.5 min total
+    MAX_RETRIES=5
+    RETRY_DELAY=10
+    for attempt in $(seq 1 $MAX_RETRIES); do
+        if echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"; then
+            break
+        fi
+        if [ $attempt -eq $MAX_RETRIES ]; then
+            echo "ERROR: Login to $HIVE_BLOG_REGISTRY failed after $MAX_RETRIES attempts"
+            exit 1
+        fi
+        echo "Login attempt $attempt failed, retrying in ${RETRY_DELAY}s..."
+        sleep $RETRY_DELAY
+        RETRY_DELAY=$((RETRY_DELAY * 2))
+    done
+
+    # Helper function for push with retry
+    push_with_retry() {
+        local image="$1"
+        local retries=5
+        local delay=10
+        for attempt in $(seq 1 $retries); do
+            if docker push "$image"; then
+                return 0
+            fi
+            if [ $attempt -eq $retries ]; then
+                echo "ERROR: Push of $image failed after $retries attempts"
+                return 1
+            fi
+            echo "Push attempt $attempt failed, retrying in ${delay}s..."
+            sleep $delay
+            delay=$((delay * 2))
+        done
+    }
 
     # Push main app
     HIVE_BLOG_IMAGE="${HIVE_BLOG_REGISTRY}/${PROJECT_NAME}:$IMAGE_TAG"
     docker tag "$REGISTRY:$IMAGE_TAG" "$HIVE_BLOG_IMAGE"
-    docker push "$HIVE_BLOG_IMAGE"
+    push_with_retry "$HIVE_BLOG_IMAGE"
     echo "Pushed: $HIVE_BLOG_IMAGE"
 
     # Push postgrest-rewriter if it exists
@@ -145,7 +180,7 @@ if [[ -n "$BLOG_REGISTRY_USER" && -n "$BLOG_REGISTRY_PASSWORD" ]]; then
     if docker image inspect "$REWRITER_SOURCE" >/dev/null 2>&1; then
         REWRITER_TARGET="${HIVE_BLOG_REGISTRY}/${PROJECT_NAME}/postgrest-rewriter:$IMAGE_TAG"
         docker tag "$REWRITER_SOURCE" "$REWRITER_TARGET"
-        docker push "$REWRITER_TARGET"
+        push_with_retry "$REWRITER_TARGET"
         echo "Pushed: $REWRITER_TARGET"
     else
         echo "No postgrest-rewriter image found, skipping"
