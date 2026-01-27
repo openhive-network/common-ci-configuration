@@ -102,9 +102,10 @@ include:
       echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to Docker registries..."
       echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
       if [[ -n "${BLOG_REGISTRY_USER:-}" && -n "${BLOG_REGISTRY_PASSWORD:-}" ]]; then
-        # Retry login with exponential backoff (external registry can be flaky)
-        MAX_RETRIES=3
-        RETRY_DELAY=5
+        # Retry login with exponential backoff (external registry can be flaky under load)
+        # 5 retries with 10s initial delay: 10s, 20s, 40s, 80s = ~2.5 min total
+        MAX_RETRIES=5
+        RETRY_DELAY=10
         for attempt in $(seq 1 $MAX_RETRIES); do
           if echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"; then
             break
@@ -155,8 +156,9 @@ include:
         docker tag "$HIVE_BLOG_IMAGE_SOURCE" "${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}"
 
         # Retry push with exponential backoff (handles transient registry issues)
-        MAX_RETRIES=3
-        RETRY_DELAY=5
+        # 5 retries with 10s initial delay: 10s, 20s, 40s, 80s = ~2.5 min total
+        MAX_RETRIES=5
+        RETRY_DELAY=10
         for attempt in $(seq 1 $MAX_RETRIES); do
           if docker push "${HIVE_BLOG_REGISTRY}/${HIVE_BLOG_IMAGE_TARGET}"; then
             break
@@ -331,9 +333,10 @@ include:
       echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to registries..."
       echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
       if [[ -n "${BLOG_REGISTRY_USER:-}" && -n "${BLOG_REGISTRY_PASSWORD:-}" ]]; then
-        # Retry login with exponential backoff (external registry can be flaky)
-        MAX_RETRIES=3
-        RETRY_DELAY=5
+        # Retry login with exponential backoff (external registry can be flaky under load)
+        # 5 retries with 10s initial delay: 10s, 20s, 40s, 80s = ~2.5 min total
+        MAX_RETRIES=5
+        RETRY_DELAY=10
         for attempt in $(seq 1 $MAX_RETRIES); do
           if echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"; then
             break
@@ -387,8 +390,9 @@ include:
         docker tag "$SOURCE" "$TARGET"
 
         # Retry push with exponential backoff (handles transient registry issues)
-        MAX_RETRIES=3
-        RETRY_DELAY=5
+        # 5 retries with 10s initial delay: 10s, 20s, 40s, 80s = ~2.5 min total
+        MAX_RETRIES=5
+        RETRY_DELAY=10
         for attempt in $(seq 1 $MAX_RETRIES); do
           if docker push "$TARGET"; then
             break
