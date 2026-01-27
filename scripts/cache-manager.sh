@@ -830,6 +830,15 @@ cmd_get() {
     # Post-extraction fixes - run inside exclusive lock to prevent race conditions
     # where symlink modifications interfere with concurrent cp operations.
     # See: https://gitlab.syncad.com/hive/HAfAH/-/pipelines/150169 for the failure mode.
+    #
+    # Skip if cache was already complete (extracted by another job) - no fixes needed
+    # and we may not have write permission to the directory created by another user/container
+    if [[ -f "${local_dest}/${CACHE_COMPLETION_MARKER}" ]]; then
+        _log "Cache extraction complete and verified"
+        _update_lru "$cache_type" "$cache_key"
+        return 0
+    fi
+
     if _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$dest_lock" -c "
         # Link shared block_log for both hive and haf* caches (block_log files excluded from tar)
         case '$cache_type' in
