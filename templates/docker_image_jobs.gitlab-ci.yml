@@ -417,3 +417,198 @@ include:
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED == "true"'
       when: on_success
     - when: never
+
+# =============================================================================
+# SMART IMAGE BUILD TEMPLATE
+# =============================================================================
+# Intelligent Docker image building with skip/re-tag/rebuild logic.
+# Ensures images are always findable within downstream search depth.
+#
+# When source files change: full build
+# When only tests/docs change:
+#   - Small gap (<RETAG_THRESHOLD): use cached image
+#   - Medium gap (RETAG_THRESHOLD to SEARCH_DEPTH): re-tag cached image
+#   - Large gap (>SEARCH_DEPTH): force rebuild (fail-safe)
+#
+# Required variables:
+#   IMAGE_REGISTRY: Docker registry URL (e.g., registry.gitlab.syncad.com/hive/haf)
+#   SOURCE_PATTERNS: Comma-separated patterns that trigger rebuild
+#                    (e.g., "src/,cmake/,Dockerfile")
+#
+# Optional variables:
+#   RETAG_THRESHOLD: Re-tag when gap > this (default: 20)
+#   SEARCH_DEPTH: Force rebuild when gap > this (default: 25)
+#   SKIP_BUILD_ALLOWED: Set to "true" if build can be skipped (default: "false")
+#   CACHED_IMAGE_COMMIT: Commit of cached image (required when SKIP_BUILD_ALLOWED=true)
+#   CACHED_IMAGE_NAME: Name of cached image (required when SKIP_BUILD_ALLOWED=true)
+#   IMAGE_NAME: Image name within registry (default: root)
+#
+# Output artifacts (dotenv):
+#   BUILD_ACTION: build|retag|skip
+#   IMAGE_NAME: Full image path with tag
+#   IMAGE_COMMIT: Commit SHA for image
+#
+# Example usage:
+#   haf_image_build:
+#     extends: .smart_image_build
+#     variables:
+#       IMAGE_REGISTRY: "registry.gitlab.syncad.com/hive/haf"
+#       SOURCE_PATTERNS: "src/,cmake/,CMakeLists.txt,Dockerfile"
+#       # From detect_changes job:
+#       SKIP_BUILD_ALLOWED: "${AUTO_SKIP_BUILD}"
+#       CACHED_IMAGE_COMMIT: "${HAF_COMMIT}"
+#       CACHED_IMAGE_NAME: "${HAF_IMAGE_NAME}"
+#     needs:
+#       - job: detect_changes
+#         artifacts: true
+#     script:
+#       - !reference [.smart_image_build, script]
+#       # ... your build logic when BUILD_ACTION=build ...
+#
+.smart_image_build:
+  extends: .docker_image_builder_job_template
+  variables:
+    RETAG_THRESHOLD: "20"
+    SEARCH_DEPTH: "25"
+    SKIP_BUILD_ALLOWED: "false"
+    CACHED_IMAGE_COMMIT: ""
+    CACHED_IMAGE_NAME: ""
+    IMAGE_NAME: ""
+    # Script URL - allows consuming repos to pin to a specific version
+    COMMON_CI_REF: "develop"
+    COMMON_CI_URL: "https://gitlab.syncad.com/hive/common-ci-configuration"
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):smart_build_setup[collapsed=true]\r\e[0KFetching smart-image-build script..."
+      # Fetch the smart-image-build script from common-ci-configuration
+      SCRIPT_URL="${COMMON_CI_URL}/-/raw/${COMMON_CI_REF}/scripts/bash/smart-image-build.sh"
+      curl -fsSL "$SCRIPT_URL" -o /tmp/smart-image-build.sh
+      chmod +x /tmp/smart-image-build.sh
+      echo -e "\e[0Ksection_end:$(date +%s):smart_build_setup\r\e[0K"
+
+    - |
+      # Determine build action using smart-image-build script
+      BUILD_ARGS=(
+        --registry="${IMAGE_REGISTRY}"
+        --patterns="${SOURCE_PATTERNS}"
+        --commit="${CI_COMMIT_SHA}"
+        --retag-threshold="${RETAG_THRESHOLD}"
+        --search-depth="${SEARCH_DEPTH}"
+        --output=smart_build_decision.env
+      )
+
+      # Add image name if specified (for sub-images like testnet/mirrornet)
+      if [[ -n "${IMAGE_NAME}" ]]; then
+        BUILD_ARGS+=(--image="${IMAGE_NAME}")
+      fi
+
+      # Pass skip-build info if allowed and we have cached data
+      if [[ "${SKIP_BUILD_ALLOWED}" == "true" && -n "${CACHED_IMAGE_COMMIT}" && -n "${CACHED_IMAGE_NAME}" ]]; then
+        BUILD_ARGS+=(
+          --skip-build
+          --cached-commit="${CACHED_IMAGE_COMMIT}"
+          --cached-image="${CACHED_IMAGE_NAME}"
+        )
+      fi
+
+      /tmp/smart-image-build.sh "${BUILD_ARGS[@]}"
+      cat smart_build_decision.env
+      source smart_build_decision.env
+
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to GitLab registry..."
+      echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+      echo -e "\e[0Ksection_end:$(date +%s):registry_login\r\e[0K"
+
+    - |
+      # Execute the build action
+      source smart_build_decision.env
+      case "$BUILD_ACTION" in
+        build)
+          echo "=== Full build required ==="
+          echo "BUILD_ACTION=build requires repo-specific build script"
+          echo "Override this section in your job's script"
+          # Repos should !reference this template and then add their build logic
+          # e.g.:
+          # script:
+          #   - !reference [.smart_image_build, script]
+          #   - |
+          #     source smart_build_decision.env
+          #     if [[ "$BUILD_ACTION" == "build" ]]; then
+          #       # Your actual build logic here
+          #       $SCRIPTS_PATH/ci-helpers/get_image4submodule.sh ...
+          #     fi
+          ;;
+        retag)
+          echo "=== Re-tagging cached image ==="
+          echo "Source: ${CACHED_IMAGE_NAME}"
+          echo "Target: ${IMAGE_NAME}"
+          docker pull "${CACHED_IMAGE_NAME}"
+          docker tag "${CACHED_IMAGE_NAME}" "${IMAGE_NAME}"
+          docker push "${IMAGE_NAME}"
+          echo "IMAGE_NAME=${IMAGE_NAME}" >> docker_image_name.env
+          echo "IMAGE_COMMIT=${IMAGE_COMMIT}" >> docker_image_name.env
+          echo "BUILD_ACTION=retag" >> docker_image_name.env
+          ;;
+        skip)
+          echo "=== Using cached image (no re-tag needed) ==="
+          echo "Cached image: ${CACHED_IMAGE_NAME}"
+          echo "IMAGE_NAME=${CACHED_IMAGE_NAME}" >> docker_image_name.env
+          echo "IMAGE_COMMIT=${IMAGE_COMMIT}" >> docker_image_name.env
+          echo "BUILD_ACTION=skip" >> docker_image_name.env
+          ;;
+        *)
+          echo "ERROR: Unknown BUILD_ACTION: $BUILD_ACTION"
+          exit 1
+          ;;
+      esac
+  artifacts:
+    reports:
+      dotenv: docker_image_name.env
+
+# Reusable script component for smart image builds.
+# Use with !reference to integrate into existing jobs.
+#
+# Example:
+#   .haf_image_build:
+#     before_script:
+#       - !reference [.smart_image_build_decision, script]
+#     script:
+#       - source smart_build_decision.env
+#       - if [[ "$BUILD_ACTION" == "build" ]]; then
+#           # ... actual build logic ...
+#         fi
+#
+.smart_image_build_decision:
+  script:
+    - |
+      # Fetch smart-image-build script
+      SCRIPT_URL="${COMMON_CI_URL:-https://gitlab.syncad.com/hive/common-ci-configuration}/-/raw/${COMMON_CI_REF:-develop}/scripts/bash/smart-image-build.sh"
+      curl -fsSL "$SCRIPT_URL" -o /tmp/smart-image-build.sh
+      chmod +x /tmp/smart-image-build.sh
+
+      # Determine build action
+      BUILD_ARGS=(
+        --registry="${IMAGE_REGISTRY}"
+        --patterns="${SOURCE_PATTERNS}"
+        --commit="${CI_COMMIT_SHA}"
+        --retag-threshold="${RETAG_THRESHOLD:-20}"
+        --search-depth="${SEARCH_DEPTH:-25}"
+        --output=smart_build_decision.env
+      )
+
+      if [[ -n "${IMAGE_NAME:-}" ]]; then
+        BUILD_ARGS+=(--image="${IMAGE_NAME}")
+      fi
+
+      if [[ "${SKIP_BUILD_ALLOWED:-false}" == "true" && -n "${CACHED_IMAGE_COMMIT:-}" && -n "${CACHED_IMAGE_NAME:-}" ]]; then
+        BUILD_ARGS+=(
+          --skip-build
+          --cached-commit="${CACHED_IMAGE_COMMIT}"
+          --cached-image="${CACHED_IMAGE_NAME}"
+        )
+      fi
+
+      /tmp/smart-image-build.sh "${BUILD_ARGS[@]}"
+      source smart_build_decision.env
+      echo "Smart build decision: BUILD_ACTION=${BUILD_ACTION}"
