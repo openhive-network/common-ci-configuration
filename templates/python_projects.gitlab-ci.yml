@@ -43,6 +43,51 @@ variables:
     - pip list
 
 
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>| DEPENDENCY UPDATE ANCHORS |>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Dependency update anchors for TEST_WITH_LATEST_DEPENDENCIES and STATIC_ANALYSIS_WITH_LATEST_DEPENDENCIES
+# These anchors can be referenced in job before_scripts to enable optional testing with latest dependencies
+#
+# Usage example:
+#   pre_commit_checks:
+#     before_script:
+#       - !reference [.configuration_template, before_script]
+#       - !reference [.update_deps_for_static_analysis, script]
+#       - poetry install
+
+# Dependency update anchors for testing with latest versions
+# Usage: Set TEST_WITH_LATEST_DEPENDENCIES=true or STATIC_ANALYSIS_WITH_LATEST_DEPENDENCIES=true
+# to run poetry update before install. Default (false) uses committed poetry.lock.
+.update_deps_for_static_analysis:
+  script:
+    - |
+      if [ "${STATIC_ANALYSIS_WITH_LATEST_DEPENDENCIES}" = "true" ]; then
+        echo "STATIC_ANALYSIS_WITH_LATEST_DEPENDENCIES is enabled - running poetry update for static-analysis group"
+        poetry -C "${PYPROJECT_DIR}" update --only static-analysis
+        pip list
+      fi
+
+.update_deps_for_tests:
+  script:
+    - |
+      if [ "${TEST_WITH_LATEST_DEPENDENCIES}" = "true" ]; then
+        echo "TEST_WITH_LATEST_DEPENDENCIES is enabled - running poetry update (excluding static-analysis group)"
+        poetry -C "${PYPROJECT_DIR}" update --without static-analysis
+        pip list
+      fi
+
+.update_all_deps:
+  script:
+    - |
+      if [ "${TEST_WITH_LATEST_DEPENDENCIES}" = "true" ]; then
+        echo "TEST_WITH_LATEST_DEPENDENCIES is enabled - running poetry update for all dependencies"
+        poetry -C "${PYPROJECT_DIR}" update
+        pip list
+      fi
+
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| DEPENDENCY UPDATE ANCHORS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
 .project_develop_configuration_template:
   extends: .configuration_template
   retry:
