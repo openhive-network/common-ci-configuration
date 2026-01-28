@@ -6,16 +6,22 @@ variables:
 include:
   - local: templates/base.gitlab-ci.yml
 
-# this version does not call git since it is not present in the pure dind image
-.pure_docker_image_builder_job_template:
-  extends: .job-defaults
-  variables:
-    DOCKER_DRIVER: overlay2
-    DOCKER_TLS_CERTDIR: "/certs"
-    FF_NETWORK_PER_BUILD: "true"
+# =============================================================================
+# SCRIPT FRAGMENTS - Atomic, composable script blocks
+# =============================================================================
+# These fragments avoid the nested array problem when using !reference.
+# Reference individual fragments instead of entire before_script arrays.
+#
+# Problem: When template A's before_script uses !reference to template B's
+# before_script, it creates nested arrays. GitLab flattens one level, but
+# chaining multiple levels (A -> B -> C) creates deeply nested arrays that
+# fail validation.
+#
+# Solution: Each fragment's `script` key contains a single multiline block.
+# Composing multiple fragments creates a flat array: [item1, item2, item3]
 
-  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:${DOCKER_BUILDER_TAG}
-  before_script:
+.script_docker_setup_buildkit:
+  script:
     - |
       echo -e "\e[0Ksection_start:$(date +%s):buildkit_config[collapsed=true]\r\e[0KConfiguring Docker BuildKit..."
       # Wait for docker daemon to be fully ready (up to 60 seconds)
@@ -30,6 +36,70 @@ include:
       docker context create builder-context
       docker buildx create --driver docker-container --name docker-container-builder --use builder-context
       echo -e "\e[0Ksection_end:$(date +%s):buildkit_config\r\e[0K"
+
+.script_docker_fix_workspace:
+  script:
+    - |
+      # Fix workspace permissions for cross-user CI jobs (fetch strategy can leave
+      # directories owned by runner user, making them non-writable by container user)
+      if [ ! -w "${CI_PROJECT_DIR}" ]; then
+        echo "Workspace not writable by container user, fixing permissions via docker..."
+        docker run --rm -v "${CI_PROJECT_DIR}:/workspace" alpine:latest chmod -R a+w /workspace
+      fi
+
+.script_git_safe_directory:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):git[collapsed=true]\r\e[0KDisabling Git directory permission check"
+      git config --global --add safe.directory '*'
+      echo -e "\e[0Ksection_end:$(date +%s):git\r\e[0K"
+
+.script_registry_login_gitlab:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to GitLab registry..."
+      echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+      echo -e "\e[0Ksection_end:$(date +%s):registry_login\r\e[0K"
+
+.script_registry_login_all:
+  script:
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to Docker registries..."
+      echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+      if [[ -n "${BLOG_REGISTRY_USER:-}" && -n "${BLOG_REGISTRY_PASSWORD:-}" ]]; then
+        # Retry login with exponential backoff (external registry can be flaky under load)
+        # 5 retries with 10s initial delay: 10s, 20s, 40s, 80s = ~2.5 min total
+        MAX_RETRIES=5
+        RETRY_DELAY=10
+        for attempt in $(seq 1 $MAX_RETRIES); do
+          if echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"; then
+            break
+          fi
+          if [ $attempt -eq $MAX_RETRIES ]; then
+            echo "ERROR: Login to $HIVE_BLOG_REGISTRY failed after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          echo "Login attempt $attempt failed, retrying in ${RETRY_DELAY}s..."
+          sleep $RETRY_DELAY
+          RETRY_DELAY=$((RETRY_DELAY * 2))
+        done
+      fi
+      echo -e "\e[0Ksection_end:$(date +%s):registry_login\r\e[0K"
+
+# =============================================================================
+# JOB TEMPLATES
+# =============================================================================
+
+# this version does not call git since it is not present in the pure dind image
+.pure_docker_image_builder_job_template:
+  extends: .job-defaults
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+    FF_NETWORK_PER_BUILD: "true"
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:${DOCKER_BUILDER_TAG}
+  before_script:
+    - !reference [.script_docker_setup_buildkit, script]
   services:
     - name: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-dind:${DOCKER_DIND_TAG}
       alias: docker
@@ -43,18 +113,10 @@ include:
       - stuck_or_timeout_failure
       - unknown_failure
   before_script:
-    - !reference [.pure_docker_image_builder_job_template, before_script]
-    # Fix workspace permissions for cross-user CI jobs (fetch strategy can leave
-    # directories owned by runner user, making them non-writable by container user)
-    - |
-      if [ ! -w "${CI_PROJECT_DIR}" ]; then
-        echo "Workspace not writable by container user, fixing permissions via docker..."
-        docker run --rm -v "${CI_PROJECT_DIR}:/workspace" alpine:latest chmod -R a+w /workspace
-      fi
-    - |
-      echo -e "\e[0Ksection_start:$(date +%s):git[collapsed=true]\r\e[0KDisabling Git directory permission check"
-      git config --global --add safe.directory '*'
-      echo -e "\e[0Ksection_end:$(date +%s):git\r\e[0K"
+    # Flat composition - each fragment returns a single script block, avoiding nested arrays
+    - !reference [.script_docker_setup_buildkit, script]
+    - !reference [.script_docker_fix_workspace, script]
+    - !reference [.script_git_safe_directory, script]
 
 .docker_image_cleanup_job_template:
   extends: .job-defaults
@@ -103,29 +165,11 @@ include:
     # here as `VAR: $VAR` - GitLab CI doesn't properly expand protected variables in that pattern.
     HIVE_BLOG_REGISTRY: registry-upload.hive.blog
   before_script:
-    - !reference [.docker_image_builder_job_template, before_script]
-    - |
-      echo -e "\e[0Ksection_start:$(date +%s):registry_login[collapsed=true]\r\e[0KLogging to Docker registries..."
-      echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-      if [[ -n "${BLOG_REGISTRY_USER:-}" && -n "${BLOG_REGISTRY_PASSWORD:-}" ]]; then
-        # Retry login with exponential backoff (external registry can be flaky under load)
-        # 5 retries with 10s initial delay: 10s, 20s, 40s, 80s = ~2.5 min total
-        MAX_RETRIES=5
-        RETRY_DELAY=10
-        for attempt in $(seq 1 $MAX_RETRIES); do
-          if echo "$BLOG_REGISTRY_PASSWORD" | docker login -u "$BLOG_REGISTRY_USER" --password-stdin "$HIVE_BLOG_REGISTRY"; then
-            break
-          fi
-          if [ $attempt -eq $MAX_RETRIES ]; then
-            echo "ERROR: Login to $HIVE_BLOG_REGISTRY failed after $MAX_RETRIES attempts"
-            exit 1
-          fi
-          echo "Login attempt $attempt failed, retrying in ${RETRY_DELAY}s..."
-          sleep $RETRY_DELAY
-          RETRY_DELAY=$((RETRY_DELAY * 2))
-        done
-      fi
-      echo -e "\e[0Ksection_end:$(date +%s):registry_login\r\e[0K"
+    # Flat composition - each fragment returns a single script block, avoiding nested arrays
+    - !reference [.script_docker_setup_buildkit, script]
+    - !reference [.script_docker_fix_workspace, script]
+    - !reference [.script_git_safe_directory, script]
+    - !reference [.script_registry_login_all, script]
   rules:
     - if: $QUICK_TEST == "true"
       when: never
