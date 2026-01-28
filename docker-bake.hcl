@@ -20,16 +20,16 @@ variable "PYTHON_RUNTIME_VERSION" {
   default = "3.12-u24.04-1"
 }
 
-variable "CI_BASE_IMAGE_PY312_VERSION" {
-  default = "ubuntu24.04-py3.12-2"
-}
-
-variable "CI_BASE_IMAGE_PY314_VERSION" {
-  default = "ubuntu24.04-py3.14-8"
+variable "CI_BASE_IMAGE_VERSION" {
+  default = "pypa_2_28-1"
 }
 
 variable "CLANG_VERSION" {
   default = "21"
+}
+
+variable "CLANG_PATCH_VERSION" {
+  default = "1.8"
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
@@ -183,31 +183,15 @@ target "python_development" {
   cache-to = generate-cache-to("python_development", "${PYTHON_RUNTIME_VERSION}")
 }
 
-target "ci-base-image-py312" {
+target "ci-base-image" {
   dockerfile = "Dockerfile.ci-base-image"
-  tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_PY312_VERSION}")
-  cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_PY312_VERSION}")
-  cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_PY312_VERSION}")
+  tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
+  cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
+  cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
   args = {
-    PYTHON_VERSION = "3.12"
     CLANG_VERSION = "${CLANG_VERSION}"
+    CLANG_PATCH_VERSION = "${CLANG_PATCH_VERSION}"
   }
-}
-
-target "ci-base-image-py314" {
-  dockerfile = "Dockerfile.ci-base-image"
-  tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_PY314_VERSION}")
-  cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_PY314_VERSION}")
-  cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_PY314_VERSION}")
-  args = {
-    PYTHON_VERSION = "3.14"
-    CLANG_VERSION = "${CLANG_VERSION}"
-  }
-}
-
-# Group target to build both ci-base-image variants
-group "ci-base-image" {
-  targets = ["ci-base-image-py312", "ci-base-image-py314"]
 }
 
 target "haf-app-test-runner" {

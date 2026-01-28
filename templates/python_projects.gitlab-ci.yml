@@ -15,7 +15,7 @@ variables:
   PYTHON_VERSION_FULL: "3.14.2"
   # registries:
   # ci-base-image is built in common-ci-configuration
-  PYTHON_IMAGE_TAG: ":ubuntu24.04-py3.14-8"
+  PYTHON_IMAGE_TAG: ":pypa_2_28-1"
   PYTHON_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/ci-base-image${PYTHON_IMAGE_TAG}"
   # colors:
   TXT_GREEN: "\e[1;32m"
@@ -36,8 +36,10 @@ variables:
     policy: pull-push
   before_script:
     - echo "Using Python project directory - ${PYPROJECT_DIR}"
-    - poetry -C "${PYPROJECT_DIR}" env use python3  # create virtualenv if not exists
-    - source $(poetry -C "${PYPROJECT_DIR}" env info --path)/bin/activate  # activate that virtualenv
+    # Create virtualenv directly with target Python (poetry env use is broken - uses poetry's Python)
+    - python3 -m venv ~/venv-${PYTHON_VERSION}
+    - source ~/venv-${PYTHON_VERSION}/bin/activate
+    - poetry -C "${PYPROJECT_DIR}" env use system
     - python3 -V
     - poetry -C "${PYPROJECT_DIR}" -V
     - pip list
