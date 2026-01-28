@@ -36,6 +36,12 @@ include:
 
 .docker_image_builder_job_template:
   extends: .pure_docker_image_builder_job_template
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+      - unknown_failure
   before_script:
     - !reference [.pure_docker_image_builder_job_template, before_script]
     # Fix workspace permissions for cross-user CI jobs (fetch strategy can leave
