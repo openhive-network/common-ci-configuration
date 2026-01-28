@@ -246,10 +246,14 @@
     - cp "${DATA_CACHE_DIR}/datadir/docker_entrypoint.log" "${CI_PROJECT_DIR}/docker_entrypoint.log" 2>/dev/null || true
     - ls -la "${DATA_CACHE_DIR}/datadir/"
   after_script:
+    # CRITICAL: Always remove lock file FIRST as a separate command
+    # This ensures lock is released even if subsequent cleanup commands fail
+    # This fixes a deadlock where concurrent pipelines wait indefinitely for a lock
+    # that was never released because it was buried in a complex script block
+    - rm -f "${DATA_CACHE_DIR}/replay_running" && echo "Lock file removed: ${DATA_CACHE_DIR}/replay_running" || echo "Lock file removal failed or not present"
+    # Remove our consumer registration
+    - rm -f "${DATA_CACHE_DIR}/consumers/${CI_JOB_ID}" 2>/dev/null || true
     - |
-      # Remove our consumer registration
-      rm -f "${DATA_CACHE_DIR}/consumers/${CI_JOB_ID}" 2>/dev/null || true
-
       # Function to check if a job is still alive via GitLab API
       job_is_alive() {
         local job_id="$1"
@@ -290,9 +294,6 @@
           fi
         done
       fi
-
-      # Remove lock file
-      rm -f "${DATA_CACHE_DIR}/replay_running" 2>/dev/null || true
 
       # Only cleanup extracted directory if:
       # 1. A tar cache exists (data is preserved)
@@ -461,10 +462,14 @@
     - cp "${DATA_CACHE_DIR}/datadir/docker_entrypoint.log" "${CI_PROJECT_DIR}/docker_entrypoint.log" 2>/dev/null || true
     - ls -la "${DATA_CACHE_DIR}/datadir/"
   after_script:
+    # CRITICAL: Always remove lock file FIRST as a separate command
+    # This ensures lock is released even if subsequent cleanup commands fail
+    # This fixes a deadlock where concurrent pipelines wait indefinitely for a lock
+    # that was never released because it was buried in a complex script block
+    - rm -f "${DATA_CACHE_DIR}/replay_running" && echo "Lock file removed: ${DATA_CACHE_DIR}/replay_running" || echo "Lock file removal failed or not present"
+    # Remove our consumer registration
+    - rm -f "${DATA_CACHE_DIR}/consumers/${CI_JOB_ID}" 2>/dev/null || true
     - |
-      # Remove our consumer registration
-      rm -f "${DATA_CACHE_DIR}/consumers/${CI_JOB_ID}" 2>/dev/null || true
-
       # Function to check if a job is still alive via GitLab API
       job_is_alive() {
         local job_id="$1"
@@ -505,9 +510,6 @@
           fi
         done
       fi
-
-      # Remove lock file
-      rm -f "${DATA_CACHE_DIR}/replay_running" 2>/dev/null || true
 
       # Only cleanup extracted directory if:
       # 1. A tar cache exists (data is preserved)
