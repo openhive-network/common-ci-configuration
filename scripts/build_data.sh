@@ -167,15 +167,16 @@ mkdir -p "$DATA_CACHE/consumers"
 touch "$DATA_CACHE/consumers/${CI_JOB_ID:-$$}"
 
 while [[ -f "$LOCK_FILE" ]]; do
-  # Check for stale lock (older than 2 hours)
+  # Check for stale lock (older than 1 hour - matches MAX_LOCK_WAIT default)
+  # Reduced from 2 hours to prevent long waits when lock is orphaned
   LOCK_AGE=$(($(date +%s) - $(stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0)))
-  if [[ $LOCK_AGE -gt 7200 ]]; then
-    echo "WARNING: Stale lock file detected (age: ${LOCK_AGE}s). Removing and proceeding..."
+  if [[ $LOCK_AGE -gt 3600 ]]; then
+    echo "WARNING: Stale lock file detected (age: ${LOCK_AGE}s > 3600s). Removing and proceeding..."
     rm -f "$LOCK_FILE"
     break
   fi
 
-  echo "Another replay is running in $DATA_CACHE. Waiting for it to end... (waited ${WAITED}s, lock age ${LOCK_AGE}s)"
+  echo "Another replay is running in $DATA_CACHE. Waiting... (waited ${WAITED}s, lock age ${LOCK_AGE}s, max wait ${MAX_WAIT_SECONDS}s)"
   sleep "$WAIT_INTERVAL"
   WAITED=$((WAITED + WAIT_INTERVAL))
 
