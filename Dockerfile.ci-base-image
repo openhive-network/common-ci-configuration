@@ -94,6 +94,7 @@ RUN apt-get update && \
         python${PYTHON_VERSION}-venv \
         python${PYTHON_VERSION}-dev \
         # Misc
+        parallel \
         perl \
         p7zip-full \
         tzdata \
