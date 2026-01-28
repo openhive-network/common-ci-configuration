@@ -43,8 +43,11 @@
   variables:
     FF_NETWORK_PER_BUILD: "true"
   before_script:
-    - !reference [.docker_image_builder_job_template, before_script]
-    - git config --global --add safe.directory '*'
+    # Flat composition using script fragments - avoids nested array problem
+    # Note: git safe.directory is already included in .script_git_safe_directory
+    - !reference [.script_docker_setup_buildkit, script]
+    - !reference [.script_docker_fix_workspace, script]
+    - !reference [.script_git_safe_directory, script]
 
 # =============================================================================
 # .prepare_haf_image - Build HAF Docker image
