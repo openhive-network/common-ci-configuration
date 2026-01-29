@@ -216,6 +216,11 @@ variables:
     GIT_STRATEGY: clone
     GIT_DEPTH: 0  # We need full history to get correct version (dynamic versioning)
     DIST_DIR: "${PYPROJECT_DIR}/dist"
+  before_script:
+    - !reference [.configuration_template, before_script]
+    # GitLab CI checks out as detached HEAD, so git doesn't know the branch name.
+    # poetry-dynamic-versioning needs a branch to detect stable/unstable builds.
+    - git checkout -B "$CI_COMMIT_REF_NAME" "$CI_COMMIT_SHA"
   script:
     - echo -e "${TXT_BLUE}Building python wheel...${TXT_CLEAR}"
     - ls -al
@@ -248,6 +253,8 @@ variables:
     GIT_DEPTH: 0  # Required for poetry publish to get correct version
   before_script:
     - !reference [.configuration_template, before_script]
+    # GitLab CI checks out as detached HEAD — checkout branch for correct versioning
+    - git checkout -B "$CI_COMMIT_REF_NAME" "$CI_COMMIT_SHA"
     - rm build_wheel.env  # to keep the git status clean
   after_script:
     - echo "WHEEL_BUILD_VERSION is ${WHEEL_BUILD_VERSION}"  # Pass version to dependent jobs
