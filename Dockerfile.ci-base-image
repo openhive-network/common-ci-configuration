@@ -117,10 +117,21 @@ ARG CMAKE_VERSION=3.28.6
 RUN curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
     | tar xz -C /usr/local --strip-components=1
 
-# Install Doxygen 1.9.8 pre-built binary (AlmaLinux 8 only has 1.8.14, hive requires 1.9.x)
+# Build and install Doxygen from source (pre-built binaries require glibc 2.29+)
+# AlmaLinux 8 only has 1.8.14 in repos, hive requires 1.9.x for wallet help generation
 ARG DOXYGEN_VERSION=1.9.8
-RUN curl -fsSL "https://github.com/doxygen/doxygen/releases/download/Release_${DOXYGEN_VERSION//./_}/doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz" \
-        | tar xz -C /usr/local --strip-components=1
+RUN set -e && \
+    curl -fsSL "https://github.com/doxygen/doxygen/archive/refs/tags/Release_${DOXYGEN_VERSION//./_}.tar.gz" \
+        | tar xz -C /tmp && \
+    cd /tmp/doxygen-Release_${DOXYGEN_VERSION//./_} && \
+    mkdir build && cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local && \
+    make -j "$(nproc)" && \
+    make install && \
+    cd / && rm -rf /tmp/doxygen-Release_${DOXYGEN_VERSION//./_} && \
+    doxygen --version
 
 # Build and install snappy with static library (snappy-static not available in repos)
 ARG SNAPPY_VERSION=1.1.10
