@@ -34,8 +34,27 @@
 variables:
   # Default GitHub repository for documentation
   GITHUB_PAGES_REPO: "openhive-network/hive-doc"
-  # Common CI configuration reference - should be set by including project
-  COMMON_CI_REF: "develop"
+  # Directory where GitHub Pages scripts are stored
+  GITHUB_PAGES_SCRIPTS_DIR: "${CI_PROJECT_DIR}/.github-pages-scripts"
+
+# =============================================================================
+# Fetch GitHub Pages Scripts
+# =============================================================================
+# Downloads the GitHub Pages scripts from common-ci-configuration.
+# This is used as a before_script in deployment jobs.
+
+.fetch_github_pages_scripts:
+  before_script:
+    - echo "Fetching GitHub Pages scripts from common-ci-configuration..."
+    - mkdir -p "${GITHUB_PAGES_SCRIPTS_DIR}"
+    - |
+      for script in deploy_github_pages.sh generate_html_docs.sh doc-index-template.html; do
+        curl -sSL --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+          "${CI_API_V4_URL}/projects/hive%2Fcommon-ci-configuration/repository/files/scripts%2Fgithub-pages%2F${script}/raw?ref=${COMMON_CI_GITHUB_PAGES_REF}" \
+          -o "${GITHUB_PAGES_SCRIPTS_DIR}/${script}"
+      done
+    - chmod +x "${GITHUB_PAGES_SCRIPTS_DIR}"/*.sh
+    - echo "GitHub Pages scripts fetched successfully"
 
 # =============================================================================
 # Generate HTML Documentation Template
@@ -62,6 +81,9 @@ variables:
     REPO_URL: "https://github.com/openhive-network/${CI_PROJECT_NAME}"
     README_PATH: "README.md"
     TSCONFIG_PATH: "tsconfig.json"
+  before_script:
+    - !reference [.npm_based_job_base, before_script]
+    - !reference [.fetch_github_pages_scripts, before_script]
   script:
     - |
       PNPM_DIR_ARG=""
@@ -69,7 +91,7 @@ variables:
         PNPM_DIR_ARG="--pnpm-dir ${PNPM_DIR}"
       fi
     - |
-      ${CI_PROJECT_DIR}/scripts/github-pages/generate_html_docs.sh \
+      ${GITHUB_PAGES_SCRIPTS_DIR}/generate_html_docs.sh \
         --repo-url "${REPO_URL}" \
         --revision "${CI_COMMIT_SHA}" \
         --output-dir "${HTML_DOCS_OUTPUT_DIR}" \
@@ -101,6 +123,8 @@ variables:
   variables:
     GITHUB_REPO: "${GITHUB_PAGES_REPO}"
     DOCS_SUBDIR: "wiki"
+  before_script:
+    - !reference [.fetch_github_pages_scripts, before_script]
   rules:
     - if: '$CI_COMMIT_REF_PROTECTED == "true" && $GITHUB_PAGES_TOKEN'
   tags:
@@ -122,7 +146,7 @@ variables:
     DOCS_SUBDIR: "manual"
   script:
     - |
-      ${CI_PROJECT_DIR}/scripts/github-pages/deploy_github_pages.sh \
+      ${GITHUB_PAGES_SCRIPTS_DIR}/deploy_github_pages.sh \
         --mode simple \
         --version "${CI_COMMIT_REF_SLUG}" \
         --project "${PROJECT_NAME}" \
@@ -147,7 +171,7 @@ variables:
   extends: .deploy_github_pages_base
   script:
     - |
-      ${CI_PROJECT_DIR}/scripts/github-pages/deploy_github_pages.sh \
+      ${GITHUB_PAGES_SCRIPTS_DIR}/deploy_github_pages.sh \
         --mode ts-wiki \
         --version "${CI_COMMIT_REF_SLUG}" \
         --project "${PROJECT_NAME}" \
@@ -174,7 +198,7 @@ variables:
   extends: .deploy_github_pages_base
   script:
     - |
-      ${CI_PROJECT_DIR}/scripts/github-pages/deploy_github_pages.sh \
+      ${GITHUB_PAGES_SCRIPTS_DIR}/deploy_github_pages.sh \
         --mode full \
         --version "${CI_COMMIT_REF_SLUG}" \
         --project "${PROJECT_NAME}" \
