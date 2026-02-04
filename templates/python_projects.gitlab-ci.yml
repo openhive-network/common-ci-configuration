@@ -154,6 +154,39 @@ variables:
     - cd "${PYPROJECT_DIR}"
     - poetry check --lock --verbose
 
+# -----------------------------------------------------------------------------
+# Poetry Lock Stability Verification Template
+# -----------------------------------------------------------------------------
+# Verifies that poetry.lock contains only stable dependency versions.
+# Ensures that stable branches use stable dependency versions.
+#
+# Usage:
+#   verify_poetry_lock_stability:
+#     stage: static_code_analysis
+#     extends: .verify_poetry_lock_stability_template
+#
+# Variables:
+#   PYPROJECT_DIR             - Directory containing poetry.lock (default: CI_PROJECT_DIR)
+#   UNSTABLE_VERSION_PATTERN  - Regex pattern to detect unstable versions (default: "dev|unstable")
+#   ALLOWED_PACKAGE_PATTERN   - Package name pattern to allow unstable versions (default: "" = none)
+#   COMMON_CI_REF             - Branch/ref to fetch script from (default: "develop")
+#
+.verify_poetry_lock_stability_template:
+  extends: .job-defaults
+  variables:
+    PYPROJECT_DIR: "${CI_PROJECT_DIR}"
+    UNSTABLE_VERSION_PATTERN: "dev|unstable"
+    ALLOWED_PACKAGE_PATTERN: ""
+    COMMON_CI_REF: "develop"
+  image: "${PYTHON_IMAGE}"
+  script:
+    - |
+      SCRIPT_URL="${CI_SERVER_URL}/hive/common-ci-configuration/-/raw/${COMMON_CI_REF}/scripts/bash/verify_poetry_lock_stability.sh"
+      echo "Fetching script from: ${SCRIPT_URL}"
+      curl -fsSL "${SCRIPT_URL}" -o /tmp/verify_poetry_lock_stability.sh
+      chmod +x /tmp/verify_poetry_lock_stability.sh
+      /tmp/verify_poetry_lock_stability.sh --pyproject-dir "${PYPROJECT_DIR}" --unstable-version-pattern "${UNSTABLE_VERSION_PATTERN}" --allowed-package-pattern "${ALLOWED_PACKAGE_PATTERN}"
+
 # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<| STATIC CODE ANALYSIS |<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 
