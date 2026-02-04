@@ -20,9 +20,6 @@ set -e
 #   --readme           Optional: Path to README file (default: README.md)
 #   --tsconfig         Optional: Path to tsconfig.json (default: tsconfig.json)
 
-SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
-PROJECT_DIR="${SCRIPTPATH}/../.."
-
 # Parse arguments
 REPO_URL=""
 REVISION_INFO=""
