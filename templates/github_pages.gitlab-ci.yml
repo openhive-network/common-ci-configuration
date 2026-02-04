@@ -1,0 +1,187 @@
+# GitHub Pages Documentation Deployment Templates
+#
+# This template provides base job definitions for deploying documentation to GitHub Pages.
+# Projects should extend these templates and configure project-specific variables.
+#
+# Available templates:
+#   .generate_html_docs_template - Generate TypeScript API docs using TypeDoc
+#   .deploy_github_pages_simple_template - Deploy single docs directory (retype)
+#   .deploy_github_pages_ts_wiki_template - Deploy TypeScript + wiki docs
+#   .deploy_github_pages_full_template - Deploy TypeScript + Python + wiki docs
+#
+# Required CI variables:
+#   GITHUB_PAGES_TOKEN - GitHub token with repo write access
+#
+# Example usage:
+#
+#   generate_html_docs:
+#     extends: .generate_html_docs_template
+#     variables:
+#       PACKAGE_NAME: "@hiveio/wax"
+#       ENTRY_POINT: "wasm/lib/index.ts"
+#     needs:
+#       - job: build
+#         artifacts: true
+#
+#   deploy_to_github_pages:
+#     extends: .deploy_github_pages_full_template
+#     variables:
+#       PROJECT_NAME: "wax"
+#     needs:
+#       - job: generate_html_docs
+#         artifacts: true
+
+variables:
+  # Default GitHub repository for documentation
+  GITHUB_PAGES_REPO: "openhive-network/hive-doc"
+  # Common CI configuration reference - should be set by including project
+  COMMON_CI_REF: "develop"
+
+# =============================================================================
+# Generate HTML Documentation Template
+# =============================================================================
+# Generates TypeScript API documentation using TypeDoc.
+# Requires npm_projects.gitlab-ci.yml to be included.
+#
+# Required variables:
+#   PACKAGE_NAME - Package name for docs (e.g., "@hiveio/wax")
+#   ENTRY_POINT - TypeScript entry point (e.g., "wasm/lib/index.ts")
+#
+# Optional variables:
+#   PNPM_DIR - Directory to run pnpm from (for monorepos)
+#   README_PATH - Path to README file (default: README.md)
+#   TSCONFIG_PATH - Path to tsconfig (default: tsconfig.json)
+#   REPO_URL - Repository URL for source links (default: GitHub mirror)
+#   HTML_DOCS_OUTPUT_DIR - Output directory (default: ${CI_PROJECT_DIR}/docs-output/ts)
+
+.generate_html_docs_template:
+  stage: build
+  extends: .npm_based_job_base
+  variables:
+    HTML_DOCS_OUTPUT_DIR: "${CI_PROJECT_DIR}/docs-output/ts"
+    REPO_URL: "https://github.com/openhive-network/${CI_PROJECT_NAME}"
+    README_PATH: "README.md"
+    TSCONFIG_PATH: "tsconfig.json"
+  script:
+    - |
+      PNPM_DIR_ARG=""
+      if [ -n "${PNPM_DIR}" ]; then
+        PNPM_DIR_ARG="--pnpm-dir ${PNPM_DIR}"
+      fi
+    - |
+      ${CI_PROJECT_DIR}/scripts/github-pages/generate_html_docs.sh \
+        --repo-url "${REPO_URL}" \
+        --revision "${CI_COMMIT_SHA}" \
+        --output-dir "${HTML_DOCS_OUTPUT_DIR}" \
+        --package-version "${BUILT_PACKAGE_VERSION}" \
+        --package-name "${PACKAGE_NAME}" \
+        --entry-point "${ENTRY_POINT}" \
+        --readme "${README_PATH}" \
+        --tsconfig "${TSCONFIG_PATH}" \
+        ${PNPM_DIR_ARG}
+  artifacts:
+    paths:
+      - "${HTML_DOCS_OUTPUT_DIR}"
+    when: always
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_REF_PROTECTED == "true"'
+  tags:
+    - public-runner-docker
+
+# =============================================================================
+# Deploy GitHub Pages Templates
+# =============================================================================
+# Base template for GitHub Pages deployment jobs.
+# Do not use directly - use one of the mode-specific templates below.
+
+.deploy_github_pages_base:
+  stage: deploy
+  image: node:20
+  variables:
+    GITHUB_REPO: "${GITHUB_PAGES_REPO}"
+    DOCS_SUBDIR: "wiki"
+  rules:
+    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $GITHUB_PAGES_TOKEN'
+  tags:
+    - public-runner-docker
+
+# -----------------------------------------------------------------------------
+# Simple mode: Single docs directory (for retype/manual docs)
+# -----------------------------------------------------------------------------
+# Required variables:
+#   PROJECT_NAME - Project subdirectory in hive-doc (e.g., "wax")
+#   DOCS_DIR - Directory containing documentation to deploy
+#
+# Optional variables:
+#   DOCS_SUBDIR - Target subdirectory (default: "manual")
+
+.deploy_github_pages_simple_template:
+  extends: .deploy_github_pages_base
+  variables:
+    DOCS_SUBDIR: "manual"
+  script:
+    - |
+      ${CI_PROJECT_DIR}/scripts/github-pages/deploy_github_pages.sh \
+        --mode simple \
+        --version "${CI_COMMIT_REF_SLUG}" \
+        --project "${PROJECT_NAME}" \
+        --github-repo "${GITHUB_REPO}" \
+        --github-token "${GITHUB_PAGES_TOKEN}" \
+        --docs-subdir "${DOCS_SUBDIR}" \
+        --source-url "${CI_PROJECT_URL}" \
+        --docs-dir "${DOCS_DIR}"
+
+# -----------------------------------------------------------------------------
+# TS-Wiki mode: TypeScript API docs + wiki/extra docs
+# -----------------------------------------------------------------------------
+# Required variables:
+#   PROJECT_NAME - Project subdirectory in hive-doc (e.g., "workerbee")
+#   TS_DOCS_DIR - Directory containing TypeScript HTML docs
+#   EXTRA_DOCS_DIR - Directory containing additional docs (wiki markdown)
+#
+# Optional variables:
+#   DOCS_SUBDIR - Target subdirectory (default: "wiki")
+
+.deploy_github_pages_ts_wiki_template:
+  extends: .deploy_github_pages_base
+  script:
+    - |
+      ${CI_PROJECT_DIR}/scripts/github-pages/deploy_github_pages.sh \
+        --mode ts-wiki \
+        --version "${CI_COMMIT_REF_SLUG}" \
+        --project "${PROJECT_NAME}" \
+        --github-repo "${GITHUB_REPO}" \
+        --github-token "${GITHUB_PAGES_TOKEN}" \
+        --docs-subdir "${DOCS_SUBDIR}" \
+        --source-url "${CI_PROJECT_URL}" \
+        --ts-docs-dir "${TS_DOCS_DIR}" \
+        --extra-docs-dir "${EXTRA_DOCS_DIR}"
+
+# -----------------------------------------------------------------------------
+# Full mode: TypeScript + Python + wiki/extra docs
+# -----------------------------------------------------------------------------
+# Required variables:
+#   PROJECT_NAME - Project subdirectory in hive-doc (e.g., "wax")
+#   TS_DOCS_DIR - Directory containing TypeScript HTML docs
+#   PY_DOCS_DIR - Directory containing Python mkdocs output
+#   EXTRA_DOCS_DIR - Directory containing additional docs (wiki markdown)
+#
+# Optional variables:
+#   DOCS_SUBDIR - Target subdirectory (default: "wiki")
+
+.deploy_github_pages_full_template:
+  extends: .deploy_github_pages_base
+  script:
+    - |
+      ${CI_PROJECT_DIR}/scripts/github-pages/deploy_github_pages.sh \
+        --mode full \
+        --version "${CI_COMMIT_REF_SLUG}" \
+        --project "${PROJECT_NAME}" \
+        --github-repo "${GITHUB_REPO}" \
+        --github-token "${GITHUB_PAGES_TOKEN}" \
+        --docs-subdir "${DOCS_SUBDIR}" \
+        --source-url "${CI_PROJECT_URL}" \
+        --ts-docs-dir "${TS_DOCS_DIR}" \
+        --py-docs-dir "${PY_DOCS_DIR}" \
+        --extra-docs-dir "${EXTRA_DOCS_DIR}"

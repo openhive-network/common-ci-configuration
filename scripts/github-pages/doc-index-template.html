@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>__PROJECT_NAME__ Documentation</title>
+  <style>
+    :root {
+      --bg-color: #0d1117;
+      --card-bg: #161b22;
+      --text-color: #c9d1d9;
+      --text-muted: #8b949e;
+      --accent-color: #58a6ff;
+      --border-color: #30363d;
+      --success-color: #3fb950;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg-color: #ffffff;
+        --card-bg: #f6f8fa;
+        --text-color: #24292f;
+        --text-muted: #57606a;
+        --accent-color: #0969da;
+        --border-color: #d0d7de;
+        --success-color: #1a7f37;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg-color);
+      color: var(--text-color);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    .container { max-width: 700px; margin: 0 auto; padding: 2rem; }
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+    h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+    .subtitle { color: var(--text-muted); font-size: 1rem; }
+    .links {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+    .links a {
+      color: var(--accent-color);
+      text-decoration: none;
+    }
+    .links a:hover { text-decoration: underline; }
+    .version-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .version-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem 1.25rem;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      text-decoration: none;
+      color: var(--text-color);
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .version-item:hover {
+      border-color: var(--accent-color);
+      background: var(--bg-color);
+    }
+    .version-icon {
+      width: 20px;
+      height: 20px;
+      color: var(--accent-color);
+    }
+    .version-name { font-weight: 500; }
+    .version-badge {
+      margin-left: auto;
+      padding: 0.2rem 0.5rem;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      background: var(--success-color);
+      color: white;
+    }
+    .loading { text-align: center; padding: 2rem; color: var(--text-muted); }
+    .error { text-align: center; padding: 2rem; color: #f85149; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>__PROJECT_NAME__ Documentation</h1>
+      <p class="subtitle">Select a version to view documentation</p>
+    </header>
+    <main>
+      <div id="versions" class="version-list">
+        <div class="loading">Loading versions...</div>
+      </div>
+    </main>
+  </div>
+  <script>
+    const tagIcon = '<svg class="version-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/></svg>';
+
+    fetch('versions.json')
+      .then(r => r.json())
+      .then(data => {
+        const container = document.getElementById('versions');
+        if (!data.versions || data.versions.length === 0) {
+          container.innerHTML = '<div class="error">No versions available</div>';
+          return;
+        }
+        container.innerHTML = data.versions.map((v, i) => `
+          <a href="${v}/" class="version-item">
+            ${tagIcon}
+            <span class="version-name">${v}</span>
+            ${i === 0 ? '<span class="version-badge">latest</span>' : ''}
+          </a>
+        `).join('');
+      })
+      .catch(err => {
+        document.getElementById('versions').innerHTML = '<div class="error">Failed to load versions</div>';
+      });
+  </script>
+</body>
+</html>
