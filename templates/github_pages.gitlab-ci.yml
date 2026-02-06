@@ -148,7 +148,7 @@ variables:
     - |
       ${GITHUB_PAGES_SCRIPTS_DIR}/deploy_github_pages.sh \
         --mode simple \
-        --version "${CI_COMMIT_REF_SLUG}" \
+        --version "${CI_COMMIT_REF_NAME}" \
         --project "${PROJECT_NAME}" \
         --github-repo "${GITHUB_REPO}" \
         --github-token "${GITHUB_PAGES_TOKEN}" \
@@ -173,7 +173,7 @@ variables:
     - |
       ${GITHUB_PAGES_SCRIPTS_DIR}/deploy_github_pages.sh \
         --mode ts-wiki \
-        --version "${CI_COMMIT_REF_SLUG}" \
+        --version "${CI_COMMIT_REF_NAME}" \
         --project "${PROJECT_NAME}" \
         --github-repo "${GITHUB_REPO}" \
         --github-token "${GITHUB_PAGES_TOKEN}" \
@@ -200,7 +200,7 @@ variables:
     - |
       ${GITHUB_PAGES_SCRIPTS_DIR}/deploy_github_pages.sh \
         --mode full \
-        --version "${CI_COMMIT_REF_SLUG}" \
+        --version "${CI_COMMIT_REF_NAME}" \
         --project "${PROJECT_NAME}" \
         --github-repo "${GITHUB_REPO}" \
         --github-token "${GITHUB_PAGES_TOKEN}" \
