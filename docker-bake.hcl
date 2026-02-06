@@ -21,15 +21,7 @@ variable "PYTHON_RUNTIME_VERSION" {
 }
 
 variable "CI_BASE_IMAGE_VERSION" {
-  default = "pypa_2_28-1"
-}
-
-variable "CLANG_VERSION" {
-  default = "21"
-}
-
-variable "CLANG_PATCH_VERSION" {
-  default = "1.8"
+  default = "pypa_2_28-2"
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
@@ -188,10 +180,6 @@ target "ci-base-image" {
   tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
   cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
   cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
-  args = {
-    CLANG_VERSION = "${CLANG_VERSION}"
-    CLANG_PATCH_VERSION = "${CLANG_PATCH_VERSION}"
-  }
 }
 
 target "haf-app-test-runner" {
