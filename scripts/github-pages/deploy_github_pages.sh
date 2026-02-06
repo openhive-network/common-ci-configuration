@@ -286,8 +286,8 @@ generate_index_page() {
       <div class="dir-list">
 HEADER
 
-  # Replace title placeholder
-  sed -i "s/__TITLE__/${title}/g" "${dir}/index.html"
+  # Replace title placeholder (use | delimiter to handle versions with slashes)
+  sed -i "s|__TITLE__|${title}|g" "${dir}/index.html"
 
   # Add directory links
   local folder_icon='<svg class="dir-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>'
@@ -310,18 +310,152 @@ ITEM
 FOOTER
 }
 
-# Generate index.html for version directory (lists all existing subdirs)
-echo "Generating index page for ${PROJECT_SUBDIR}/${VERSION}/"
+# Update subdirs.json for this version directory
+# Each deployment adds its subdirectory to the list, enabling dynamic index.html
 VERSION_DIR="${PROJECT_SUBDIR}/${VERSION}"
-EXISTING_SUBDIRS=()
-for d in "${VERSION_DIR}"/*/; do
-  if [ -d "$d" ]; then
-    subdir_name=$(basename "$d")
-    EXISTING_SUBDIRS+=("$subdir_name")
-  fi
-done
-echo "Found subdirectories: ${EXISTING_SUBDIRS[*]}"
-generate_index_page "${VERSION_DIR}" "${PROJECT_SUBDIR} ${VERSION}" "${EXISTING_SUBDIRS[@]}"
+SUBDIRS_FILE="${VERSION_DIR}/subdirs.json"
+python3 << EOF
+import json
+from pathlib import Path
+
+subdirs_file = Path("${SUBDIRS_FILE}")
+current_subdir = "${GITHUB_DOCS_SUBDIR}"
+
+if subdirs_file.exists():
+    data = json.loads(subdirs_file.read_text())
+else:
+    data = {"subdirs": []}
+
+if current_subdir not in data["subdirs"]:
+    data["subdirs"].append(current_subdir)
+
+# Sort: manual first, then wiki, then others alphabetically
+def sort_key(s):
+    if s == "manual":
+        return (0, s)
+    elif s == "wiki":
+        return (1, s)
+    return (2, s)
+
+data["subdirs"] = sorted(data["subdirs"], key=sort_key)
+subdirs_file.write_text(json.dumps(data, indent=2))
+EOF
+
+echo "Updated subdirs.json:"
+cat "${SUBDIRS_FILE}"
+
+# Generate dynamic index.html for version directory that loads subdirs.json
+echo "Generating dynamic index page for ${VERSION_DIR}/"
+cat > "${VERSION_DIR}/index.html" << 'DYNINDEX'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>__TITLE__</title>
+  <style>
+    :root {
+      --bg-color: #0d1117;
+      --card-bg: #161b22;
+      --text-color: #c9d1d9;
+      --text-muted: #8b949e;
+      --accent-color: #58a6ff;
+      --border-color: #30363d;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg-color: #ffffff;
+        --card-bg: #f6f8fa;
+        --text-color: #24292f;
+        --text-muted: #57606a;
+        --accent-color: #0969da;
+        --border-color: #d0d7de;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg-color);
+      color: var(--text-color);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    .container { max-width: 700px; margin: 0 auto; padding: 2rem; }
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+    h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+    .subtitle { color: var(--text-muted); font-size: 1rem; }
+    .dir-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .dir-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem 1.25rem;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      text-decoration: none;
+      color: var(--text-color);
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .dir-item:hover {
+      border-color: var(--accent-color);
+      background: var(--bg-color);
+    }
+    .dir-icon {
+      width: 20px;
+      height: 20px;
+      color: var(--accent-color);
+    }
+    .dir-name { font-weight: 500; }
+    .loading { text-align: center; padding: 2rem; color: var(--text-muted); }
+    .error { text-align: center; padding: 2rem; color: #f85149; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>__TITLE__</h1>
+      <p class="subtitle">Select a subdirectory</p>
+    </header>
+    <main>
+      <div id="subdirs" class="dir-list">
+        <div class="loading">Loading...</div>
+      </div>
+    </main>
+  </div>
+  <script>
+    const folderIcon = '<svg class="dir-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>';
+
+    fetch('subdirs.json')
+      .then(r => r.json())
+      .then(data => {
+        const container = document.getElementById('subdirs');
+        if (!data.subdirs || data.subdirs.length === 0) {
+          container.innerHTML = '<div class="error">No subdirectories available</div>';
+          return;
+        }
+        container.innerHTML = data.subdirs.map(s => `
+          <a href="${s}/" class="dir-item">
+            ${folderIcon}
+            <span class="dir-name">${s}/</span>
+          </a>
+        `).join('');
+      })
+      .catch(err => {
+        document.getElementById('subdirs').innerHTML = '<div class="error">Failed to load subdirectories</div>';
+      });
+  </script>
+</body>
+</html>
+DYNINDEX
+
+# Replace title placeholder (use | delimiter to handle versions with slashes like bw/branch-name)
+sed -i "s|__TITLE__|${PROJECT_SUBDIR} ${VERSION}|g" "${VERSION_DIR}/index.html"
 
 # Generate index.html for docs subdir based on mode
 echo "Generating index page for ${DOCS_BASE}/"
