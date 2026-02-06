@@ -42,11 +42,33 @@ variables:
 # =============================================================================
 # Downloads the GitHub Pages scripts from common-ci-configuration.
 # This is used as a before_script in deployment jobs.
+#
+# The script ref is determined in this order:
+# 1. COMMON_CI_GITHUB_PAGES_REF variable if explicitly set
+# 2. Auto-detected from npm-common-config submodule (ts/npm-common-config or npm-common-config)
 
 .fetch_github_pages_scripts:
   before_script:
     - echo "Fetching GitHub Pages scripts from common-ci-configuration..."
     - mkdir -p "${GITHUB_PAGES_SCRIPTS_DIR}"
+    # Auto-detect ref from submodule if not explicitly set
+    - |
+      if [ -z "${COMMON_CI_GITHUB_PAGES_REF:-}" ]; then
+        echo "COMMON_CI_GITHUB_PAGES_REF not set, detecting from submodule..."
+        for submodule_path in ts/npm-common-config npm-common-config; do
+          if [ -d "${submodule_path}" ]; then
+            COMMON_CI_GITHUB_PAGES_REF=$(git -C "${submodule_path}" rev-parse HEAD 2>/dev/null || echo "")
+            if [ -n "${COMMON_CI_GITHUB_PAGES_REF}" ]; then
+              echo "Detected ref from ${submodule_path}: ${COMMON_CI_GITHUB_PAGES_REF}"
+              break
+            fi
+          fi
+        done
+        if [ -z "${COMMON_CI_GITHUB_PAGES_REF}" ]; then
+          echo "ERROR: Could not detect COMMON_CI_GITHUB_PAGES_REF. Set it explicitly or ensure npm-common-config submodule is checked out."
+          exit 1
+        fi
+      fi
     - |
       for script in deploy_github_pages.sh generate_html_docs.sh doc-index-template.html; do
         curl -sSL --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
