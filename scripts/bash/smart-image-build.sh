@@ -8,11 +8,13 @@
 # it re-tags the cached image to a newer commit to keep it within the search window.
 #
 # Decision Logic:
-#   When source files changed: full build required
+#   When source files changed (no --skip-build): full build required
 #   When only tests/docs changed (--skip-build):
-#     - Small gap (<RETAG_THRESHOLD): use cached image as-is
-#     - Medium gap (RETAG_THRESHOLD to SEARCH_DEPTH): re-tag cached image
-#     - Large gap (>SEARCH_DEPTH): force rebuild (fail-safe)
+#     - Source changes since cached image (gap > 0): full build required
+#       (intermediate commits changed source files that the cached image lacks)
+#     - No source changes, small total gap (<RETAG_THRESHOLD): use cached as-is
+#     - No source changes, medium total gap (RETAG_THRESHOLD to SEARCH_DEPTH): re-tag
+#     - No source changes, large total gap (>SEARCH_DEPTH): force rebuild (fail-safe)
 #
 # Usage:
 #   smart-image-build.sh [OPTIONS]
@@ -242,31 +244,46 @@ else
         GAP_SIZE=$((SEARCH_DEPTH + 1))
     fi
 
-    if [[ $GAP_SIZE -le $RETAG_THRESHOLD ]]; then
-        # Small gap - cached image is close enough, downstream will find it
-        BUILD_ACTION="skip"
-        IMAGE_COMMIT="$CACHED_COMMIT"
-        # Extract tag from cached image
-        IMAGE_TAG="${CACHED_IMAGE##*:}"
-        IMAGE_NAME="$CACHED_IMAGE"
-        log "Gap ($GAP_SIZE) <= threshold ($RETAG_THRESHOLD) - using cached image"
-
-    elif [[ $GAP_SIZE -le $SEARCH_DEPTH ]]; then
-        # Medium gap - re-tag to keep image within search window
-        BUILD_ACTION="retag"
-        IMAGE_COMMIT="$COMMIT"
-        IMAGE_TAG="$CURRENT_TAG"
-        IMAGE_NAME="$CURRENT_IMAGE"
-        log "Gap ($GAP_SIZE) > threshold ($RETAG_THRESHOLD) but <= search depth ($SEARCH_DEPTH) - re-tagging"
-
-    else
-        # Large gap (fail-safe) - force full rebuild
+    if [[ $GAP_SIZE -gt 0 ]]; then
+        # Source files changed since cached image - must rebuild even though
+        # the latest commit only changed tests/docs. The cached image binary
+        # doesn't include intermediate source changes.
         BUILD_ACTION="build"
         IMAGE_COMMIT="$COMMIT"
         IMAGE_TAG="$CURRENT_TAG"
         IMAGE_NAME="$CURRENT_IMAGE"
-        log "WARNING: Gap ($GAP_SIZE) exceeds search depth ($SEARCH_DEPTH) - forcing full rebuild"
-        log "         This is a fail-safe to ensure downstream repos can find the image"
+        log "Gap ($GAP_SIZE) > 0 - source files changed since cached image, full build required"
+
+    else
+        # No source changes since cached image (gap = 0).
+        # Decide whether the cached tag is fresh enough for downstream repos.
+        # Count ALL commits (not just source-changing) to measure tag staleness.
+        TOTAL_GAP=$(git rev-list --count "$CACHED_COMMIT".."$COMMIT" 2>/dev/null || echo "$((SEARCH_DEPTH + 1))")
+
+        if [[ $TOTAL_GAP -le $RETAG_THRESHOLD ]]; then
+            # Small total gap - cached image tag is recent enough
+            BUILD_ACTION="skip"
+            IMAGE_COMMIT="$CACHED_COMMIT"
+            IMAGE_TAG="${CACHED_IMAGE##*:}"
+            IMAGE_NAME="$CACHED_IMAGE"
+            log "No source changes, total gap ($TOTAL_GAP) <= threshold ($RETAG_THRESHOLD) - using cached image"
+
+        elif [[ $TOTAL_GAP -le $SEARCH_DEPTH ]]; then
+            # Medium total gap - re-tag to keep image within search window
+            BUILD_ACTION="retag"
+            IMAGE_COMMIT="$COMMIT"
+            IMAGE_TAG="$CURRENT_TAG"
+            IMAGE_NAME="$CURRENT_IMAGE"
+            log "No source changes, total gap ($TOTAL_GAP) > threshold ($RETAG_THRESHOLD) - re-tagging"
+
+        else
+            # Large gap (fail-safe) - force full rebuild
+            BUILD_ACTION="build"
+            IMAGE_COMMIT="$COMMIT"
+            IMAGE_TAG="$CURRENT_TAG"
+            IMAGE_NAME="$CURRENT_IMAGE"
+            log "WARNING: Total gap ($TOTAL_GAP) exceeds search depth ($SEARCH_DEPTH) - forcing full rebuild"
+        fi
     fi
 fi
 
