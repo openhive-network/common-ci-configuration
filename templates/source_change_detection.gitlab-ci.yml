@@ -242,29 +242,28 @@ variables:
 
         echo "Output written to: $UPSTREAM_OUTPUT"
         cat "$UPSTREAM_OUTPUT"
-        exit 0
+      else
+        # Fetch common-ci-configuration scripts
+        SCRIPTS_URL="https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/develop/scripts/bash"
+
+        mkdir -p /tmp/ci-scripts
+        for script in find-last-source-commit.sh get-cached-image.sh find-upstream-image.sh; do
+          wget -q -O "/tmp/ci-scripts/$script" "$SCRIPTS_URL/$script"
+          chmod +x "/tmp/ci-scripts/$script"
+        done
+
+        # Run the upstream image finder (with automatic fallback to older commits)
+        /tmp/ci-scripts/find-upstream-image.sh \
+          --repo-url="$UPSTREAM_REPO_URL" \
+          --registry="$UPSTREAM_REGISTRY" \
+          --branch="$UPSTREAM_BRANCH" \
+          --patterns="$UPSTREAM_PATTERNS" \
+          ${UPSTREAM_IMAGE:+--image="$UPSTREAM_IMAGE"} \
+          --depth="$UPSTREAM_DEPTH" \
+          --max-search="$UPSTREAM_MAX_SEARCH" \
+          --output="$UPSTREAM_OUTPUT" \
+          ${UPSTREAM_REQUIRE_HIT:+$([ "$UPSTREAM_REQUIRE_HIT" = "true" ] && echo "--require-hit")}
       fi
-
-      # Fetch common-ci-configuration scripts
-      SCRIPTS_URL="https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/develop/scripts/bash"
-
-      mkdir -p /tmp/ci-scripts
-      for script in find-last-source-commit.sh get-cached-image.sh find-upstream-image.sh; do
-        wget -q -O "/tmp/ci-scripts/$script" "$SCRIPTS_URL/$script"
-        chmod +x "/tmp/ci-scripts/$script"
-      done
-
-      # Run the upstream image finder (with automatic fallback to older commits)
-      /tmp/ci-scripts/find-upstream-image.sh \
-        --repo-url="$UPSTREAM_REPO_URL" \
-        --registry="$UPSTREAM_REGISTRY" \
-        --branch="$UPSTREAM_BRANCH" \
-        --patterns="$UPSTREAM_PATTERNS" \
-        ${UPSTREAM_IMAGE:+--image="$UPSTREAM_IMAGE"} \
-        --depth="$UPSTREAM_DEPTH" \
-        --max-search="$UPSTREAM_MAX_SEARCH" \
-        --output="$UPSTREAM_OUTPUT" \
-        ${UPSTREAM_REQUIRE_HIT:+$([ "$UPSTREAM_REQUIRE_HIT" = "true" ] && echo "--require-hit")}
   artifacts:
     reports:
       dotenv: $UPSTREAM_OUTPUT
