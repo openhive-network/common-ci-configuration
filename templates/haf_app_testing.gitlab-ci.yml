@@ -947,6 +947,9 @@ include:
     # Postgres user in HAF container (UID:GID)
     POSTGRES_UID: "105"
     POSTGRES_GID: "109"
+    # Services to apply fast healthcheck interval (5s) in CI
+    # Override if your app uses different service names
+    CI_FAST_HEALTHCHECK_SERVICES: "haf backend-block-processing"
 
 # Docker login and git safe.directory setup
 # Use: !reference [.haf_app_sync_setup, script]
@@ -960,6 +963,19 @@ include:
       git config --global --add safe.directory "$CI_PROJECT_DIR"
       git config --global --add safe.directory "$CI_PROJECT_DIR/haf"
       echo -e "\e[0Ksection_end:$(date +%s):git\r\e[0K"
+    - |
+      # Generate CI healthcheck override for fast container startup
+      # Production compose files use interval: 60s (appropriate for long replays)
+      # but in CI, containers are ready in seconds — 5s avoids wasting ~2 minutes
+      mkdir -p "${CI_PROJECT_DIR}/docker"
+      {
+        echo "services:"
+        for svc in ${CI_FAST_HEALTHCHECK_SERVICES:-haf}; do
+          printf '  %s:\n    healthcheck:\n      interval: 5s\n' "$svc"
+        done
+      } > "${CI_PROJECT_DIR}/docker/ci-healthcheck-override.yml"
+      export COMPOSE_OPTIONS_STRING="${COMPOSE_OPTIONS_STRING} --file ci-healthcheck-override.yml"
+      echo "CI healthcheck override: interval=5s for services: ${CI_FAST_HEALTHCHECK_SERVICES:-haf}"
 
 # Fetch HAF replay data from local cache or NFS (simple version)
 # Requires: HAF_COMMIT, DATA_CACHE_HAF_PREFIX variables
