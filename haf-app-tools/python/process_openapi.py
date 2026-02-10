@@ -84,6 +84,9 @@ def generate_type_string_from_schema(schema):
             return reference.split('/')[-1]
     elif 'type' in schema:
         schema_type = schema['type']
+        # Handle OpenAPI 3.1.0 nullable types like ["string", "null"]
+        if isinstance(schema_type, list):
+            schema_type = next(t for t in schema_type if t != 'null')
         if schema_type == 'integer':
             return 'INT'
         elif schema_type == 'string':
