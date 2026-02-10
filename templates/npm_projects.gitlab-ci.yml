@@ -148,11 +148,15 @@ variables:
   variables:
     # Path pointing the source directory containing a package.json file - it can be overrided by derived job
     SOURCE_DIR: "${CI_PROJECT_DIR}"
-    # Path to the built package tarball - it should be overrided by derived job
+    # Output directory where the built package tarball is stored - it can be overrided by derived job
+    DIST_DIR: ""
+    # Path to the built package tarball - computed automatically from DIST_DIR and BUILT_PACKAGE_PATH if not set
     PACKAGE_TGZ_PATH: ""
 
   before_script:
     - !reference [.npm_based_job_base, before_script]
+    # Compute local path from filename (cross-runner compatible) if not explicitly set
+    - if [ -z "${PACKAGE_TGZ_PATH}" ] && [ -n "${BUILT_PACKAGE_PATH}" ]; then PACKAGE_TGZ_PATH="${DIST_DIR}/$(basename ${BUILT_PACKAGE_PATH})"; fi
     - echo -e "\e[0Ksection_start:$(date +%s):package_tgz_unpack[collapsed=true]\r\e[0KAttempting to unpack ${PACKAGE_TGZ_PATH}"
     - cd "${CI_PROJECT_DIR}"
     - tar -xf "${PACKAGE_TGZ_PATH}" -C "${SOURCE_DIR}" --strip-components=1
