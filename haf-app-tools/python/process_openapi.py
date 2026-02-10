@@ -559,6 +559,7 @@ if __name__ == "__main__":
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("input_files", nargs='+')
     parser.add_argument("--home-rewrite", action="store_true", help="Use /rpc/home rewrite rule")
+    parser.add_argument("--version", type=str, help="Override the API version in the OpenAPI spec")
     args = parser.parse_args()
 
     output_dir = args.output_dir
@@ -568,6 +569,9 @@ if __name__ == "__main__":
 
     # Do a first pass that just collects all the openapi fragments
     process_sql_files(input_files)
+    # Override the API version if specified
+    if args.version and 'info' in collected_openapi_fragments:
+        collected_openapi_fragments['info']['version'] = args.version
     # Then a second pass that does the substitutions, writing output files to `output_dir`
     process_sql_files(input_files, output_dir)
     # and dump the nginx rewrite rules
