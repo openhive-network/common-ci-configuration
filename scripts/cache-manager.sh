@@ -709,7 +709,23 @@ cmd_get() {
         elif ! _nfs_available; then
             _log "NFS not available, cache miss"
             return 1
-        elif [[ -f "$NFS_TAR_FILE" ]]; then
+        fi
+
+        # NFS directory attribute caching can cause a file to appear missing for
+        # seconds after it was created on another builder. Retry a few times with
+        # short sleeps to handle this race (common when phase 2 jobs start
+        # immediately after phase 1 creates the cache).
+        if ! [[ -f "$NFS_TAR_FILE" ]]; then
+            for _nfs_retry in 1 2 3 4 5; do
+                sleep 5
+                if [[ -f "$NFS_TAR_FILE" ]]; then
+                    _log "NFS file appeared after ${_nfs_retry} retries (NFS cache staleness)"
+                    break
+                fi
+            done
+        fi
+
+        if [[ -f "$NFS_TAR_FILE" ]]; then
             # Copy NFS tar to local FIRST, then extract from local (faster)
             # Use locking + atomic rename to prevent concurrent jobs from reading incomplete files
             _log "NFS cache hit: $NFS_TAR_FILE - copying to local cache"
