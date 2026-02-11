@@ -798,6 +798,11 @@ cmd_get() {
 
             if [ \"\$needs_cleanup\" = true ]; then
                 sudo rm -rf '${local_dest}' 2>/dev/null || rm -rf '${local_dest}' 2>/dev/null || true
+                if [ -d '${local_dest}' ]; then
+                    echo '[cache-manager] ERROR: Failed to clean up stale extraction at ${local_dest}' >&2
+                    echo '[cache-manager] This usually means files are owned by a different user (uid 105)' >&2
+                    exit 1
+                fi
             fi
         fi
         mkdir -p '${local_dest}'
@@ -807,7 +812,7 @@ cmd_get() {
         echo \"[cache-manager] Extracting (\${tar_size_gb}GB) to: $local_dest\" >&2
 
         extract_start=\$(date +%s.%N)
-        tar xf '$LOCAL_TAR_FILE' -C '$local_dest'
+        tar xf '$LOCAL_TAR_FILE' -C '$local_dest' || { echo '[cache-manager] ERROR: tar extraction failed' >&2; exit 1; }
         extract_end=\$(date +%s.%N)
         extract_duration=\$(echo \"\$extract_end - \$extract_start\" | bc 2>/dev/null || echo '?')
         throughput=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / \$extract_duration\" | bc 2>/dev/null || echo '?')

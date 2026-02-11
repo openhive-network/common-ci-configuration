@@ -92,7 +92,16 @@ validate_cache_integrity() {
             return 1
         fi
 
-        echo "Cache validation passed: pgdata structure is complete"
+        # Sanity check: tablespace should have a minimum number of files
+        # A partially-extracted cache can pass directory checks but have missing data files
+        local file_count
+        file_count=$(sudo find "$tablespace" -type f 2>/dev/null | wc -l)
+        if [[ "$file_count" -lt 50 ]]; then
+            echo "Cache validation failed: tablespace has only $file_count files (expected 50+)"
+            return 1
+        fi
+
+        echo "Cache validation passed: pgdata structure is complete ($file_count tablespace files)"
     fi
 
     return 0
