@@ -1204,8 +1204,8 @@ LOCKINFO
         # Clean up lock info file
         rm -f '${NFS_TAR_LOCK}.info' 2>/dev/null || true
     "; then
-        _log "WARNING: Failed to push to NFS, but local cache exists"
-        # Don't fail - we have local cache
+        _error "Failed to push to NFS (local cache exists but won't help cross-builder jobs)"
+        return 1
     fi
 
     # Write metadata next to tar file (if NFS push succeeded)
