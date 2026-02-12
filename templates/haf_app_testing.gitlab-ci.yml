@@ -564,7 +564,7 @@ include:
         sleep 1
       done
       if docker info >/dev/null 2>&1; then
-        docker run --rm -v "${CI_PROJECT_DIR}:/workspace" alpine:latest \
+        timeout 60 docker run --rm -v "${CI_PROJECT_DIR}:/workspace" alpine:latest \
           sh -c "rm -rf /workspace/.haf-data" 2>/dev/null || true
       fi
     - |
@@ -625,13 +625,13 @@ include:
         # Capture logs before cleanup
         docker compose -f "${COMPOSE_FILE:-docker/docker-compose-test.yml}" -p "${COMPOSE_PROJECT_NAME:-haf-test}" logs --no-color > container-logs.txt 2>&1 || true
 
-        # Cleanup
-        docker compose -f "${COMPOSE_FILE:-docker/docker-compose-test.yml}" -p "${COMPOSE_PROJECT_NAME:-haf-test}" down -v --remove-orphans || true
+        # Cleanup (timeout prevents hangs when Docker daemon is overloaded)
+        timeout 120 docker compose -f "${COMPOSE_FILE:-docker/docker-compose-test.yml}" -p "${COMPOSE_PROJECT_NAME:-haf-test}" down -v --remove-orphans || echo "WARNING: docker compose down timed out or failed"
       fi
 
       # Clean up data directories to prevent permission issues for next job
       # Use Docker to remove as root since docker-builder doesn't have sudo
-      docker run --rm -v "${CI_PROJECT_DIR}:/workspace" alpine:latest \
+      timeout 60 docker run --rm -v "${CI_PROJECT_DIR}:/workspace" alpine:latest \
         sh -c "rm -rf /workspace/.haf-data" 2>/dev/null || \
         rm -rf "${HAF_DATA_DIRECTORY:-${CI_PROJECT_DIR}/.haf-data}" 2>/dev/null || true
 
@@ -1224,7 +1224,8 @@ include:
 
       # Now stop containers - PostgreSQL should already be stopped cleanly
       # Note: Don't use --volumes as it can interfere with bind-mount data persistence
-      docker compose "${COMPOSE_OPTIONS[@]}" down --timeout "${COMPOSE_DOWN_TIMEOUT:-60}"
+      # timeout prevents hangs when Docker daemon is overloaded
+      timeout 120 docker compose "${COMPOSE_OPTIONS[@]}" down --timeout "${COMPOSE_DOWN_TIMEOUT:-60}"
       popd
 
       # Archive logs
@@ -1976,8 +1977,8 @@ include:
       docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" logs haf > haf.log 2>&1 || true
       docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" logs postgrest > postgrest.log 2>&1 || true
 
-      # Stop and remove containers
-      docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" down --volumes --remove-orphans || true
+      # Stop and remove containers (timeout prevents hangs when Docker daemon is overloaded)
+      timeout 120 docker compose --env-file ci.env "${COMPOSE_OPTIONS[@]}" down --volumes --remove-orphans || echo "WARNING: docker compose down timed out or failed"
 
       # Archive logs
       tar -czvf container-logs.tar.gz *.log 2>/dev/null || true
