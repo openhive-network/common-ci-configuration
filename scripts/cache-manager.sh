@@ -828,7 +828,16 @@ cmd_get() {
         echo \"[cache-manager] Extracting (\${tar_size_gb}GB) to: $local_dest\" >&2
 
         extract_start=\$(date +%s.%N)
-        tar xf '$LOCAL_TAR_FILE' -C '$local_dest' || { echo '[cache-manager] ERROR: tar extraction failed' >&2; exit 1; }
+        if ! tar xf '$LOCAL_TAR_FILE' -C '$local_dest'; then
+            # Tar failed (e.g. symlink already exists from a previous valid extraction)
+            # If a usable cache is already present, use it instead of failing
+            if [ -d '${local_dest}/datadir' ] && [ -f '${local_dest}/${CACHE_COMPLETION_MARKER}' ]; then
+                echo '[cache-manager] tar extraction failed but existing valid cache found, reusing it' >&2
+                exit 0
+            fi
+            echo '[cache-manager] ERROR: tar extraction failed and no existing valid cache' >&2
+            exit 1
+        fi
         extract_end=\$(date +%s.%N)
         extract_duration=\$(echo \"\$extract_end - \$extract_start\" | bc 2>/dev/null || echo '?')
         throughput=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / \$extract_duration\" | bc 2>/dev/null || echo '?')
@@ -837,13 +846,15 @@ cmd_get() {
         _log "Cache ready"
     else
         _error "Failed to acquire lock or extract tar archive"
-        # Clean up any partial/stale extraction to prevent downstream corruption
-        # This is critical: if extraction fails, stale data from previous runs can cause
-        # PostgreSQL tablespace conflicts and other data integrity issues.
+        # Clean up partial extraction, but preserve valid caches
         # See: HAF pipeline 150882 failure analysis
         if [[ -d "$local_dest" ]]; then
-            _log "Cleaning up stale/partial extraction directory: $local_dest"
-            sudo rm -rf "$local_dest" 2>/dev/null || rm -rf "$local_dest" 2>/dev/null || true
+            if [[ -f "${local_dest}/${CACHE_COMPLETION_MARKER}" ]]; then
+                _log "Extraction failed but existing valid cache preserved at: $local_dest"
+            else
+                _log "Cleaning up stale/partial extraction directory: $local_dest"
+                sudo rm -rf "$local_dest" 2>/dev/null || rm -rf "$local_dest" 2>/dev/null || true
+            fi
         fi
         return 1
     fi
