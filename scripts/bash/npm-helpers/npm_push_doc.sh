@@ -51,6 +51,9 @@ DIST_DIR="${4:?Missing arg #4 pointing the dist directory}"
 FEATURE_BRANCH_NAME="${5:?Missing arg #5 pointing a branch name}"
 FINAL_MERGE="${6:?Missing arg #6 pointing the final merge flag value}"
 DOC_URL="${7:?Missing arg #7 pointing the documentation URL}"
+# Source project URL for branch existence checks during cleanup (defaults to PROJECT_URL).
+# When PROJECT_URL points to a separate wiki/doc repo, this should point to the source repo where feature branches exist.
+SOURCE_PROJECT_URL="${8:-${PROJECT_URL}}"
 
 if [ "${FINAL_MERGE}" = "true" ]; then
   FINAL_MERGE=1
@@ -116,7 +119,7 @@ else
   git push origin "HEAD:main"
 fi
 
-perform_wiki_cleanup "${WIKI_REPO_DIR}/non-stable" "${PROJECT_URL}"
+perform_wiki_cleanup "${WIKI_REPO_DIR}/non-stable" "${SOURCE_PROJECT_URL}"
 
 echo "Documentation url: ${DOC_URL}"
 
