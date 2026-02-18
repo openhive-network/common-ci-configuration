@@ -82,8 +82,9 @@ main() {
     fi
 
     if [[ ! -f "${lockfile}" ]]; then
-        log_success "No poetry.lock file found - skipping check"
-        exit 0
+        log_error "ERROR: poetry.lock not found at '${lockfile}'"
+        log_error "Check that --pyproject-dir points to a directory containing poetry.lock"
+        exit 1
     fi
 
     # Search for version lines matching unstable pattern, include package name (line before version)
