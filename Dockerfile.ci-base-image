@@ -5,7 +5,7 @@
 # This replaces the ci-base-image previously built from hive/hive repo
 #
 # Python version can be selected at runtime via PYTHON_VERSION environment variable:
-#   docker run -e PYTHON_VERSION=3.14 ci-base-image:pypa_2_28-2 python3 --version
+#   docker run -e PYTHON_VERSION=3.14 ci-base-image:pypa_2_28-3 python3 --version
 #
 # Default Python version is 3.14
 # In future you might want to change pypa image tag to get newer Python versions as they are added
@@ -61,7 +61,10 @@ RUN set -e && \
 
 WORKDIR /tmp/rocksdb-build
 
-# Clone at specific commit (shallow, reliable method for arbitrary commit hashes)
+# Clone at specific commit (shallow fetch of arbitrary commit hash).
+# Note: --depth 1 fetch of an arbitrary SHA works on GitHub public repos
+# (via uploadpack.allowReachableSHA1InWant). If this stops working, replace with:
+#   git clone https://github.com/facebook/rocksdb.git src && cd src && git checkout ${ROCKSDB_COMMIT}
 RUN git init src && cd src && \
     git fetch --depth 1 https://github.com/facebook/rocksdb.git ${ROCKSDB_COMMIT} && \
     git checkout FETCH_HEAD
@@ -96,7 +99,7 @@ RUN if [ -f build/tools/sst_dump ]; then \
       mkdir -p ${ROCKSDB_INSTALL_PREFIX}/bin && \
       cp build/tools/sst_dump ${ROCKSDB_INSTALL_PREFIX}/bin/; \
     else \
-      echo "WARNING: sst_dump not found in build/tools/"; \
+      echo "ERROR: sst_dump not found in build/tools/ (WITH_CORE_TOOLS=ON should produce it)" && exit 1; \
     fi
 
 # Clean up build artifacts (only the installed prefix is needed)
