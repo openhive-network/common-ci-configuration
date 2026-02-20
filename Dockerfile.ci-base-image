@@ -11,6 +11,98 @@
 # In future you might want to change pypa image tag to get newer Python versions as they are added
 
 ARG BASE_IMAGE=quay.io/pypa/manylinux_2_28:2026.01.16-1
+
+# --- Preinstall vendor libraries for hive ---
+# RocksDB build stage: produces a static library + CMake package config + sst_dump tool
+# installed under /opt/hive/vendor/rocksdb/<commit-hash>/ for commit-hash-indexed detection.
+# When hive's CMake detects a preinstalled build matching its submodule commit, it skips the
+# ~2000-file RocksDB compilation entirely.
+FROM ${BASE_IMAGE} AS rocksdb-builder
+
+# Commit hash of the rocksdb submodule used in hive.
+# Override via: docker build --build-arg ROCKSDB_COMMIT=<hash> ...
+ARG ROCKSDB_COMMIT=ae8fb3e5000e46d8d4c9dbf3a36019c0aaceebff
+ARG ROCKSDB_INSTALL_PREFIX=/opt/hive/vendor/rocksdb/${ROCKSDB_COMMIT}
+
+# CMake version must match the main stage to ensure consistent behavior
+ARG CMAKE_VERSION=3.28.6
+
+SHELL ["/bin/bash", "-c"]
+
+# Install build dependencies (AlmaLinux 8 / manylinux_2_28)
+RUN dnf install -y \
+        git \
+        gcc-c++ \
+        ninja-build \
+        liburing-devel \
+    && dnf clean all && rm -rf /var/cache/dnf
+
+# Install CMake (same version as main stage)
+RUN curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+    | tar xz -C /usr/local --strip-components=1
+
+# Build and install snappy static library (same as main stage — repos lack snappy-static)
+ARG SNAPPY_VERSION=1.1.10
+RUN set -e && \
+    curl -fsSL "https://github.com/google/snappy/archive/refs/tags/${SNAPPY_VERSION}.tar.gz" \
+        | tar xz -C /tmp && \
+    cd /tmp/snappy-${SNAPPY_VERSION} && \
+    mkdir build && cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DSNAPPY_BUILD_TESTS=OFF \
+        -DSNAPPY_BUILD_BENCHMARKS=OFF && \
+    make -j "$(nproc)" && \
+    make install && \
+    cd / && rm -rf /tmp/snappy-${SNAPPY_VERSION}
+
+WORKDIR /tmp/rocksdb-build
+
+# Clone at specific commit (shallow, reliable method for arbitrary commit hashes)
+RUN git init src && cd src && \
+    git fetch --depth 1 https://github.com/facebook/rocksdb.git ${ROCKSDB_COMMIT} && \
+    git checkout FETCH_HEAD
+
+# Build with EXACT same options as hive/libraries/vendor/CMakeLists.txt.
+# CRITICAL: These flags must stay in sync with hive's vendor/CMakeLists.txt.
+# If hive changes its RocksDB build options, update these flags accordingly.
+RUN cmake -GNinja -S src -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=${ROCKSDB_INSTALL_PREFIX} \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DROCKSDB_BUILD_SHARED=OFF \
+    -DFAIL_ON_WARNINGS=OFF \
+    -DWITH_TESTS=OFF \
+    -DWITH_SNAPPY=ON \
+    -DWITH_ZLIB=OFF \
+    -DWITH_BZ2=OFF \
+    -DWITH_LIBURING=ON \
+    -DWITH_BENCHMARK_TOOLS=OFF \
+    -DWITH_CORE_TOOLS=ON \
+    -DWITH_TOOLS=OFF \
+    -DWITH_TRACE_TOOLS=OFF \
+    -DWITH_GFLAGS=OFF \
+    -DUSE_RTTI=ON \
+    -DPORTABLE=ON && \
+    ninja -C build -j$(nproc) && \
+    cmake --install build
+
+# Copy sst_dump tool to bin/ directory for use by hive's build.sh
+RUN if [ -f build/tools/sst_dump ]; then \
+      mkdir -p ${ROCKSDB_INSTALL_PREFIX}/bin && \
+      cp build/tools/sst_dump ${ROCKSDB_INSTALL_PREFIX}/bin/; \
+    else \
+      echo "WARNING: sst_dump not found in build/tools/"; \
+    fi
+
+# Clean up build artifacts (only the installed prefix is needed)
+RUN rm -rf /tmp/rocksdb-build
+
+# --- Main ci-base-image stage ---
 FROM ${BASE_IMAGE}
 
 ARG POETRY_VERSION=2.1.3
@@ -218,6 +310,13 @@ RUN git clone --depth 1 --branch 7.8.1 https://github.com/jtv/libpqxx.git /tmp/l
     cmake -DCMAKE_BUILD_TYPE=Release -GNinja -DBUILD_TEST=OFF .. && \
     ninja install && \
     cd / && rm -rf /tmp/libpqxx
+
+# Copy preinstalled RocksDB from the builder stage
+# Provides /opt/hive/vendor/rocksdb/<commit>/{lib,include,bin} with:
+# - librocksdb.a (static library)
+# - CMake package config (RocksDBConfig.cmake, RocksDBTargets.cmake)
+# - sst_dump tool (in bin/)
+COPY --from=rocksdb-builder /opt/hive/vendor /opt/hive/vendor
 
 # Install sccache for distributed compiler caching
 RUN curl -fsSL https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz \
