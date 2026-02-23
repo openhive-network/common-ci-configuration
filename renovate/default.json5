@@ -8,9 +8,13 @@
   // Prevents flooding CI with pipeline runs for all open Renovate MRs.
   "rebaseWhen": "conflicted",
 
-  // Default limit for all projects. Individual projects can override (e.g. prConcurrentLimit: 0).
+  // Per-repo limits. Individual projects can override (e.g. prConcurrentLimit: 0 to disable).
+  // Max open Renovate MRs per repo at any time.
   "prConcurrentLimit": 10,
-  "prHourlyLimit": 0,
+  // Max branches processed per repo per run — limits CI load from a single Renovate execution.
+  "branchConcurrentLimit": 2,
+  // Max new MRs created per hour per repo — spreads updates over time instead of batching.
+  "prHourlyLimit": 2,
 
   "commitMessagePrefix": "chore(deps):",
   "addLabels": ["dependencies"],
