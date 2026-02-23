@@ -1,0 +1,34 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "dependencyDashboard": true,
+  "platformAutomerge": true,
+
+  // Default limit for all projects. Individual projects can override (e.g. prConcurrentLimit: 0).
+  "prConcurrentLimit": 10,
+  "prHourlyLimit": 0,
+
+  "commitMessagePrefix": "chore(deps):",
+  "addLabels": ["dependencies"],
+  "packageRules": [
+    {
+      "automerge": false,
+      "description": "Group all patch updates together",
+      "groupName": "patch updates",
+      "matchUpdateTypes": ["patch"]
+    },
+    {
+      "description": "Group all pre-commit hook updates",
+      "groupName": "pre-commit hooks",
+      "matchManagers": ["pre-commit"]
+    },
+    {
+      "automerge": false,
+      "description": "Never auto-merge Dockerfile changes (CI infrastructure)",
+      "matchManagers": ["dockerfile"],
+      "prBodyNotes": [
+        "\u26a0\ufe0f **This updates CI infrastructure.** Trigger manual image build jobs in this MR before merging to confirm it's working."
+      ]
+    }
+  ]
+}
