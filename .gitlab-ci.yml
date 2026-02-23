@@ -259,6 +259,7 @@ lint_python_scripts:
   variables:
     DOCKERFILE_PATH: ""
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -281,6 +282,7 @@ build_docker_dind_image:
   variables:
     BUILD_TARGET: "docker-dind"
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -310,6 +312,7 @@ build_docker_builder_image:
     - job: build_docker_dind_image
       optional: true
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -338,6 +341,7 @@ build_image_remover_image:
     - job: build_docker_dind_image
       optional: true
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -367,6 +371,7 @@ build_benchmark_test_runner_image:
     - job: build_docker_dind_image
       optional: true
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -398,6 +403,7 @@ build_haf_app_test_runner_image:
     - job: build_benchmark_test_runner_image
       optional: true
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -425,6 +431,7 @@ build_tox_test_runner_image:
     - job: build_docker_dind_image
       optional: true
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -452,6 +459,7 @@ build_nginx_image:
     - job: build_docker_dind_image
       optional: true
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -479,6 +487,7 @@ build_postgrest_image:
     - job: build_docker_dind_image
       optional: true
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -506,6 +515,7 @@ build_alpine_image:
     - job: build_docker_dind_image
       optional: true
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -581,6 +591,7 @@ build_dockerfile_image:
     - job: build_docker_dind_image
       optional: true
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -609,6 +620,7 @@ build_emsdk_image:
     - job: build_docker_dind_image
       optional: true
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH # for branch `develop` run if there were changes on the branch
@@ -644,6 +656,7 @@ build_psql_image:
     - job: build_docker_dind_image
       optional: true
   rules:
+    - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH # for branch main run if there were changes on the branch
