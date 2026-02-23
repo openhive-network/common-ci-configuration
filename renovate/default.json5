@@ -4,6 +4,10 @@
   "dependencyDashboard": true,
   "platformAutomerge": true,
 
+  // Only rebase MRs when they have merge conflicts (not on every run).
+  // Prevents flooding CI with pipeline runs for all open Renovate MRs.
+  "rebaseWhen": "conflicted",
+
   // Default limit for all projects. Individual projects can override (e.g. prConcurrentLimit: 0).
   "prConcurrentLimit": 10,
   "prHourlyLimit": 0,
