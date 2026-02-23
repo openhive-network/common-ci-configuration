@@ -36,7 +36,7 @@ RUN --mount=type=cache,mode=0777,sharing=locked,target=${APT_CACHE_DIR} \
       https://launchpad.net/ubuntu/+source/sudo/1.9.15p5-3ubuntu5/+build/28035899/+files/sudo_1.9.15p5-3ubuntu5_amd64.deb \
       http://launchpadlibrarian.net/743048427/coreutils_9.4-3.1ubuntu1_amd64.deb \
       https://launchpad.net/ubuntu/+source/apparmor/4.1.0~beta1-0ubuntu3/+build/29135383/+files/libapparmor1_4.1.0~beta1-0ubuntu3_amd64.deb \
-      http://archive.ubuntu.com/ubuntu/pool/main/p/pam/libpam0g_1.5.3-5ubuntu5.4_amd64.deb \
+      https://launchpad.net/~ubuntu-security/+archive/ubuntu/ppa/+build/30939880/+files/libpam0g_1.5.3-5ubuntu5.4_amd64.deb \
       https://launchpad.net/~ubuntu-security/+archive/ubuntu/ppa/+build/30939880/+files/libpam-modules_1.5.3-5ubuntu5.4_amd64.deb \
       https://launchpad.net/~ubuntu-security/+archive/ubuntu/ppa/+build/30939880/+files/libpam-modules-bin_1.5.3-5ubuntu5.4_amd64.deb \
       https://launchpad.net/~ubuntu-security/+archive/ubuntu/ppa/+build/30939880/+files/libpam-runtime_1.5.3-5ubuntu5.4_all.deb \
