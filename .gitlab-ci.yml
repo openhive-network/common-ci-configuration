@@ -32,6 +32,7 @@ stages:
   - example-build
   - example-test
   - example-cleanup
+  - maintenance
 
 include:
   - template: Workflows/Branch-Pipelines.gitlab-ci.yml
@@ -92,6 +93,10 @@ default:
         fi
         )
 
+.skip_on_renovate_rule: &skip_on_renovate_rule
+  if: '$RENOVATE_RUN == "true"'
+  when: never
+
 .validation_job:
   extends: .job-defaults
   stage: validation
@@ -117,6 +122,7 @@ lint_bash_scripts:
     reports:
       junit: shellcheck-junit-result.xml
   rules:
+    - *skip_on_renovate_rule
     - if: $CI_COMMIT_REF_PROTECTED == "true"
       changes:
         paths:
@@ -145,6 +151,7 @@ lint_ci_templates:
     reports:
       junit: yamllint-junit-result.xml
   rules:
+    - *skip_on_renovate_rule
     - if: $CI_COMMIT_REF_PROTECTED == "true"
       changes:
         paths:
@@ -177,6 +184,7 @@ lint_python_scripts:
     reports:
       junit: pylint-junit-result.xml
   rules:
+    - *skip_on_renovate_rule
     - if: $CI_COMMIT_REF_PROTECTED == "true"
       changes:
         paths:
@@ -654,7 +662,10 @@ build_psql_image:
 
 psql_image_test:
   stage: test
-  image: 
+  rules:
+    - *skip_on_renovate_rule
+    - when: on_success
+  image:
     name: registry.gitlab.syncad.com/hive/common-ci-configuration/psql:14-1
     entrypoint: [""]
   services:
@@ -686,10 +697,75 @@ buildkit_cache_cleanup:
   allow_failure: true
   # Don't use needs: [] - let it wait for build stage to complete
   # Otherwise it runs concurrently with builds and overloads the registry
+  rules:
+    - *skip_on_renovate_rule
+    - !reference [.buildkit_cleanup_job_template, rules]
   variables:
     # Use latest tag since the image may not be built in this pipeline (change detection)
     IMAGE_REMOVER_TAG: latest
     CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache"
+
+# =============================================================================
+# Renovate Bot
+# =============================================================================
+
+.base_renovate:
+  image: renovate/renovate:42.96
+
+validate_renovate_config:
+  extends:
+    - .validation_job
+    - .base_renovate
+  script:
+    - |
+      for config in renovate/*.json5; do
+        echo "Validating $config..."
+        renovate-config-validator "$config"
+      done
+  rules:
+    - *skip_on_renovate_rule
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+      changes:
+        paths:
+          - renovate/*.json5
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        paths:
+          - renovate/*.json5
+        compare_to: 'refs/heads/develop'
+
+renovate:
+  extends: .base_renovate
+  stage: maintenance
+  interruptible: false
+  variables:
+    GIT_STRATEGY: none
+    RENOVATE_PLATFORM: gitlab
+    RENOVATE_ENDPOINT: "${CI_API_V4_URL}"
+    RENOVATE_REPOSITORIES: '["hive/clive"]'
+    RENOVATE_GIT_AUTHOR: "Renovate Bot <renovate@syncad.com>"
+    LOG_LEVEL: info
+    LOG_FILE: renovate.log
+    LOG_FILE_LEVEL: debug
+  before_script:
+    - |
+      for var in RENOVATE_TOKEN GITHUB_COM_TOKEN; do
+        if [ -z "${!var}" ]; then
+          echo "Error: ${var} is not set"
+          exit 1
+        fi
+      done
+  script:
+    - renovate
+  artifacts:
+    paths:
+      - renovate.log
+    expire_in: 1 week
+    when: always
+  rules:
+    - if: '$RENOVATE_RUN == "true"'
+  tags:
+    - public-runner-docker
 
 example_docker_image_builder_job:
   extends: .pure_docker_image_builder_job_template
@@ -706,7 +782,9 @@ example_docker_image_builder_job:
   needs:
     - job: build_docker_dind_image
       optional: true
-  when: manual
+  rules:
+    - *skip_on_renovate_rule
+    - when: manual
   tags:
     - public-runner-docker
 
@@ -725,7 +803,9 @@ example_jmeter_benchmark_job:
       - jmeter_report.xml
     reports:
       junit: jmeter_junit_report.xml
-  when: manual
+  rules:
+    - *skip_on_renovate_rule
+    - when: manual
   tags:
     - public-runner-docker
 
@@ -741,7 +821,9 @@ example_tox_test_job:
   artifacts:
     paths:
       - sampleproject/tox-result.json
-  when: manual
+  rules:
+    - *skip_on_renovate_rule
+    - when: manual
   tags:
     - public-runner-docker
 
@@ -754,6 +836,8 @@ example_image_cleanup_job:
     IMAGE_TAG: latest
   needs:
     - example_docker_image_builder_job
-  when: manual
+  rules:
+    - *skip_on_renovate_rule
+    - when: manual
   tags:
     - public-runner-docker

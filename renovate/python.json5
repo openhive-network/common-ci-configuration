@@ -1,0 +1,79 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["local>hive/common-ci-configuration//renovate/default.json5"],
+
+  "poetry": {
+    "enabled": true,
+
+    // Poetry lacks a way to update the lockfile to a specific version
+    // (`poetry update --lock` always resolves to the latest allowed by pyproject.toml).
+    // To make separateMajorMinor/separateMultipleMajor work correctly, all dependencies
+    // in pyproject.toml MUST have upper bounds (`>=X.Y.Z,<{X+1}.0.0`) that constrain
+    // the resolver to stay within the intended major version range.
+    //
+    // An alternative workaround is to disable these options entirely (separateMajorMinor: false,
+    // separateMultipleMajor: false), but that merges major and minor updates into single MRs,
+    // losing the ability to review breaking changes separately.
+    //
+    // Without upper bounds these options caused MR title/lockfile mismatches — Renovate
+    // targeted a minor version but Poetry resolved to a major one:
+    //   https://gitlab.syncad.com/hive/clive/-/merge_requests/878 (mkdocstrings-python — MR targeted 1.19.0, lockfile resolved to 2.0.2)
+    //   https://gitlab.syncad.com/hive/clive/-/merge_requests/880 (pytest — MR targeted 8.4.2, lockfile resolved to 9.0.2)
+    //
+    // See: https://github.com/renovatebot/renovate/discussions/41206
+    "separateMajorMinor": true,
+    "separateMultipleMajor": true,
+
+    // minimumReleaseAge still cannot work with Poetry — the lockfile would resolve to
+    // the latest version regardless of the age gate, causing title/lockfile mismatches.
+    // Upper bounds don't help here since this is about time-gating, not version ranges.
+    //   https://gitlab.syncad.com/hive/clive/-/merge_requests/877 (minimumReleaseAge gated a version, but lockfile resolved to a newer one)
+    "minimumReleaseAge": "0 days",
+
+    // lockFileMaintenance deletes poetry.lock and regenerates it from scratch,
+    // updating all transitive dependencies at once with no control over individual versions.
+    // This produces massive, hard-to-review MRs. Per-package updates via update-lockfile
+    // are sufficient.
+    "lockFileMaintenance": { "enabled": false }
+  },
+
+  "pre-commit": { "enabled": true },
+  "pip_requirements": { "enabled": false },
+
+  "ignoreDeps": [
+    "poetry-core",        // pinned to match Poetry version on CI
+    "python-poetry/poetry" // pre-commit hook, pinned to match Poetry version on CI
+  ],
+
+  "packageRules": [
+    {
+      "allowedVersions": "!/unstable/",
+      "automerge": false,
+      "description": "Group Hive ecosystem packages (ignore feature branch builds)",
+      "groupName": "hiveio-ecosystem",
+      "ignoreUnstable": false,
+      "matchManagers": ["poetry"],
+      "matchPackageNames": ["/^hiveio-/"],
+      "prPriority": 99
+    },
+    {
+      "automerge": true,
+      "description": "Group static-analysis tools",
+      "groupName": "static-analysis",
+      "matchManagers": ["poetry"],
+      "matchPackageNames": ["mypy", "pre-commit", "ruff", "pydoclint", "/^types-/"]
+    },
+    {
+      "description": "Group pytest ecosystem",
+      "groupName": "pytest",
+      "matchManagers": ["poetry"],
+      "matchPackageNames": ["/^pytest/"]
+    },
+    {
+      "description": "Group documentation tools",
+      "groupName": "documentation-tools",
+      "matchManagers": ["poetry"],
+      "matchPackageNames": ["/^mkdocs/", "/^markdown-pycon/"]
+    },
+  ]
+}
