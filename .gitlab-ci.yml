@@ -723,7 +723,7 @@ buildkit_cache_cleanup:
 # =============================================================================
 
 .base_renovate:
-  image: renovate/renovate:42.96
+  image: renovate/renovate:43.31
 
 validate_renovate_config:
   extends:
