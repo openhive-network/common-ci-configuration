@@ -774,6 +774,9 @@ renovate:
     - |
       repos=(
         hive/clive
+        hive/schemas
+        hive/beekeeper
+        hive/wax
       )
       first=true
       for repo in "${repos[@]}"; do
