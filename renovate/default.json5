@@ -8,13 +8,23 @@
   // Prevents flooding CI with pipeline runs for all open Renovate MRs.
   "rebaseWhen": "conflicted",
 
-  // Per-repo limits. Individual projects can override (e.g. prConcurrentLimit: 0 to disable).
-  // Max open Renovate MRs per repo at any time.
-  "prConcurrentLimit": 10,
-  // Max branches processed per repo per run — limits CI load from a single Renovate execution.
-  "branchConcurrentLimit": 2,
-  // Max new MRs created per hour per repo — spreads updates over time instead of batching.
-  "prHourlyLimit": 2,
+  // --- Rate limiting ---
+  // Individual projects can override any of these in their own renovate.json5.
+
+  // Max open Renovate MRs (and branches) per repo at any time.
+  // 0 = unlimited. This intentionally does not cap the total number of open MRs
+  // so that internal dependency updates (e.g. hiveio-* packages) are never blocked.
+  // branchConcurrentLimit is not set, so it inherits from prConcurrentLimit (= no limit).
+  "prConcurrentLimit": 0,
+
+  // Max *new* MRs (and their branches) created per hour per repo.
+  // Does NOT affect rebases or updates of existing branches — only creation of new ones.
+  "prHourlyLimit": 1,
+
+  // Max commits pushed per hour per repo — covers everything: new branches, rebases,
+  // and version-bump updates. Prevents a cascade of CI runs when merging one MR
+  // triggers rebases of all remaining Renovate branches.
+  "commitHourlyLimit": 2,
 
   "commitMessagePrefix": "chore(deps):",
   "addLabels": ["dependencies"],
