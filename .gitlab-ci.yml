@@ -723,7 +723,7 @@ buildkit_cache_cleanup:
 # =============================================================================
 
 .base_renovate:
-  image: renovate/renovate:42.96
+  image: renovate/renovate:43.31
 
 validate_renovate_config:
   extends:
@@ -755,11 +755,11 @@ renovate:
     GIT_STRATEGY: none
     RENOVATE_PLATFORM: gitlab
     RENOVATE_ENDPOINT: "${CI_API_V4_URL}"
-    RENOVATE_REPOSITORIES: '["hive/clive"]'
     RENOVATE_GIT_AUTHOR: "Renovate Bot <renovate@syncad.com>"
     LOG_LEVEL: info
-    LOG_FILE: renovate.log
     LOG_FILE_LEVEL: debug
+    # Seconds to wait between processing consecutive repos (0 = no delay).
+    INTER_REPO_DELAY: "300"
   before_script:
     - |
       for var in RENOVATE_TOKEN GITHUB_COM_TOKEN; do
@@ -769,10 +769,29 @@ renovate:
         fi
       done
   script:
-    - renovate
+    # Process repos sequentially so that CI pipelines triggered by one repo
+    # have time to finish (or at least start) before the next repo is processed.
+    - |
+      repos=(
+        hive/clive
+      )
+      first=true
+      for repo in "${repos[@]}"; do
+        if [ "$first" = true ]; then
+          first=false
+        elif [ "${INTER_REPO_DELAY}" -gt 0 ] 2>/dev/null; then
+          echo "===== Waiting ${INTER_REPO_DELAY}s before next repo ====="
+          sleep "${INTER_REPO_DELAY}"
+        fi
+        echo "===== Processing ${repo} ====="
+        RENOVATE_REPOSITORIES="[\"${repo}\"]" \
+        LOG_FILE="renovate-${repo##*/}.log" \
+          renovate
+        echo "===== Finished ${repo} ====="
+      done
   artifacts:
     paths:
-      - renovate.log
+      - renovate-*.log
     expire_in: 1 week
     when: always
   rules:
