@@ -1,5 +1,11 @@
 variable "CI_REGISTRY_IMAGE" {}
 variable "CI_COMMIT_SHA" {}
+variable "CI_COMMIT_BRANCH" {
+  default = ""
+}
+variable "CI_DEFAULT_BRANCH" {
+  default = "develop"
+}
 variable "EMSCRIPTEN_VERSION" {
   default = "4.0.22"
 }
@@ -52,7 +58,12 @@ function "notempty" {
 function "generate-tags" {
   params = [target, local_tag]
   result = [
-    notempty(CI_REGISTRY_IMAGE) ? "${CI_REGISTRY_IMAGE}/${target}:${local_tag}" : "${target}:${local_tag}",
+    # Version tag: only on default branch or local builds to prevent feature branches
+    # from overwriting production image tags (e.g. ci-base-image:pypa_2_28-2)
+    (CI_COMMIT_BRANCH == "" || CI_COMMIT_BRANCH == CI_DEFAULT_BRANCH)
+      ? (notempty(CI_REGISTRY_IMAGE) ? "${CI_REGISTRY_IMAGE}/${target}:${local_tag}" : "${target}:${local_tag}")
+      : "",
+    # Commit SHA tag: always pushed in CI for traceability
     notempty(CI_COMMIT_SHA) ? "${CI_REGISTRY_IMAGE}/${target}:${CI_COMMIT_SHA}": ""
   ]
 }
