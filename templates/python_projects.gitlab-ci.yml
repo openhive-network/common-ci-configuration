@@ -254,6 +254,9 @@ variables:
   script:
     - echo -e "${TXT_BLUE}Building python wheel...${TXT_CLEAR}"
     - ls -al
+    # Workaround: installs plugins from [tool.poetry.requires-plugins] without installing project dependencies.
+    # See: https://github.com/python-poetry/poetry/issues/9990#issuecomment-2737176168
+    - poetry -C "${PYPROJECT_DIR}" install --dry-run
     - poetry -C "${PYPROJECT_DIR}" version
     - poetry -C "${PYPROJECT_DIR}" build --format wheel
     - if [ ! -d "${DIST_DIR}" ] && [ -d "dist" ]; then cp -r "dist" "${DIST_DIR}"; fi
@@ -299,6 +302,9 @@ variables:
   script:
     - echo -e "${TXT_BLUE}Deploying python wheel to the GitLab PyPI registry...${TXT_CLEAR}"
     - ls -al
+    # Workaround: installs plugins from [tool.poetry.requires-plugins] without installing project dependencies.
+    # See: https://github.com/python-poetry/poetry/issues/9990#issuecomment-2737176168
+    - poetry -C "${PYPROJECT_DIR}" install --dry-run
     - poetry -C "${PYPROJECT_DIR}" version
     - poetry -C "${PYPROJECT_DIR}" config repositories.gitlab "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi"
     - poetry -C "${PYPROJECT_DIR}" config http-basic.gitlab gitlab-ci-token "${CI_JOB_TOKEN}"
@@ -315,6 +321,9 @@ variables:
   script:
     - echo -e "${TXT_BLUE}Deploying python wheel to the official PyPI registry...${TXT_CLEAR}"
     - ls -al
+    # Workaround: installs plugins from [tool.poetry.requires-plugins] without installing project dependencies.
+    # See: https://github.com/python-poetry/poetry/issues/9990#issuecomment-2737176168
+    - poetry -C "${PYPROJECT_DIR}" install --dry-run
     - poetry -C "${PYPROJECT_DIR}" version
     - poetry -C "${PYPROJECT_DIR}" config pypi-token.pypi "${PYPI_AUTHORIZATION_TOKEN}"
     - poetry -C "${PYPROJECT_DIR}" publish --skip-existing
