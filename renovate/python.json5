@@ -48,7 +48,7 @@
   "packageRules": [
     {
       "allowedVersions": "!/unstable/",
-      "automerge": false,
+      "automerge": true,
       "description": "Group Hive ecosystem packages (ignore feature branch builds)",
       "groupName": "hiveio-ecosystem",
       "ignoreUnstable": false,
