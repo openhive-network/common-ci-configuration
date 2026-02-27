@@ -777,6 +777,7 @@ renovate:
         hive/schemas
         hive/beekeeper
         hive/wax
+        hive/hive
       )
       first=true
       for repo in "${repos[@]}"; do
