@@ -31,8 +31,8 @@
   "packageRules": [
     {
       "automerge": false,
-      "description": "Group all patch updates together",
-      "groupName": "patch updates",
+      "description": "Group patch updates per manager",
+      "groupName": "patch updates ({{{manager}}})",
       "matchUpdateTypes": ["patch"]
     },
     {
