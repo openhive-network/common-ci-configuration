@@ -27,7 +27,7 @@ variable "PYTHON_RUNTIME_VERSION" {
 }
 
 variable "CI_BASE_IMAGE_VERSION" {
-  default = "pypa_2_28-2"
+  default = "pypa_2_28-4"
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
