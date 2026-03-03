@@ -711,21 +711,25 @@ cmd_get() {
             return 1
         fi
 
-        # NFS directory attribute caching can cause a file to appear missing for
-        # seconds after it was created on another builder. Retry a few times with
-        # short sleeps to handle this race (common when phase 2 jobs start
-        # immediately after phase 1 creates the cache).
+        # NFS negative dentry caching can cause a file to appear missing for
+        # seconds after it was created on another builder. On Linux 6.17+ with
+        # NFSv4.2, negative dentries for UIDs unknown to the NFS server are
+        # cached indefinitely (ignoring acdirmax), so stat()-based checks like
+        # [[ -f file ]] never see the file. Work around this by using open()
+        # (head -c 1) which bypasses the negative dentry cache.
         if ! [[ -f "$NFS_TAR_FILE" ]]; then
             for _nfs_retry in 1 2 3 4 5; do
                 sleep 5
-                if [[ -f "$NFS_TAR_FILE" ]]; then
+                # Use head (open syscall) instead of test -f (stat syscall)
+                # to bypass NFS negative dentry cache bug on kernel 6.17+
+                if head -c 1 "$NFS_TAR_FILE" >/dev/null 2>&1 || [[ -f "$NFS_TAR_FILE" ]]; then
                     _log "NFS file appeared after ${_nfs_retry} retries (NFS cache staleness)"
                     break
                 fi
             done
         fi
 
-        if [[ -f "$NFS_TAR_FILE" ]]; then
+        if head -c 1 "$NFS_TAR_FILE" >/dev/null 2>&1 || [[ -f "$NFS_TAR_FILE" ]]; then
             # Copy NFS tar to local FIRST, then extract from local (faster)
             # Use locking + atomic rename to prevent concurrent jobs from reading incomplete files
             _log "NFS cache hit: $NFS_TAR_FILE - copying to local cache"
