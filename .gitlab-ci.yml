@@ -790,6 +790,11 @@ renovate:
         hive/beekeeper
         hive/wax
         hive/hive
+        hive/haf
+        hive/hafah
+        hive/balance_tracker
+        hive/reputation_tracker
+        hive/haf_block_explorer
       )
       first=true
       for repo in "${repos[@]}"; do
