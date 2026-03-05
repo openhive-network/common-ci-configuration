@@ -85,6 +85,19 @@ RUN dnf install -y epel-release && \
         xdg-user-dirs \
     && dnf clean all && rm -rf /var/cache/dnf
 
+# Install PostgreSQL 18 development packages from PGDG repo
+# Required for building PostgreSQL extensions (HAF fork manager, sql_serializer)
+# Provides pg_config, server headers, and libpq at /usr/pgsql-18/
+RUN dnf install -y --nogpgcheck \
+        https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-x86_64/pgdg-redhat-repo-latest.noarch.rpm && \
+    dnf module disable -y postgresql && \
+    dnf install -y --nogpgcheck \
+        postgresql18-devel \
+    && dnf clean all && rm -rf /var/cache/dnf
+
+# Add PostgreSQL 18 bin directory to PATH (for pg_config)
+ENV PATH="/usr/pgsql-18/bin:$PATH"
+
 # Fix PAM configuration for sudo (manylinux has minimal PAM setup)
 COPY <<'EOF' /etc/pam.d/sudo
 auth       sufficient   pam_rootok.so
