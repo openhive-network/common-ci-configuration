@@ -580,6 +580,18 @@ build_ci_base_image:
     - job: build_docker_dind_image
       optional: true
 
+build_ci_base_image_ubuntu:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "ci-base-image-ubuntu"
+    DOCKERFILE_PATH: "Dockerfile.ci-base-image-ubuntu"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+
 build_dockerfile_image:
   extends: .build_docker_image
   stage: build
@@ -716,7 +728,7 @@ buildkit_cache_cleanup:
   variables:
     # Use latest tag since the image may not be built in this pipeline (change detection)
     IMAGE_REMOVER_TAG: latest
-    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache"
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache,ci-base-image-ubuntu/cache"
 
 # =============================================================================
 # Renovate Bot

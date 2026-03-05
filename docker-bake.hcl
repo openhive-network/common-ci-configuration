@@ -30,6 +30,10 @@ variable "CI_BASE_IMAGE_VERSION" {
   default = "pypa_2_28-pg18-1"
 }
 
+variable "CI_BASE_IMAGE_UBUNTU_VERSION" {
+  default = "ubuntu24.04-pg18-1"
+}
+
 variable "HAF_APP_TEST_RUNNER_VERSION" {
   default = "2.2"
 }
@@ -191,6 +195,13 @@ target "ci-base-image" {
   tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
   cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
   cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
+}
+
+target "ci-base-image-ubuntu" {
+  dockerfile = "Dockerfile.ci-base-image-ubuntu"
+  tags = generate-tags("ci-base-image-ubuntu", "${CI_BASE_IMAGE_UBUNTU_VERSION}")
+  cache-from = generate-cache-from("ci-base-image-ubuntu", "${CI_BASE_IMAGE_UBUNTU_VERSION}")
+  cache-to = generate-cache-to("ci-base-image-ubuntu", "${CI_BASE_IMAGE_UBUNTU_VERSION}")
 }
 
 target "haf-app-test-runner" {
