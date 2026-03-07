@@ -54,7 +54,10 @@
       "ignoreUnstable": false,
       "matchManagers": ["poetry"],
       "matchPackageNames": ["/^hiveio-/"],
-      "prPriority": 99
+      "prPriority": 99,
+      // Batch ecosystem updates to once a week (Friday ~7pm EST = Saturday 00:00 UTC)
+      // to reduce noise on develop from frequent post-dated releases.
+      "schedule": ["before 2am on saturday"]
     },
     {
       "automerge": true,
