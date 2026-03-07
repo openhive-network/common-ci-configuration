@@ -47,6 +47,11 @@ include:
     - cd "${BINARIES_DIR}/${TARGET_ENVIRONMENT}"
     - cmake -DBoost_NO_WARN_NEW_VERSIONS=1 -DBoost_USE_STATIC_RUNTIME=ON -DCMAKE_TOOLCHAIN_FILE=/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -DWASM_USE_FS="${WASM_USE_FS}" -DTARGET_ENVIRONMENT="${TARGET_ENVIRONMENT}" -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" -S "${SOURCE_DIR}" -B "${BINARIES_DIR}/${TARGET_ENVIRONMENT}"
     - make -j 8
+    - |
+      if command -v sccache &> /dev/null; then
+        echo "=== sccache statistics ==="
+        sccache --show-stats || true
+      fi
     - cmake --install "${BINARIES_DIR}/${TARGET_ENVIRONMENT}" --component "${COMPONENT_INSTALL_NAME}.common_runtime" --prefix "${BINARIES_DIR}"
 
   artifacts:
