@@ -84,6 +84,13 @@
       HIVE_RAW_URL="https://gitlab.syncad.com/hive/hive/-/raw/${HIVE_SCRIPTS_REF}/scripts/ci-helpers"
       for script in get_image4submodule.sh docker_image_utils.sh build_instance.sh source-patterns.sh; do
         TARGET="$SCRIPTS_PATH/ci-helpers/$script"
+        # Preserve project's own source-patterns.sh if it exists (e.g., HAF has
+        # src/ in its patterns which hive's version lacks). A dangling symlink
+        # (broken submodule link) is NOT a valid override — only real files count.
+        if [[ "$script" == "source-patterns.sh" && -f "$TARGET" && ! -L "$TARGET" ]]; then
+          echo "Keeping project's own $script (not overwriting with hive's version)"
+          continue
+        fi
         # Remove dangling symlink before fetching
         rm -f "$TARGET"
         echo "Fetching $script from hive@${HIVE_SCRIPTS_REF}..."
