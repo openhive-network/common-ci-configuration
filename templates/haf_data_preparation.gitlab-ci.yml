@@ -82,7 +82,7 @@
     - |
       # Fetch required scripts from hive repo (symlinks don't work without submodule checkout)
       HIVE_RAW_URL="https://gitlab.syncad.com/hive/hive/-/raw/${HIVE_SCRIPTS_REF}/scripts/ci-helpers"
-      for script in get_image4submodule.sh docker_image_utils.sh; do
+      for script in get_image4submodule.sh docker_image_utils.sh build_instance.sh source-patterns.sh; do
         TARGET="$SCRIPTS_PATH/ci-helpers/$script"
         # Remove dangling symlink before fetching
         rm -f "$TARGET"
@@ -90,6 +90,12 @@
         curl -fsSL "${HIVE_RAW_URL}/${script}" -o "$TARGET"
         chmod +x "$TARGET"
       done
+      # Also fetch common.sh (dependency of build_instance.sh)
+      HIVE_SCRIPTS_URL="https://gitlab.syncad.com/hive/hive/-/raw/${HIVE_SCRIPTS_REF}/scripts"
+      TARGET_COMMON="$SCRIPTS_PATH/common.sh"
+      rm -f "$TARGET_COMMON"
+      curl -fsSL "${HIVE_SCRIPTS_URL}/common.sh" -o "$TARGET_COMMON"
+      chmod +x "$TARGET_COMMON"
     - $SCRIPTS_PATH/ci-helpers/get_image4submodule.sh "$SUBMODULE_DIR" registry.gitlab.syncad.com/hive/haf
       HAF "$REGISTRY_USER" "$REGISTRY_PASS" --export-binaries="$BINARY_CACHE_PATH" --network-type="$HIVE_NETWORK_TYPE"
     - chmod -Rc a+rwx "$BINARY_CACHE_PATH"
@@ -139,6 +145,8 @@
     HIVE_NETWORK_TYPE: mainnet
     DATA_CACHE_DIR: "${DATA_CACHE_HAF_PREFIX}_${HAF_COMMIT}"
     COMMON_CI_REF: "develop"
+    # Cache type for NFS cache separation (e.g., "haf" for PG17, "haf18" for PG18)
+    HAF_CACHE_TYPE: "haf"
     # NFS cache configuration
     CACHE_NFS_PATH: "/nfs/ci-cache"
     CACHE_LOCAL_PATH: "/cache"
@@ -172,7 +180,7 @@
 
       # 2. If no local cache, try to get from NFS via cache-manager
       if [[ "$LOCAL_CACHE_HIT" != "true" ]] && [[ -x "$CACHE_MANAGER" ]]; then
-        if "$CACHE_MANAGER" get haf "$CACHE_KEY" "${DATA_CACHE_DIR}"; then
+        if "$CACHE_MANAGER" get "${HAF_CACHE_TYPE}" "$CACHE_KEY" "${DATA_CACHE_DIR}"; then
           echo "NFS cache hit for HAF commit $CACHE_KEY"
           NFS_CACHE_HIT=true
         fi
@@ -187,10 +195,10 @@
 
         # If we got local cache but NFS doesn't have it, push to NFS for cross-builder jobs
         if [[ "$LOCAL_CACHE_HIT" == "true" ]] && [[ "$NFS_CACHE_HIT" != "true" ]]; then
-          NFS_TAR="${CACHE_NFS_PATH}/haf/${CACHE_KEY}.tar"
+          NFS_TAR="${CACHE_NFS_PATH}/${HAF_CACHE_TYPE}/${CACHE_KEY}.tar"
           if [[ -x "$CACHE_MANAGER" ]] && [[ -z "${FILTERED_CACHE_KEY:-}" ]] && [[ ! -f "$NFS_TAR" ]]; then
             echo "Local cache exists but NFS cache missing - pushing to NFS for cross-builder jobs"
-            "$CACHE_MANAGER" put haf "$CACHE_KEY" "${DATA_CACHE_DIR}" || echo "Warning: Failed to push to NFS cache"
+            "$CACHE_MANAGER" put "${HAF_CACHE_TYPE}" "$CACHE_KEY" "${DATA_CACHE_DIR}" || echo "Warning: Failed to push to NFS cache"
           fi
         fi
       else
@@ -240,7 +248,7 @@
 
         # Push to NFS cache for future use (skip if job uses custom cache key)
         if [[ -x "$CACHE_MANAGER" ]] && [[ -z "${FILTERED_CACHE_KEY:-}" ]]; then
-          "$CACHE_MANAGER" put haf "$CACHE_KEY" "${DATA_CACHE_DIR}" || echo "Warning: Failed to push to NFS cache"
+          "$CACHE_MANAGER" put "${HAF_CACHE_TYPE}" "$CACHE_KEY" "${DATA_CACHE_DIR}" || echo "Warning: Failed to push to NFS cache"
         elif [[ -n "${FILTERED_CACHE_KEY:-}" ]]; then
           echo "Skipping main HAF cache push (job uses FILTERED_CACHE_KEY)"
         fi
@@ -305,7 +313,7 @@
       # Only cleanup extracted directory if:
       # 1. A tar cache exists (data is preserved)
       # 2. No other jobs are waiting for or using this data
-      CACHE_TAR="/cache/haf_${HAF_COMMIT}.tar"
+      CACHE_TAR="/cache/${HAF_CACHE_TYPE}_${HAF_COMMIT}.tar"
       if [[ -f "$CACHE_TAR" ]] && [[ -d "${DATA_CACHE_DIR}" ]]; then
         # Check if any consumers remain
         CONSUMER_COUNT=$(find "${DATA_CACHE_DIR}/consumers" -type f 2>/dev/null | wc -l)
