@@ -30,6 +30,7 @@
 #
 # Optional:
 #   --skip-build             Indicate build can be skipped (only tests/docs changed)
+#   --verify-image           Verify cached image exists in registry before skip/retag
 #   --retag-threshold=N      Re-tag when gap > N (default: 20)
 #   --search-depth=N         Force rebuild when gap > N (default: 25)
 #   --image=NAME             Image name within registry (default: root)
@@ -78,6 +79,7 @@ COMMIT=""
 CACHED_COMMIT=""
 CACHED_IMAGE=""
 SKIP_BUILD=false
+VERIFY_IMAGE=false
 RETAG_THRESHOLD=20
 SEARCH_DEPTH=25
 IMAGE=""
@@ -119,6 +121,9 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-build)
             SKIP_BUILD=true
+            ;;
+        --verify-image)
+            VERIFY_IMAGE=true
             ;;
         --retag-threshold=*)
             RETAG_THRESHOLD="${1#*=}"
@@ -284,6 +289,21 @@ else
             IMAGE_NAME="$CURRENT_IMAGE"
             log "WARNING: Total gap ($TOTAL_GAP) exceeds search depth ($SEARCH_DEPTH) - forcing full rebuild"
         fi
+    fi
+fi
+
+# =============================================================================
+# IMAGE EXISTENCE VERIFICATION
+# =============================================================================
+
+if [[ "$VERIFY_IMAGE" == "true" && ("$BUILD_ACTION" == "skip" || "$BUILD_ACTION" == "retag") ]]; then
+    log "Verifying cached image exists in registry: $CACHED_IMAGE"
+    if ! docker manifest inspect "$CACHED_IMAGE" >/dev/null 2>&1; then
+        log "WARNING: Cached image not found in registry, falling back to full build"
+        BUILD_ACTION="build"
+        IMAGE_COMMIT="$COMMIT"
+        IMAGE_TAG="$CURRENT_TAG"
+        IMAGE_NAME="$CURRENT_IMAGE"
     fi
 fi
 
