@@ -184,8 +184,18 @@ if [[ -d "$WORK_DIR" ]]; then
     rm -rf "$WORK_DIR"
 fi
 
-git clone --depth="$DEPTH" --branch="$BRANCH" --single-branch "$REPO_URL" "$WORK_DIR" 2>&1 | \
-    while IFS= read -r line; do log "  $line"; done
+if ! git clone --depth="$DEPTH" --branch="$BRANCH" --single-branch "$REPO_URL" "$WORK_DIR" 2>&1 | \
+    while IFS= read -r line; do log "  $line"; done; then
+    if [[ "$BRANCH" != "develop" ]]; then
+        log "WARNING: Branch '$BRANCH' not found, falling back to 'develop'"
+        BRANCH="develop"
+        git clone --depth="$DEPTH" --branch="$BRANCH" --single-branch "$REPO_URL" "$WORK_DIR" 2>&1 | \
+            while IFS= read -r line; do log "  $line"; done
+    else
+        log "ERROR: Failed to clone repository"
+        exit 1
+    fi
+fi
 
 # Find source commits (full 40-char hashes for cache keys)
 # Get multiple commits so we can fall back if the latest doesn't have an image yet

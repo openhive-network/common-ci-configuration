@@ -118,6 +118,17 @@ include:
       if UPSTREAM_PATTERNS=$(curl -sf "$PATTERNS_URL" | sh); then
         echo "Loaded patterns: $UPSTREAM_PATTERNS"
         export UPSTREAM_PATTERNS
+      elif [[ "$HAF_PATTERNS_REF" != "develop" ]]; then
+        echo "WARNING: HAF_PATTERNS_REF '$HAF_PATTERNS_REF' not found, falling back to develop"
+        HAF_PATTERNS_REF="develop"
+        PATTERNS_URL="https://gitlab.syncad.com/hive/haf/-/raw/develop/scripts/ci-helpers/source-patterns.sh"
+        if UPSTREAM_PATTERNS=$(curl -sf "$PATTERNS_URL" | sh); then
+          echo "Loaded patterns (from develop fallback): $UPSTREAM_PATTERNS"
+          export UPSTREAM_PATTERNS
+        else
+          echo "ERROR: Could not fetch source-patterns.sh from HAF (even from develop)"
+          exit 1
+        fi
       else
         echo "ERROR: Could not fetch source-patterns.sh from HAF"
         exit 1
