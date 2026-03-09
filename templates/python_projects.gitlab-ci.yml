@@ -167,7 +167,7 @@ variables:
 #
 # Variables:
 #   PYPROJECT_DIR             - Directory containing poetry.lock (default: CI_PROJECT_DIR)
-#   UNSTABLE_VERSION_PATTERN  - Regex pattern to detect unstable versions (default: "dev|unstable")
+#   UNSTABLE_VERSION_PATTERN  - Regex pattern to detect unstable versions (default: "dev")
 #   ALLOWED_PACKAGE_PATTERN   - Package name pattern to allow unstable versions (default: "" = none)
 #   COMMON_CI_REF             - Branch/ref to fetch script from (default: "develop")
 #
@@ -175,7 +175,7 @@ variables:
   extends: .job-defaults
   variables:
     PYPROJECT_DIR: "${CI_PROJECT_DIR}"
-    UNSTABLE_VERSION_PATTERN: "dev|unstable"
+    UNSTABLE_VERSION_PATTERN: "dev"
     ALLOWED_PACKAGE_PATTERN: ""
     COMMON_CI_REF: "develop"
   image: "${PYTHON_IMAGE}"
