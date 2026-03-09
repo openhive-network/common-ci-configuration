@@ -10,7 +10,7 @@
 #
 # Options:
 #   --pyproject-dir <path>              Directory containing poetry.lock (default: current directory)
-#   --unstable-version-pattern <regex>          Unstable version pattern to detect (default: "dev|unstable")
+#   --unstable-version-pattern <regex>          Unstable version pattern to detect (default: "dev")
 #   --allowed-package-pattern <regex>   Package name pattern to allow unstable versions (default: none)
 #   -h, --help                          Show this help message
 #
@@ -45,7 +45,7 @@ show_help() {
 
 main() {
     local pyproject_dir="."
-    local unstable_pattern="dev|unstable"
+    local unstable_pattern="dev"
     local allowed_package_pattern=""
 
     # Parse arguments
