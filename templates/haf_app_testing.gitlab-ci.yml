@@ -1219,12 +1219,16 @@ include:
       # 1. All pending WAL is flushed
       # 2. A shutdown checkpoint is created
       # 3. All required PostgreSQL directories remain intact
-      echo "Stopping PostgreSQL with pg_ctl (smart mode, 60s timeout)..."
+      # Use fast mode directly - it terminates all connections immediately.
+      # Smart mode waits for clients to disconnect voluntarily, which times out
+      # when app containers are still running (they poll in sleep loops).
+      # Since we've already done CHECKPOINT in the wait script, fast mode is safe.
+      echo "Stopping PostgreSQL with pg_ctl (fast mode, 60s timeout)..."
       if ! docker compose "${COMPOSE_OPTIONS[@]}" exec -T --user postgres "$HAF_CONTAINER" \
-          /usr/lib/postgresql/17/bin/pg_ctl stop -D /home/hived/datadir/haf_db_store/pgdata -m smart -t 60 2>&1; then
-        echo "WARNING: pg_ctl smart stop failed, trying fast mode..."
+          /usr/lib/postgresql/17/bin/pg_ctl stop -D /home/hived/datadir/haf_db_store/pgdata -m fast -t 60 2>&1; then
+        echo "WARNING: pg_ctl fast stop failed, trying immediate mode..."
         docker compose "${COMPOSE_OPTIONS[@]}" exec -T --user postgres "$HAF_CONTAINER" \
-          /usr/lib/postgresql/17/bin/pg_ctl stop -D /home/hived/datadir/haf_db_store/pgdata -m fast -t 30 2>&1 || true
+          /usr/lib/postgresql/17/bin/pg_ctl stop -D /home/hived/datadir/haf_db_store/pgdata -m immediate -t 30 2>&1 || true
       fi
 
       # Collect logs before stopping containers
