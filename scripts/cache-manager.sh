@@ -1025,12 +1025,18 @@ cmd_put() {
             sudo rm -rf '${local_source}/datadir' '${local_source}/shm_dir' 2>/dev/null || rm -rf '${local_source}/datadir' '${local_source}/shm_dir' 2>/dev/null || true
 
             echo '[cache-manager] Copying datadir to local cache...' >&2
-            sudo cp -aT '$copy_from' '${local_source}/datadir'
+            if ! sudo cp -aT '$copy_from' '${local_source}/datadir'; then
+                echo '[cache-manager] ERROR: Failed to copy datadir to local cache' >&2
+                exit 1
+            fi
 
             # Copy shm_dir if provided
             if [ -n '$shm_dir' ] && [ -d '$shm_dir' ]; then
                 echo '[cache-manager] Copying shm_dir to local cache...' >&2
-                sudo cp -aT '$shm_dir' '${local_source}/shm_dir'
+                if ! sudo cp -aT '$shm_dir' '${local_source}/shm_dir'; then
+                    echo '[cache-manager] ERROR: Failed to copy shm_dir to local cache' >&2
+                    exit 1
+                fi
             fi
 
             # Remove empty blockchain directory to trigger symlink on test runners
