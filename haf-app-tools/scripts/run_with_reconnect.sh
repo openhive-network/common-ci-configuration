@@ -27,6 +27,18 @@
 
 set -o pipefail
 
+_rwc_terminated=0
+_rwc_sleep_pid=0
+
+_rwc_handle_signal() {
+    _rwc_terminated=1
+    if [ "$_rwc_sleep_pid" -ne 0 ]; then
+        kill "$_rwc_sleep_pid" 2>/dev/null
+    fi
+}
+
+trap _rwc_handle_signal TERM INT QUIT
+
 _rwc_max_retries="${MAX_RECONNECT_RETRIES:-0}"
 _rwc_retry_delay="${RECONNECT_DELAY:-5}"
 _rwc_max_delay="${RECONNECT_MAX_DELAY:-60}"
@@ -111,7 +123,15 @@ run_with_reconnect() {
         local sleep_time=$((delay + jitter))
 
         echo "[$(date -uIseconds)] Connection lost (exit code 2). Waiting ${sleep_time}s before retry..." >&2
-        sleep "$sleep_time"
+        sleep "$sleep_time" &
+        _rwc_sleep_pid=$!
+        wait "$_rwc_sleep_pid" 2>/dev/null
+        _rwc_sleep_pid=0
+
+        if [ "$_rwc_terminated" -eq 1 ]; then
+            echo "[$(date -uIseconds)] Received termination signal. Exiting." >&2
+            return 143  # 128 + 15 (SIGTERM)
+        fi
 
         # Exponential backoff capped at max_delay
         delay=$((delay * 2))
