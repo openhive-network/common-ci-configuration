@@ -9,6 +9,8 @@ RUN <<EOF
     echo "haf_admin ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers
 EOF
 
+COPY haf-app-tools/scripts/run_with_reconnect.sh /usr/local/bin/run_with_reconnect.sh
+
 USER haf_admin
 WORKDIR /home/haf_admin
 
