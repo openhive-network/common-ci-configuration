@@ -688,7 +688,7 @@ psql_image_test:
     - *skip_on_renovate_rule
     - when: on_success
   image:
-    name: registry.gitlab.syncad.com/hive/common-ci-configuration/psql:14-1
+    name: registry.gitlab.syncad.com/hive/common-ci-configuration/psql:14-2
     entrypoint: [""]
   services:
     - postgres:14
