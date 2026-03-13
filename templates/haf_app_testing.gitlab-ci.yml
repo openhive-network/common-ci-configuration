@@ -1215,6 +1215,15 @@ include:
         echo "Proceeding with pg_ctl stop which will attempt clean shutdown..."
       fi
 
+      # VACUUM ANALYZE key tables so CI caches have up-to-date planner stats
+      # and visibility maps. Without this, Index Only Scans degrade to Heap
+      # Fetches after cache restore (~10% throughput regression).
+      echo "Running VACUUM ANALYZE on key tables for CI cache quality..."
+      if ! docker compose "${COMPOSE_OPTIONS[@]}" exec -T "$HAF_CONTAINER" psql -U haf_admin -d haf_block_log -c \
+          "VACUUM ANALYZE hafd.account_operations, hafd.operations, hafd.transactions, hafd.blocks;" 2>&1; then
+        echo "WARNING: VACUUM ANALYZE failed - cache may have stale planner stats"
+      fi
+
       # Use pg_ctl stop for clean shutdown - this ensures:
       # 1. All pending WAL is flushed
       # 2. A shutdown checkpoint is created
