@@ -242,6 +242,7 @@ fi
     --shared-file-dir="$DATA_CACHE/shm_dir" \
     --docker-option=--env=HIVED_UID="$(id -u)" \
     --docker-option=--env=HAF_CI_MODE="${HAF_CI_MODE:-0}" \
+    --docker-option=--env=SHUTDOWN_VACUUM_ANALYZE=true \
     "$IMG" --replay-blockchain --stop-at-block="$STOP_AT_BLOCK" --exit-before-sync
 
 echo "Logs from container hived_instance:"
