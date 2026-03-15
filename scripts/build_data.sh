@@ -240,7 +240,7 @@ fi
     "${DOCKER_VOLUMES[@]}" \
     --data-dir="$DATA_CACHE/datadir" \
     --shared-file-dir="$DATA_CACHE/shm_dir" \
-    --docker-option=--env=HIVED_UID="$(id -u)" \
+    --docker-option=--env=HIVED_UID="${HIVED_UID:-1000}" \
     --docker-option=--env=HAF_CI_MODE="${HAF_CI_MODE:-0}" \
     --docker-option=--env=SHUTDOWN_VACUUM_ANALYZE=true \
     "$IMG" --replay-blockchain --stop-at-block="$STOP_AT_BLOCK" --exit-before-sync
@@ -249,8 +249,6 @@ echo "Logs from container hived_instance:"
 docker logs -f hived_instance &
 
 status=$(docker wait hived_instance)
-
-echo "HIVED_UID=$(id -u)" > "$DATA_CACHE/datadir/hived_uid.env"
 
 echo "$status" > "$DATA_CACHE/datadir/status"
 
