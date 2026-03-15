@@ -32,6 +32,8 @@ then
 else
   mkdir -p $DATA_BASE_DIR/datadir
   mkdir -p $DATA_BASE_DIR/shm_dir
+  # Ensure dirs are owned by the hived user so containers can write without UID remapping
+  chown -R ${HIVED_UID:-1000}:${HIVED_UID:-1000} $DATA_BASE_DIR/datadir $DATA_BASE_DIR/shm_dir
 fi
 
 function handle_single_file_of_block_log() {
