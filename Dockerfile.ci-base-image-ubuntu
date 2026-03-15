@@ -19,7 +19,7 @@ ARG CLANG_VERSION=21
 ARG PG_MAJOR=18
 
 ENV LANG=en_US.UTF-8
-ENV PATH="/home/hived_admin/.local/bin:$PATH"
+ENV PATH="/home/hived/.local/bin:$PATH"
 
 SHELL ["/bin/bash", "-c"]
 
@@ -138,10 +138,6 @@ RUN curl -fsSL https://github.com/mozilla/sccache/releases/download/v0.8.1/sccac
 # Remove default ubuntu user (UID 1000) from phusion/baseimage to free UID 1000 for hived
 RUN userdel --remove ubuntu 2>/dev/null || true
 
-# Create hived_admin user with sudo access
-RUN useradd -ms /bin/bash -u 2000 -g users -c "Hived admin account" hived_admin && \
-    echo "hived_admin ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
 # Create hived user for running hived daemon
 # UID 1000 matches hive's setup_ubuntu.sh convention. NOPASSWD sudo required for
 # runtime operations (e.g. chown in entrypoint scripts).
@@ -169,16 +165,16 @@ RUN git clone --depth 1 --branch bw_timer_settime_fix https://gitlab.syncad.com/
     make install && \
     cd / && rm -rf /tmp/faketime
 
-USER hived_admin
-WORKDIR /home/hived_admin
+USER hived
+WORKDIR /home/hived
 
 # Configure git
 RUN git config --global --add safe.directory '*'
 
 # Install Poetry
 RUN curl -sSL https://install.python-poetry.org | python3 - && \
-    /home/hived_admin/.local/bin/poetry self update ${POETRY_VERSION} && \
-    /home/hived_admin/.local/bin/poetry self add "poetry-dynamic-versioning[plugin]@>=1.0.0,<2.2.0"
+    /home/hived/.local/bin/poetry self update ${POETRY_VERSION} && \
+    /home/hived/.local/bin/poetry self add "poetry-dynamic-versioning[plugin]@>=1.0.0,<2.2.0"
 
 # Compile Python bytecode for faster startup
 RUN python3 -c "import sysconfig, compileall; compileall.compile_dir(sysconfig.get_path('stdlib'))"
