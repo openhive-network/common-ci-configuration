@@ -250,6 +250,7 @@ docker logs -f hived_instance &
 
 status=$(docker wait hived_instance)
 
+echo "HIVED_UID=${HIVED_UID:-1000}" > "$DATA_CACHE/datadir/hived_uid.env"
 echo "$status" > "$DATA_CACHE/datadir/status"
 
 # NOTE: Do NOT remove replay_running here - the CI template's after_script handles it

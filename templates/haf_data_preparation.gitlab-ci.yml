@@ -260,7 +260,7 @@
           echo "Skipping main HAF cache push (job uses FILTERED_CACHE_KEY)"
         fi
       fi
-    - cp "${DATA_CACHE_DIR}/datadir/hived_uid.env" "$CI_PROJECT_DIR/hived_uid.env"
+    - cp "${DATA_CACHE_DIR}/datadir/hived_uid.env" "$CI_PROJECT_DIR/hived_uid.env" 2>/dev/null || echo "HIVED_UID=1000" > "$CI_PROJECT_DIR/hived_uid.env"
     - cp "${DATA_CACHE_DIR}/datadir/docker_entrypoint.log" "${CI_PROJECT_DIR}/docker_entrypoint.log" 2>/dev/null || true
     - ls -la "${DATA_CACHE_DIR}/datadir/"
   after_script:
@@ -480,7 +480,7 @@
       # Create dotenv with image name for downstream jobs
       echo "HIVED_IMAGE_NAME=$HIVED_IMAGE_NAME" > docker_image_name.env
       echo "HIVED_COMMIT=$HIVE_COMMIT" >> docker_image_name.env
-    - cp "${DATA_CACHE_DIR}/datadir/hived_uid.env" "$CI_PROJECT_DIR/hived_uid.env"
+    - cp "${DATA_CACHE_DIR}/datadir/hived_uid.env" "$CI_PROJECT_DIR/hived_uid.env" 2>/dev/null || echo "HIVED_UID=1000" > "$CI_PROJECT_DIR/hived_uid.env"
     - cp "${DATA_CACHE_DIR}/datadir/docker_entrypoint.log" "${CI_PROJECT_DIR}/docker_entrypoint.log" 2>/dev/null || true
     - ls -la "${DATA_CACHE_DIR}/datadir/"
   after_script:
