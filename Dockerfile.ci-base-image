@@ -123,7 +123,7 @@ ARG BUILDX_VERSION=v0.24.0
 ENV DEFAULT_PYTHON_VERSION=3.14
 ENV PYTHON_VERSION=${DEFAULT_PYTHON_VERSION}
 ENV LANG=en_US.UTF-8
-ENV PATH="/home/hived_admin/.local/bin:$PATH"
+ENV PATH="/home/hived/.local/bin:$PATH"
 
 SHELL ["/bin/bash", "-c"]
 
@@ -310,17 +310,11 @@ RUN curl -fsSL https://github.com/mozilla/sccache/releases/download/v0.8.1/sccac
 # Set sccache cache directory (defaults to /.cache which isn't writable)
 ENV SCCACHE_DIR=/tmp/sccache
 
-# Create hived_admin user with sudo access (for backwards compatibility with hive/hive ci-base-image)
-RUN useradd -ms /bin/bash -u 2000 -g users -c "Hived admin account" hived_admin && \
-    echo "hived_admin ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
 # Create hived user for running hived daemon (used by hive builds)
 # UID 1000 matches hive's setup_ubuntu.sh convention. NOPASSWD sudo required for
 # runtime operations (e.g. chown in entrypoint scripts).
-# chmod 710 allows group (users) to traverse /home/hived so hived_admin can access /home/hived/bin
 RUN useradd -ms /bin/bash -u 1000 -g users -c "Hived daemon account" hived && \
-    echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
-    chmod 710 /home/hived
+    echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Install Docker CLI
 RUN curl -fsSLO "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" && \
@@ -384,8 +378,8 @@ RUN ln -sf /usr/local/bin/python3 /usr/local/bin/python && \
 # Compile Python bytecode for faster startup (default Python only)
 RUN /usr/local/bin/python3 -c "import sysconfig, compileall; compileall.compile_dir(sysconfig.get_path('stdlib'), quiet=1)"
 
-USER hived_admin
-WORKDIR /home/hived_admin
+USER hived
+WORKDIR /home/hived
 
 # Configure git
 RUN git config --global --add safe.directory '*'
@@ -405,4 +399,4 @@ RUN rm -f /usr/lib64/libncurses.so /usr/lib64/libtinfo.so \
          /usr/lib64/libreadline.so /usr/lib64/libhistory.so \
          /lib64/libncurses.so /lib64/libtinfo.so \
          /lib64/libreadline.so /lib64/libhistory.so 2>/dev/null || true
-USER hived_admin
+USER hived
