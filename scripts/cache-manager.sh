@@ -239,6 +239,12 @@ _cleanup_stale_locks() {
 # Check if running on the NFS host (where NFS path is local, not a mount)
 # On NFS host: /nfs/ci-cache is a symlink to /storage1/ci-cache (local storage)
 # On clients: /nfs/ci-cache is an NFS mount point
+#
+# Inside Docker containers on the NFS host, the symlink is replaced by a bind
+# mount (e.g. /storage1/ci-cache:/nfs/ci-cache), so the symlink and mountpoint
+# checks both fail. We fall back to checking the filesystem type: on a real NFS
+# client the path is "nfs"/"nfs4", while on the NFS host (even inside Docker)
+# it is the underlying local filesystem (zfs, ext4, xfs, …).
 _is_nfs_host() {
     # If it's a symlink, we're on the NFS host
     if [[ -L "$CACHE_NFS_PATH" ]]; then
@@ -247,6 +253,19 @@ _is_nfs_host() {
     # If it exists but is NOT a mount point, we're on the NFS host
     if [[ -d "$CACHE_NFS_PATH" ]] && ! mountpoint -q "$CACHE_NFS_PATH" 2>/dev/null; then
         return 0
+    fi
+    # Fallback: compare filesystem types and check if both paths are local.
+    # On a real NFS client /nfs/ci-cache is type "nfs"/"nfs4"; on the NFS host
+    # (even inside a Docker bind mount) it is the underlying local filesystem
+    # (zfs, ext4, xfs, …). If the NFS path is NOT an NFS filesystem, we are
+    # on the host that owns the storage.
+    if [[ -d "$CACHE_NFS_PATH" ]] && [[ -d "$CACHE_LOCAL_PATH" ]]; then
+        local nfs_fstype
+        nfs_fstype=$(stat -f -c '%T' "$CACHE_NFS_PATH" 2>/dev/null) || return 1
+        # Any NFS variant (nfs, nfs4, nfs/nfs4, …) means we are a client
+        if [[ "$nfs_fstype" != nfs* ]]; then
+            return 0
+        fi
     fi
     return 1
 }
@@ -1388,8 +1407,16 @@ cmd_cleanup() {
         grep -oP '\|.*$' "$lru_index" 2>/dev/null | sed 's/^|//' | sort > "$lru_entries_file"
     fi
 
-    # Find all tar files and check if they're in the LRU index
-    while IFS= read -r tar_path; do
+    # Find all tar files not in LRU index, sorted oldest-first by mtime.
+    # Remove them if they are older than max_age_days OR if we are still over
+    # the size limit (size pressure).  Orphans have no LRU timestamp, so mtime
+    # is the best proxy for age.
+    local over_size_limit=false
+    if [[ $total_size -gt $max_size_bytes ]]; then
+        over_size_limit=true
+    fi
+
+    while IFS=$'\t' read -r _mtime tar_path; do
         [[ -f "$tar_path" ]] || continue
 
         # Extract cache_type/cache_key from path (e.g., ./haf_filtered/146072_filtered.tar -> haf_filtered/146072_filtered)
@@ -1410,8 +1437,20 @@ cmd_cleanup() {
         local file_mtime
         file_mtime=$(stat -c %Y "$tar_path" 2>/dev/null || echo 0)
 
-        # Skip files newer than max_age_days
-        if [[ $file_mtime -gt $cutoff_mtime ]]; then
+        # Decide whether to remove: by age or by size pressure
+        local reason=""
+        if [[ $file_mtime -le $cutoff_mtime ]]; then
+            reason="older than ${max_age_days} days"
+        elif [[ "$over_size_limit" == "true" ]] && [[ $total_size -gt $max_size_bytes ]]; then
+            reason="size pressure (over ${max_size_gb}GB limit)"
+        else
+            # Not old enough and not over size limit — skip
+            continue
+        fi
+
+        # Skip files created in the last 5 minutes (protect in-progress caches)
+        local min_age_seconds=300
+        if [[ $(($(date +%s) - file_mtime)) -lt $min_age_seconds ]]; then
             continue
         fi
 
@@ -1426,7 +1465,7 @@ cmd_cleanup() {
         local file_size
         file_size=$(stat -c %s "$tar_path" 2>/dev/null || echo 0)
         local age_days=$(( ($(date +%s) - file_mtime) / 86400 ))
-        _log "Removing orphan: $entry (${age_days} days old, $((file_size / 1024 / 1024 / 1024))GB)"
+        _log "Removing orphan: $entry (${age_days}d old, $((file_size / 1024 / 1024 / 1024))GB, ${reason})"
 
         sudo rm -f "$tar_path" "$tar_lock" "${tar_lock}.info" 2>/dev/null || \
             rm -f "$tar_path" "$tar_lock" "${tar_lock}.info" 2>/dev/null || true
@@ -1438,10 +1477,12 @@ cmd_cleanup() {
         total_size=$((total_size - file_size))
         orphan_removed=$((orphan_removed + 1))
 
-        # Stop if under size limit
-        [[ $total_size -le $max_size_bytes ]] && break
+        # Stop if under size limit (and we were only removing due to size pressure)
+        if [[ $total_size -le $max_size_bytes ]]; then
+            break
+        fi
 
-    done < <(find "$search_path" -name "*.tar" -type f 2>/dev/null | sort)
+    done < <(find "$search_path" -name "*.tar" -type f -printf '%T@\t%p\n' 2>/dev/null | sort -n)
 
     rm -f "$lru_entries_file"
 
