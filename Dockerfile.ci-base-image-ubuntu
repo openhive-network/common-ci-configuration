@@ -135,12 +135,18 @@ RUN curl -fsSL https://github.com/mozilla/sccache/releases/download/v0.8.1/sccac
     | tar xz -C /usr/local/bin --strip-components=1 --wildcards '*/sccache' \
     && chmod +x /usr/local/bin/sccache
 
+# Remove default ubuntu user (UID 1000) from phusion/baseimage to free UID 1000 for hived
+RUN userdel --remove ubuntu 2>/dev/null || true
+
 # Create hived_admin user with sudo access
 RUN useradd -ms /bin/bash -u 2000 -g users -c "Hived admin account" hived_admin && \
     echo "hived_admin ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Create hived user for running hived daemon
-RUN useradd -ms /bin/bash -u 2001 -g users -c "Hived daemon account" hived
+# UID 1000 matches hive's setup_ubuntu.sh convention. NOPASSWD sudo required for
+# runtime operations (e.g. chown in entrypoint scripts).
+RUN useradd -ms /bin/bash -u 1000 -g users -c "Hived daemon account" hived && \
+    echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Install Docker CLI
 RUN curl -fsSLO "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" && \

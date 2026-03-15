@@ -315,8 +315,11 @@ RUN useradd -ms /bin/bash -u 2000 -g users -c "Hived admin account" hived_admin 
     echo "hived_admin ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Create hived user for running hived daemon (used by hive builds)
+# UID 1000 matches hive's setup_ubuntu.sh convention. NOPASSWD sudo required for
+# runtime operations (e.g. chown in entrypoint scripts).
 # chmod 710 allows group (users) to traverse /home/hived so hived_admin can access /home/hived/bin
-RUN useradd -ms /bin/bash -u 2001 -g users -c "Hived daemon account" hived && \
+RUN useradd -ms /bin/bash -u 1000 -g users -c "Hived daemon account" hived && \
+    echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
     chmod 710 /home/hived
 
 # Install Docker CLI
