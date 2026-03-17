@@ -32,8 +32,15 @@ RUN <<EOF
   # Install Python packages needed by HAF app tests
   pip3 install --no-cache-dir psycopg2-binary
 
-  # Ensure hived user has sudo access (should already exist from base image)
-  id hived 2>/dev/null || useradd -ms /bin/bash hived
+  # Ensure hived user exists with UID 1000 (matching HAF container conventions).
+  # The base image should have hived at UID 1000, but if not, create it.
+  # Without explicit -u 1000, useradd picks next available UID (e.g. 2001),
+  # causing tar-extracted files to have wrong ownership inside HAF containers.
+  if ! id hived 2>/dev/null; then
+    userdel --remove ubuntu 2>/dev/null || true
+    useradd -ms /bin/bash -u 1000 -g users hived
+  fi
+  echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 EOF
 
 USER hived
