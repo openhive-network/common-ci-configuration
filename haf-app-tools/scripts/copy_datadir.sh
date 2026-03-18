@@ -213,25 +213,25 @@ extract_nfs_cache_if_needed() {
 
         if [[ -n "$tar_file" ]]; then
             echo "Extracting $tar_file to $data_source"
-            # Pre-validate: ensure extraction target and expected subdirectories exist
-            # Catches Docker volume mount races where /cache isn't ready yet
-            if ! mkdir -p "$data_source" 2>/dev/null; then
-                echo "WARNING: Cannot create $data_source, checking mounts..."
-                mount | grep -i cache || echo "No cache mount found"
-                df /cache/ 2>/dev/null || echo "/cache not mounted"
-                ls -la /cache/ 2>/dev/null || echo "Cannot list /cache"
+            # Pre-validate: ensure extraction target exists
+            # Diagnose root cause (permissions vs mount race) if it fails
+            echo "Pre-extraction diagnostics: id=$(id), parent=$(dirname "$data_source")"
+            ls -la "$(dirname "$data_source")" 2>&1 | head -5 || true
+            if ! mkdir -p "$data_source" 2>&1; then
+                echo "WARNING: mkdir -p $data_source failed, full diagnostics:"
+                echo "  uid: $(id)"
+                echo "  parent dir:"
+                ls -la "$(dirname "$data_source")" 2>&1 || echo "  cannot list parent"
+                mount | grep -i cache || echo "  no cache mount found"
+                df "$(dirname "$data_source")" 2>&1 || echo "  df failed"
                 # Retry after short delay (Docker volume mount race condition)
                 sleep 5
-                if ! mkdir -p "$data_source"; then
+                if ! mkdir -p "$data_source" 2>&1; then
                     echo "FATAL: Cannot create extraction target $data_source after retry"
                     return 1
                 fi
                 echo "Extraction target created after retry"
             fi
-            # Pre-create subdirectories that tar expects to exist
-            for subdir in datadir consumers shm_dir; do
-                mkdir -p "${data_source}/${subdir}" 2>/dev/null || true
-            done
             chmod 777 "$data_source" 2>/dev/null || true
 
             # Use flock to prevent race conditions when multiple jobs extract to the same cache dir
