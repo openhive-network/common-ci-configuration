@@ -27,7 +27,7 @@ variable "PYTHON_RUNTIME_VERSION" {
 }
 
 variable "CI_BASE_IMAGE_VERSION" {
-  default = "pypa_2_28-pg18-2"
+  default = "pypa_2_28-pg18-3"
 }
 
 variable "CI_BASE_IMAGE_UBUNTU_VERSION" {
