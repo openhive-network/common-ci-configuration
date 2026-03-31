@@ -30,6 +30,10 @@ variable "CI_BASE_IMAGE_VERSION" {
   default = "pypa_2_28-pg18-3"
 }
 
+variable "CI_BASE_IMAGE_HAF_VERSION" {
+  default = "pypa_2_28-pg18-3"
+}
+
 variable "CI_BASE_IMAGE_UBUNTU_VERSION" {
   default = "ubuntu24.04-pg18-2"
 }
@@ -195,6 +199,13 @@ target "ci-base-image" {
   tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
   cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
   cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
+}
+
+target "ci-base-image-haf" {
+  dockerfile = "Dockerfile.ci-base-image-haf"
+  tags = generate-tags("ci-base-image-haf", "${CI_BASE_IMAGE_HAF_VERSION}")
+  cache-from = generate-cache-from("ci-base-image-haf", "${CI_BASE_IMAGE_HAF_VERSION}")
+  cache-to = generate-cache-to("ci-base-image-haf", "${CI_BASE_IMAGE_HAF_VERSION}")
 }
 
 target "ci-base-image-ubuntu" {
