@@ -7,10 +7,38 @@
 #     --build-arg HIVE_CI_IMAGE=registry.gitlab.syncad.com/hive/hive/ci-base-image:<tag> \
 #     -t registry.gitlab.syncad.com/hive/haf/ci-base-image:<tag> .
 
-ARG HIVE_CI_IMAGE=registry.gitlab.syncad.com/hive/common-ci-configuration/ci-base-image:fddc56669a22b53e6d75a6d697ee8a0f42a7ce52
+
+ARG HIVE_CI_IMAGE_TAG=pypa_2_28-pg18-3
+ARG HIVE_CI_REGISTRY=registry.gitlab.syncad.com/hive/common-ci-configuration
 ARG POSTGRES_VERSION=18
 
-FROM ${HIVE_CI_IMAGE}
+# Builder stage - compiles dependencies, not included in final image
+FROM ${HIVE_CI_REGISTRY}/ci-base-image:${HIVE_CI_IMAGE_TAG} AS builder
+
+ARG POSTGRES_VERSION
+
+# Build pg_cron
+RUN git clone --depth 1 https://github.com/citusdata/pg_cron.git /tmp/pg_cron && \
+    cd /tmp/pg_cron && \
+    make PG_CONFIG=/usr/pgsql-${POSTGRES_VERSION}/bin/pg_config \
+         CFLAGS="-O2 -fPIC -fvisibility=hidden -std=c99 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-implicit-fallthrough" && \
+    make install PG_CONFIG=/usr/pgsql-${POSTGRES_VERSION}/bin/pg_config DESTDIR=/tmp/pg_cron_install && \
+    rm -rf /tmp/pg_cron
+
+# Rebuild libpqxx with C++20 and std::source_location support
+RUN git clone --depth 1 --branch 7.8.1 https://github.com/jtv/libpqxx.git /tmp/libpqxx && \
+    cd /tmp/libpqxx && \
+    mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release -GNinja -DBUILD_TEST=OFF \
+          -DCMAKE_CXX_STANDARD=20 \
+          -DCMAKE_INSTALL_PREFIX=/tmp/libpqxx_install \
+          -DCMAKE_INSTALL_LIBDIR=lib64 \
+          .. && \
+    ninja install && \
+    cd / && rm -rf /tmp/libpqxx
+
+# Final image
+FROM ${HIVE_CI_REGISTRY}/ci-base-image:${HIVE_CI_IMAGE_TAG}
 
 ARG POSTGRES_VERSION
 ENV POSTGRES_VERSION=${POSTGRES_VERSION}
@@ -20,13 +48,9 @@ SHELL ["/bin/bash", "-c"]
 USER root
 WORKDIR /usr/local/src
 
-# Build pg_cron
-RUN git clone --depth 1 https://github.com/citusdata/pg_cron.git /tmp/pg_cron && \
-    cd /tmp/pg_cron && \
-    make PG_CONFIG=/usr/pgsql-${POSTGRES_VERSION}/bin/pg_config \
-         CFLAGS="-O2 -fPIC -fvisibility=hidden -std=c99 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-implicit-fallthrough" && \
-    make install PG_CONFIG=/usr/pgsql-${POSTGRES_VERSION}/bin/pg_config && \
-    rm -rf /tmp/pg_cron
+# Copy built artifacts from builder (no sources/object files)
+COPY --from=builder /tmp/pg_cron_install/ /
+COPY --from=builder /tmp/libpqxx_install/ /usr/local/
 
 # Install tox and AI packages
 RUN pip3 install --break-system-packages tox tokenizers pysbd base58
@@ -35,18 +59,6 @@ RUN pip3 install --break-system-packages tox tokenizers pysbd base58
 RUN ln -sf /usr/pgsql-${POSTGRES_VERSION}/lib/libpq.so /usr/lib64/libpq.so && \
     ln -sf /usr/pgsql-${POSTGRES_VERSION}/lib/libpq.so.5 /usr/lib64/libpq.so.5 && \
     ln -sf /usr/pgsql-${POSTGRES_VERSION}/include /usr/include/postgresql
-
-# Rebuild libpqxx with C++20 and std::source_location support
-RUN git clone --depth 1 --branch 7.8.1 https://github.com/jtv/libpqxx.git /tmp/libpqxx && \
-    cd /tmp/libpqxx && \
-    mkdir build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Release -GNinja -DBUILD_TEST=OFF \
-          -DCMAKE_CXX_STANDARD=20 \
-          -DCMAKE_INSTALL_PREFIX=/usr/local \
-          -DCMAKE_INSTALL_LIBDIR=lib64 \
-          .. && \
-    ninja install && \
-    cd / && rm -rf /tmp/libpqxx
 
 # Provide pg_lsclusters stub for AlmaLinux
 RUN printf "#!/bin/bash\necho \"${POSTGRES_VERSION} main 5432 online\"\n" > /usr/local/bin/pg_lsclusters && \
