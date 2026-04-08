@@ -2,6 +2,13 @@ variables:
   DOCKER_BUILDER_TAG: "latest"
   DOCKER_DIND_TAG: "latest"
   IMAGE_REMOVER_TAG: "latest"
+  # Package caching proxies on genfiles (192.168.50.197 / 192.168.5.145).
+  # Passed as build-args to docker buildx bake via HCL variable resolution.
+  # Also applies to non-docker jobs that run pip/npm directly.
+  # Empty values are safe - npm/pip fall back to their default registries.
+  NPM_CONFIG_REGISTRY: "http://npm-cache.syncad.com:8080/"
+  PIP_INDEX_URL: "http://pypi-cache.syncad.com:8080/root/pypi/+simple/"
+  PIP_TRUSTED_HOST: "pypi-cache.syncad.com"
 
 include:
   - local: templates/base.gitlab-ci.yml
