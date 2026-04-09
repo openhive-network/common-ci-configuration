@@ -577,6 +577,18 @@ build_ci_base_image:
     - job: build_docker_dind_image
       optional: true
 
+build_ci_base_image_haf:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "ci-base-image-haf"
+    DOCKERFILE_PATH: "Dockerfile.ci-base-image-haf"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+
 build_ci_base_image_ubuntu:
   extends: .effective_build_docker_image
   stage: build
