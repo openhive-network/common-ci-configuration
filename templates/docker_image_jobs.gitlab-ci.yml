@@ -41,7 +41,15 @@ include:
         sleep 2
       done
       docker context create builder-context
-      docker buildx create --driver docker-container --name docker-container-builder --use builder-context
+      # Pass buildkitd.toml when mounted by the runner (e.g. docker.io mirror config).
+      # Without this, the buildkit container ignores the mounted file and pulls direct
+      # from registries — bypassing mirrors and risking Docker Hub rate limits.
+      # Off-runner usage works too: missing file → default config → direct pulls.
+      BUILDKIT_CONFIG_ARG=""
+      if [ -f /etc/buildkitd.toml ]; then
+        BUILDKIT_CONFIG_ARG="--config /etc/buildkitd.toml"
+      fi
+      docker buildx create --driver docker-container --name docker-container-builder --use $BUILDKIT_CONFIG_ARG builder-context
       echo -e "\e[0Ksection_end:$(date +%s):buildkit_config\r\e[0K"
 
 .script_docker_fix_workspace:
