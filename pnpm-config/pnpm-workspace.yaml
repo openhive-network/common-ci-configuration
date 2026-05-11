@@ -28,8 +28,8 @@ catalogs:
     ts-proto: 1.172.0
 
   playwright-toolset:
-    "@playwright/test": 1.58.2
-    playwright: 1.58.2
+    "@playwright/test": 1.59.1
+    playwright: 1.59.1
     http-server: 14.1.1
 
   husky:
