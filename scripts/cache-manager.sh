@@ -844,7 +844,14 @@ cmd_get() {
                 fi
             fi
         fi
-        mkdir -p '${local_dest}'
+        if ! mkdir -p '${local_dest}'; then
+            echo '[cache-manager] ERROR: mkdir -p ${local_dest} failed' >&2
+            exit 1
+        fi
+        if [ ! -d '${local_dest}' ]; then
+            echo '[cache-manager] ERROR: ${local_dest} is missing after mkdir -p (concurrent removal?)' >&2
+            exit 1
+        fi
 
         tar_size=\$(stat -c %s '$LOCAL_TAR_FILE' 2>/dev/null || echo 0)
         tar_size_gb=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / 1024\" | bc 2>/dev/null || echo '?')
