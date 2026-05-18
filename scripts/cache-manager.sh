@@ -876,16 +876,12 @@ cmd_get() {
         _log "Cache ready"
     else
         _error "Failed to acquire lock or extract tar archive"
-        # Clean up partial extraction, but preserve valid caches
-        # See: HAF pipeline 150882 failure analysis
-        if [[ -d "$local_dest" ]]; then
-            if [[ -f "${local_dest}/${CACHE_COMPLETION_MARKER}" ]]; then
-                _log "Extraction failed but existing valid cache preserved at: $local_dest"
-            else
-                _log "Cleaning up stale/partial extraction directory: $local_dest"
-                sudo rm -rf "$local_dest" 2>/dev/null || rm -rf "$local_dest" 2>/dev/null || true
-            fi
-        fi
+        # NOTE: We deliberately do NOT rm -rf "$local_dest" here. That would run
+        # outside the flock and can race with the next acquirer's mkdir/tar — see
+        # HAF pipeline 171604 job 3156584, where this cleanup landed mid-tar in
+        # the next job and removed its CWD. The in-lock cleanup at lines 821-846
+        # already handles "datadir exists without completion marker → wipe and
+        # retry" the next time anyone tries to extract this cache.
         return 1
     fi
 
