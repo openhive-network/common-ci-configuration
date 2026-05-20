@@ -5,12 +5,13 @@ FROM ghcr.io/alphagov/paas/psql:${PAAS_PSQL_VERSION} AS psql
 
 RUN <<EOF
     set -e
-    apk add --no-cache sudo git bash
+    apk add --no-cache sudo git bash python3 py3-psycopg2
     adduser -s /bin/bash -G users -D "haf_admin"
     echo "haf_admin ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers
 EOF
 
 COPY haf-app-tools/scripts/run_with_reconnect.sh /usr/local/bin/run_with_reconnect.sh
+COPY haf-app-tools/scripts/install_with_app_lock.py /usr/local/bin/install_with_app_lock.py
 
 USER haf_admin
 WORKDIR /home/haf_admin
