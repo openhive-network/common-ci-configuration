@@ -674,12 +674,16 @@ build_psql_image:
       changes:
         paths:
           - Dockerfile.psql
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH # for other branches compare to develop and run if there are diffrences
       exists:
         - Dockerfile.psql
       changes:
         paths:
           - Dockerfile.psql
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
         compare_to: 'refs/heads/develop'
 
 psql_image_test:
