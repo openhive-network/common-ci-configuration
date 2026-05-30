@@ -50,10 +50,29 @@ def main():
     conn = psycopg2.connect(dsn)
     conn.autocommit = True
 
-    with conn.cursor() as cur:
-        cur.execute("SET application_name = %s", (f"{app_name}-install",))
-        cur.execute("SELECT hive.try_acquire_app_install_lock(%s)", (app_name,))
-        acquired = cur.fetchone()[0]
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET application_name = %s", (f"{app_name}-install",))
+            cur.execute("SELECT hive.try_acquire_app_install_lock(%s)", (app_name,))
+            acquired = cur.fetchone()[0]
+    except psycopg2.errors.UndefinedFunction:
+        # The hive_fork_manager extension in this database predates the
+        # advisory-lock helpers (added in haf MR !970). Run the install
+        # without the lock rather than refusing to proceed -- the lock is a
+        # safety mechanism, not a correctness requirement. This is the
+        # Python-side counterpart of install_app.sh's "wrapper not found"
+        # graceful skip; both make the lock layer optional so the install
+        # remains functional across haf version skews.
+        log.warning(
+            "hive.try_acquire_app_install_lock not defined in this database; "
+            "running %s install without HAF advisory lock. "
+            "(Expected only against a haf version that predates the helpers; "
+            "should not happen in a current production stack.)",
+            app_name,
+        )
+        conn.close()
+        result = subprocess.run(install_cmd)
+        return result.returncode
 
     # Forward the NOTICE from the function (the holder description, on failure)
     forward_notices(conn)
