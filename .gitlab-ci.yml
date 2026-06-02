@@ -715,7 +715,73 @@ psql_image_test:
       psql --list
       psql --command="\set"
   tags:
-    - public-runner-docker    
+    - public-runner-docker
+
+# Verifies that the freshly-built psql image actually contains the
+# install_with_app_lock.py wrapper, python3, and psycopg2 -- so that HAF apps
+# building FROM this image can rely on the advisory-lock skip path working.
+# Catches: someone removing the COPY line, dropping py3-psycopg2/python3 from
+# apk add, or breaking the wrapper script itself. Runs only when
+# build_psql_image runs (rules track the same source paths).
+psql_image_assert_wrapper:
+  stage: test
+  image:
+    name: $CI_REGISTRY_IMAGE/psql:$CI_COMMIT_SHORT_SHA
+    entrypoint: [""]
+  needs:
+    - job: build_psql_image
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.psql
+      changes:
+        paths:
+          - Dockerfile.psql
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.psql
+      changes:
+        paths:
+          - Dockerfile.psql
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
+        compare_to: 'refs/heads/develop'
+  script:
+    - |
+      set -e
+      echo "=== Wrapper file present? ==="
+      test -f /usr/local/bin/install_with_app_lock.py || { echo "FAIL: /usr/local/bin/install_with_app_lock.py missing"; exit 1; }
+      echo "OK"
+
+      echo "=== python3 available? ==="
+      command -v python3 >/dev/null || { echo "FAIL: python3 not in PATH"; exit 1; }
+      python3 --version
+      echo "OK"
+
+      echo "=== psycopg2 importable? ==="
+      python3 -c "import psycopg2; print(f'psycopg2 {psycopg2.__version__}')" \
+        || { echo "FAIL: psycopg2 not importable"; exit 1; }
+      echo "OK"
+
+      echo "=== Wrapper script imports cleanly? ==="
+      python3 -c "
+      import importlib.util, sys
+      spec = importlib.util.spec_from_file_location('w', '/usr/local/bin/install_with_app_lock.py')
+      mod = importlib.util.module_from_spec(spec)
+      spec.loader.exec_module(mod)
+      assert hasattr(mod, 'main'), 'wrapper has no main()'
+      print('wrapper loaded; main() found')
+      " || { echo "FAIL: wrapper script has Python errors"; exit 1; }
+      echo "OK"
+
+      echo "=== All wrapper-presence assertions PASSED ==="
+  tags:
+    - public-runner-docker
 
 buildkit_cache_cleanup:
   stage: cleanup
