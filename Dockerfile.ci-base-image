@@ -113,6 +113,41 @@ RUN if [ -f build/tools/sst_dump ]; then \
 # Clean up build artifacts (only the installed prefix is needed)
 RUN rm -rf /tmp/rocksdb-build
 
+# --- aarch64 cross toolchain builder ---
+# Builds a buildroot cross toolchain (x86_64 host -> aarch64 target) used to
+# cross-compile hived for ARM: GCC 14.2.0 / binutils 2.43.1 / glibc 2.35, with an
+# aarch64 sysroot carrying Boost 1.88 (matching the x64 build), OpenSSL, snappy,
+# zlib, bzip2, readline, liburing, icu. Definition lives in aarch64-toolchain/
+# (config + patches + Toolchain.cmake). buildroot must build as a non-root user.
+# This stage is heavy (~20 min) but fully cached by BuildKit until the toolchain
+# definition changes.
+FROM ${BASE_IMAGE} AS aarch64-toolchain-builder
+
+ARG BUILDROOT_VERSION=2025.02.4
+
+SHELL ["/bin/bash", "-c"]
+
+# buildroot host prerequisites (AlmaLinux 8 / manylinux_2_28)
+RUN dnf install -y \
+        git wget which cpio unzip bzip2 bc rsync perl file gawk patch \
+        gcc gcc-c++ make python3 diffutils findutils tar gzip xz \
+    && dnf clean all && rm -rf /var/cache/dnf
+
+# Non-root build user (buildroot refuses to build several packages as root)
+RUN useradd -ms /bin/bash -u 1001 broot && mkdir -p /opt/hive && chown broot:broot /opt/hive
+
+USER broot
+WORKDIR /home/broot
+
+COPY --chown=broot:broot aarch64-toolchain/ /home/broot/aarch64-toolchain/
+
+# Produces /opt/hive/cross/aarch64 (buildroot output/host + Toolchain.cmake at its root)
+RUN BUILDROOT_VERSION="${BUILDROOT_VERSION}" \
+    ASSETS_DIR=/home/broot/aarch64-toolchain \
+    WORK_DIR=/home/broot/buildroot \
+    OUTPUT_DIR=/opt/hive/cross/aarch64 \
+    bash /home/broot/aarch64-toolchain/build-toolchain.sh
+
 # --- Main ci-base-image stage ---
 FROM build-deps
 
@@ -301,6 +336,12 @@ RUN git clone --depth 1 --branch 7.8.1 https://github.com/jtv/libpqxx.git /tmp/l
 # - CMake package config (RocksDBConfig.cmake, RocksDBTargets.cmake)
 # - sst_dump tool (in bin/)
 COPY --from=rocksdb-builder /opt/hive/vendor /opt/hive/vendor
+
+# Copy the prebuilt aarch64 cross toolchain (buildroot: GCC 14.2 / glibc 2.35 / Boost 1.88).
+# Used to cross-compile hived for ARM (see hive/doc/aarch64 and build_arm.sh). The
+# Toolchain.cmake at $CROSS_ROOT/Toolchain.cmake honors the CROSS_ROOT env var.
+COPY --from=aarch64-toolchain-builder /opt/hive/cross /opt/hive/cross
+ENV CROSS_ROOT=/opt/hive/cross/aarch64
 
 # Install sccache for distributed compiler caching
 RUN curl -fsSL https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz \

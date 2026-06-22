@@ -27,7 +27,8 @@ variable "PYTHON_RUNTIME_VERSION" {
 }
 
 variable "CI_BASE_IMAGE_VERSION" {
-  default = "pypa_2_28-pg18-3"
+  # -arm-1: adds prebuilt aarch64 buildroot cross toolchain (see aarch64-toolchain/)
+  default = "pypa_2_28-pg18-arm-1"
 }
 
 variable "CI_BASE_IMAGE_UBUNTU_VERSION" {
