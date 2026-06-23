@@ -148,6 +148,66 @@ RUN BUILDROOT_VERSION="${BUILDROOT_VERSION}" \
     OUTPUT_DIR=/opt/hive/cross/aarch64 \
     bash /home/broot/aarch64-toolchain/build-toolchain.sh
 
+# --- aarch64 RocksDB builder ---
+# Cross-compile the vendored RocksDB (same submodule commit and options as the x64
+# rocksdb-builder, but for aarch64) so aarch64 hived builds skip the ~2000-file
+# RocksDB compilation. Installed under /opt/hive/vendor-aarch64/rocksdb/<commit>
+# (arch-namespaced to coexist with the x64 build at /opt/hive/vendor/rocksdb/<commit>).
+# hive's aarch64 cross-build points HIVE_VENDOR_PREINSTALLED_DIR at /opt/hive/vendor-aarch64.
+FROM build-deps AS aarch64-rocksdb-builder
+
+# Keep in sync with the x64 rocksdb-builder ROCKSDB_COMMIT above and hive's submodule.
+ARG ROCKSDB_COMMIT=ae8fb3e5000e46d8d4c9dbf3a36019c0aaceebff
+ARG ROCKSDB_INSTALL_PREFIX=/opt/hive/vendor-aarch64/rocksdb/${ROCKSDB_COMMIT}
+
+SHELL ["/bin/bash", "-c"]
+
+# Bring in the cross toolchain (with aarch64 sysroot: snappy, liburing, ...) built above
+COPY --from=aarch64-toolchain-builder /opt/hive/cross /opt/hive/cross
+ENV CROSS_ROOT=/opt/hive/cross/aarch64
+
+WORKDIR /tmp/rocksdb-build
+
+RUN git init src && cd src && \
+    git fetch --depth 1 https://github.com/facebook/rocksdb.git ${ROCKSDB_COMMIT} && \
+    git checkout FETCH_HEAD
+
+# CRITICAL: these flags must match the x64 rocksdb-builder and hive's
+# vendor/CMakeLists.txt. Added: the aarch64 toolchain file. PORTABLE=ON avoids
+# host-specific -march so the result runs on generic aarch64.
+RUN cmake -GNinja -S src -B build \
+    --toolchain /opt/hive/cross/aarch64/Toolchain.cmake \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=${ROCKSDB_INSTALL_PREFIX} \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DROCKSDB_BUILD_SHARED=OFF \
+    -DFAIL_ON_WARNINGS=OFF \
+    -DWITH_TESTS=OFF \
+    -DWITH_SNAPPY=ON \
+    -DWITH_ZLIB=OFF \
+    -DWITH_BZ2=OFF \
+    -DWITH_LIBURING=ON \
+    -DWITH_BENCHMARK_TOOLS=OFF \
+    -DWITH_CORE_TOOLS=ON \
+    -DWITH_TOOLS=OFF \
+    -DWITH_TRACE_TOOLS=OFF \
+    -DWITH_GFLAGS=OFF \
+    -DUSE_RTTI=ON \
+    -DPORTABLE=ON && \
+    ninja -C build -j$(nproc) && \
+    cmake --install build
+
+# Copy sst_dump (aarch64) into bin/, mirroring the x64 builder
+RUN if [ -f build/tools/sst_dump ]; then \
+      mkdir -p ${ROCKSDB_INSTALL_PREFIX}/bin && \
+      cp build/tools/sst_dump ${ROCKSDB_INSTALL_PREFIX}/bin/; \
+    else \
+      echo "ERROR: sst_dump not found in build/tools/ (WITH_CORE_TOOLS=ON should produce it)" && exit 1; \
+    fi
+
+RUN rm -rf /tmp/rocksdb-build
+
 # --- Main ci-base-image stage ---
 FROM build-deps
 
@@ -342,6 +402,12 @@ COPY --from=rocksdb-builder /opt/hive/vendor /opt/hive/vendor
 # Toolchain.cmake at $CROSS_ROOT/Toolchain.cmake honors the CROSS_ROOT env var.
 COPY --from=aarch64-toolchain-builder /opt/hive/cross /opt/hive/cross
 ENV CROSS_ROOT=/opt/hive/cross/aarch64
+
+# Copy the cross-built aarch64 RocksDB (commit-indexed), mirroring the x64 vendor dir.
+# Lets aarch64 hived builds skip the RocksDB compilation. hive's aarch64 cross-build
+# sets HIVE_VENDOR_PREINSTALLED_DIR=/opt/hive/vendor-aarch64 to find it.
+COPY --from=aarch64-rocksdb-builder /opt/hive/vendor-aarch64 /opt/hive/vendor-aarch64
+ENV HIVE_AARCH64_VENDOR_DIR=/opt/hive/vendor-aarch64
 
 # Install sccache for distributed compiler caching
 RUN curl -fsSL https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz \
