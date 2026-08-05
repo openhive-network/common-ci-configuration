@@ -792,12 +792,26 @@ cmd_get() {
         fi
     fi
 
-    # 2. Extract from LOCAL tar with exclusive locking on destination
+    # 2. Extract from LOCAL tar into a staging directory, then swap it into place.
     # Use exclusive lock on destination directory to prevent race conditions where multiple
     # jobs on the same builder try to extract to the same location simultaneously.
     # This was causing "Cannot open: File exists" errors when concurrent extractions collided.
+    #
+    # Extracting straight into $local_dest publishes a half-written cache for the whole
+    # duration of the tar: anything that looks at the path (including callers that clean
+    # up "incomplete" caches outside this lock) sees a datadir with no completion marker
+    # and can wipe it mid-extraction. Staging + rename means the published path only ever
+    # goes from absent/old to complete-with-marker. Costs one extra copy of the cache on
+    # disk while the swap is pending.
 
     local dest_lock="${local_dest}.lock"
+    # $$ alone is not unique here: every container has its own PID namespace, so two
+    # builders can easily both be pid 7. Job id (globally unique) plus hostname keeps
+    # one job's failure cleanup from deleting another job's staging directory.
+    local stage_id
+    stage_id="${CI_JOB_ID:-$$}-$(hostname 2>/dev/null || echo unknown)"
+    local stage_dir="${local_dest}.staging.${stage_id}"
+    local old_dir="${local_dest}.old.${stage_id}"
     _touch_lock "$dest_lock"
 
     # Check for stale locks before attempting to acquire
@@ -816,53 +830,25 @@ cmd_get() {
             exit 0
         fi
 
-        # Clean up incomplete/stale extraction if present
-        # Cases: permission issues, missing completion marker, or interrupted extraction
-        if [ -d '${local_dest}' ]; then
-            needs_cleanup=false
-
-            # Check for permission issues (can't write)
-            if ! touch '${local_dest}/.write_test' 2>/dev/null; then
-                echo '[cache-manager] Stale extraction with permission issues, cleaning up' >&2
-                needs_cleanup=true
-            else
-                rm -f '${local_dest}/.write_test'
-            fi
-
-            # Check for incomplete extraction (datadir exists but no completion marker)
-            if [ -d '${local_dest}/datadir' ] && [ ! -f '${local_dest}/${CACHE_COMPLETION_MARKER}' ]; then
-                echo '[cache-manager] Incomplete extraction detected (missing completion marker), cleaning up' >&2
-                needs_cleanup=true
-            fi
-
-            if [ \"\$needs_cleanup\" = true ]; then
-                sudo rm -rf '${local_dest}' 2>/dev/null || rm -rf '${local_dest}' 2>/dev/null || true
-                if [ -d '${local_dest}' ]; then
-                    echo '[cache-manager] ERROR: Failed to clean up stale extraction at ${local_dest}' >&2
-                    echo '[cache-manager] This usually means files are owned by a different user (uid 105)' >&2
-                    exit 1
-                fi
-            fi
-        fi
-        if ! mkdir -p '${local_dest}'; then
-            echo '[cache-manager] ERROR: mkdir -p ${local_dest} failed' >&2
-            exit 1
-        fi
-        if [ ! -d '${local_dest}' ]; then
-            echo '[cache-manager] ERROR: ${local_dest} is missing after mkdir -p (concurrent removal?)' >&2
+        # Start from a clean staging directory. The published path is left untouched
+        # until the swap, so an interrupted extraction can never be observed by anyone.
+        sudo rm -rf '${stage_dir}' 2>/dev/null || rm -rf '${stage_dir}' 2>/dev/null || true
+        if ! mkdir -p '${stage_dir}'; then
+            echo '[cache-manager] ERROR: mkdir -p ${stage_dir} failed' >&2
             exit 1
         fi
 
         tar_size=\$(stat -c %s '$LOCAL_TAR_FILE' 2>/dev/null || echo 0)
         tar_size_gb=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / 1024\" | bc 2>/dev/null || echo '?')
-        echo \"[cache-manager] Extracting (\${tar_size_gb}GB) to: $local_dest\" >&2
+        echo \"[cache-manager] Extracting (\${tar_size_gb}GB) to staging: ${stage_dir}\" >&2
 
         extract_start=\$(date +%s.%N)
-        if ! tar xf '$LOCAL_TAR_FILE' -C '$local_dest'; then
+        if ! tar xf '$LOCAL_TAR_FILE' -C '${stage_dir}'; then
             # Tar failed (e.g. symlink already exists from a previous valid extraction)
             # If a usable cache is already present, use it instead of failing
             if [ -d '${local_dest}/datadir' ] && [ -f '${local_dest}/${CACHE_COMPLETION_MARKER}' ]; then
                 echo '[cache-manager] tar extraction failed but existing valid cache found, reusing it' >&2
+                sudo rm -rf '${stage_dir}' 2>/dev/null || rm -rf '${stage_dir}' 2>/dev/null || true
                 exit 0
             fi
             echo '[cache-manager] ERROR: tar extraction failed and no existing valid cache' >&2
@@ -876,12 +862,11 @@ cmd_get() {
         _log "Cache ready"
     else
         _error "Failed to acquire lock or extract tar archive"
-        # NOTE: We deliberately do NOT rm -rf "$local_dest" here. That would run
-        # outside the flock and can race with the next acquirer's mkdir/tar — see
-        # HAF pipeline 171604 job 3156584, where this cleanup landed mid-tar in
-        # the next job and removed its CWD. The in-lock cleanup at lines 821-846
-        # already handles "datadir exists without completion marker → wipe and
-        # retry" the next time anyone tries to extract this cache.
+        # Only the staging directory is ours to remove; $local_dest belongs to whoever
+        # published it. Removing that here would run outside the flock and could race
+        # with the next acquirer — see HAF pipeline 171604 job 3156584, where such a
+        # cleanup landed mid-tar in the next job and removed its CWD.
+        sudo rm -rf "$stage_dir" 2>/dev/null || rm -rf "$stage_dir" 2>/dev/null || true
         return 1
     fi
 
@@ -889,9 +874,10 @@ cmd_get() {
     # where symlink modifications interfere with concurrent cp operations.
     # See: https://gitlab.syncad.com/hive/HAfAH/-/pipelines/150169 for the failure mode.
     #
-    # Skip if cache was already complete (extracted by another job) - no fixes needed
-    # and we may not have write permission to the directory created by another user/container
-    if [[ -f "${local_dest}/${CACHE_COMPLETION_MARKER}" ]]; then
+    # Nothing staged means another job published a complete cache while we waited, so
+    # there is nothing to fix up - and we may not have write permission to the directory
+    # created by that other user/container anyway.
+    if [[ ! -d "$stage_dir" ]]; then
         _log "Cache extraction complete and verified"
         _update_lru "$cache_type" "$cache_key"
         return 0
@@ -902,7 +888,7 @@ cmd_get() {
         case '$cache_type' in
             hive|haf*)
                 # Create block_log symlinks if blockchain dir exists but is empty
-                blockchain_dir='${local_dest}/datadir/blockchain'
+                blockchain_dir='${stage_dir}/datadir/blockchain'
                 if [ -d \"\$blockchain_dir\" ] && [ -z \"\$(ls -A \"\$blockchain_dir\" 2>/dev/null)\" ]; then
                     for block_file in \"${SHARED_BLOCK_LOG_DIR:-/blockchain/block_log_5m}\"/block_log* ; do
                         if [ -f \"\$block_file\" ]; then
@@ -917,9 +903,9 @@ cmd_get() {
         # Fix PostgreSQL permissions and symlinks for HAF caches
         case '$cache_type' in
             haf*)
-                pgdata_path='${local_dest}/datadir/haf_db_store/pgdata'
-                tablespace_path='${local_dest}/datadir/haf_db_store/tablespace'
-                pg_tblspc='${local_dest}/datadir/haf_db_store/pgdata/pg_tblspc'
+                pgdata_path='${stage_dir}/datadir/haf_db_store/pgdata'
+                tablespace_path='${stage_dir}/datadir/haf_db_store/tablespace'
+                pg_tblspc='${stage_dir}/datadir/haf_db_store/pgdata/pg_tblspc'
 
                 # Fix pg_tblspc symlinks to use relative paths
                 if [ -d \"\$pg_tblspc\" ]; then
@@ -952,23 +938,42 @@ cmd_get() {
 
         # Write completion marker to indicate extraction is fully complete
         # This must be the LAST step - if we get here, the cache is valid
-        cat > '${local_dest}/${CACHE_COMPLETION_MARKER}' 2>/dev/null <<MARKER || true
+        cat > '${stage_dir}/${CACHE_COMPLETION_MARKER}' 2>/dev/null <<MARKER || true
 timestamp=\$(date -Iseconds)
 hostname=\$(hostname)
 job_id=${CI_JOB_ID:-unknown}
 pipeline_id=${CI_PIPELINE_ID:-unknown}
 MARKER
-        chmod 644 '${local_dest}/${CACHE_COMPLETION_MARKER}' 2>/dev/null || true
+        chmod 644 '${stage_dir}/${CACHE_COMPLETION_MARKER}' 2>/dev/null || true
         echo '[cache-manager] Wrote completion marker' >&2
+
+        # Publish: swap the finished staging directory into the destination. Moving any
+        # existing cache aside first (rather than deleting in place) keeps the window
+        # where the destination does not exist down to two renames, and works even when
+        # the stale cache is owned by another uid.
+        if [ -d '${local_dest}' ]; then
+            if ! { sudo mv '${local_dest}' '${old_dir}' 2>/dev/null || mv '${local_dest}' '${old_dir}'; }; then
+                echo '[cache-manager] ERROR: cannot move stale cache aside at ${local_dest}' >&2
+                echo '[cache-manager] This usually means files are owned by a different user (uid 105)' >&2
+                exit 1
+            fi
+        fi
+        if ! { mv '${stage_dir}' '${local_dest}' 2>/dev/null || sudo mv '${stage_dir}' '${local_dest}'; }; then
+            echo '[cache-manager] ERROR: failed to publish staged cache to ${local_dest}' >&2
+            if [ -d '${old_dir}' ]; then
+                sudo mv '${old_dir}' '${local_dest}' 2>/dev/null || mv '${old_dir}' '${local_dest}' 2>/dev/null || true
+            fi
+            exit 1
+        fi
+        sudo rm -rf '${old_dir}' 2>/dev/null || rm -rf '${old_dir}' 2>/dev/null || true
+        echo '[cache-manager] Published cache to ${local_dest}' >&2
     "; then
         _log "Cache extraction complete and verified"
     else
         _error "Failed to apply post-extraction fixes"
-        # Clean up incomplete extraction since it's not marked as complete
-        if [[ -d "$local_dest" ]]; then
-            _log "Cleaning up incomplete extraction: $local_dest"
-            sudo rm -rf "$local_dest" 2>/dev/null || rm -rf "$local_dest" 2>/dev/null || true
-        fi
+        # Only ever clean up our own staging/backup dirs - the published cache is either
+        # untouched or was restored by the rollback above.
+        sudo rm -rf "$stage_dir" "$old_dir" 2>/dev/null || rm -rf "$stage_dir" "$old_dir" 2>/dev/null || true
         return 1
     fi
 
