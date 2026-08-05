@@ -149,11 +149,12 @@ extract_nfs_cache_if_needed() {
         return 0
     fi
 
-    # Cache is missing or incomplete - clean up any stale data before extracting
-    if [[ -d "${data_source}" ]]; then
-        echo "Removing incomplete/corrupted cache at ${data_source}"
-        sudo rm -rf "${data_source}" 2>/dev/null || rm -rf "${data_source}" 2>/dev/null || true
-    fi
+    # Cache is missing or incomplete. Do NOT clean it up here: this runs without holding
+    # the cache lock, so on a shared cache (NFS) every job that starts at the same time
+    # wipes the directory a lock holder is extracting into, and tar dies on the deleted
+    # files ("Cannot utime: Stale file handle"). Replacing an incomplete cache is the
+    # extractor's job, under the lock - see cache-manager.sh cmd_get, which stages the
+    # extraction and swaps it in.
 
     # Parse DATA_SOURCE to derive cache type and key
     # Pattern: /cache/{type}_{key} -> cache-manager get {type} {key} {data_source}
@@ -238,10 +239,16 @@ extract_nfs_cache_if_needed() {
             # All post-extraction fixes (permissions, symlinks) must be inside the lock to prevent
             # race conditions with concurrent readers. See: HAfAH pipeline 150169 failure.
             if flock "$data_source" bash -c "
-                if [[ -d \"${data_source}/datadir\" ]]; then
+                if [[ -d \"${data_source}/datadir\" ]] && [[ -f \"${data_source}/${CACHE_COMPLETION_MARKER}\" ]]; then
                     echo 'Cache already extracted by another job'
                     exit 0
                 fi
+
+                # Leftovers from an interrupted extraction: clear them here, inside the
+                # lock, rather than before it. Contents only - the directory itself is
+                # what this flock is held on.
+                find \"$data_source\" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+
                 tar xf \"$tar_file\" --warning=no-timestamp -C \"$data_source\"
 
                 # Restore pgdata permissions for PostgreSQL (inside lock)
@@ -271,6 +278,16 @@ extract_nfs_cache_if_needed() {
                         fi
                     done
                 fi
+
+                # Completion marker LAST, so an interrupted run is never mistaken for a
+                # finished one (same contract as cache-manager.sh).
+                cat > \"${data_source}/${CACHE_COMPLETION_MARKER}\" <<MARKER || true
+timestamp=\$(date -Iseconds)
+hostname=\$(hostname)
+job_id=${CI_JOB_ID:-unknown}
+pipeline_id=${CI_PIPELINE_ID:-unknown}
+MARKER
+                chmod 644 \"${data_source}/${CACHE_COMPLETION_MARKER}\" 2>/dev/null || true
             "; then
                 echo "Cache extracted successfully from $tar_file"
                 return 0
