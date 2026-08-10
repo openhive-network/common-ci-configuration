@@ -153,8 +153,8 @@ extract_nfs_cache_if_needed() {
     # the cache lock, so on a shared cache (NFS) every job that starts at the same time
     # wipes the directory a lock holder is extracting into, and tar dies on the deleted
     # files ("Cannot utime: Stale file handle"). Replacing an incomplete cache is the
-    # extractor's job, under the lock - see cache-manager.sh cmd_get, which stages the
-    # extraction and swaps it in.
+    # extractor's job, under the lock - see cache-manager.sh cmd_get, which extracts in
+    # place under the destination lock and writes the completion marker last.
 
     # Parse DATA_SOURCE to derive cache type and key
     # Pattern: /cache/{type}_{key} -> cache-manager get {type} {key} {data_source}
