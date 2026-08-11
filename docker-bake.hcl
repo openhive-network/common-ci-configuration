@@ -19,24 +19,26 @@ variable "POSTGREST_VERSION" {
   default = "v12.0.2"
 }
 variable "PYTHON_VERSION" {
-  default = "3.12.9-1"
+  default = "3.14.2-1"
 }
 
 variable "PYTHON_RUNTIME_VERSION" {
-  default = "3.12-u24.04-1"
+  default = "3.14-u26.04-1"
 }
 
 variable "CI_BASE_IMAGE_VERSION" {
-  # -arm-1: adds prebuilt aarch64 buildroot cross toolchain (see aarch64-toolchain/)
-  default = "pypa_2_28-pg18-arm-1"
+  # -4: canonical tag consolidating pypa_2_28-4 / pypa_2_28-pg18-3 /
+  # pypa_2_28-pg18-arm-1 (includes the prebuilt aarch64 buildroot cross
+  # toolchain, see aarch64-toolchain/)
+  default = "pypa_2_28-pg18-4"
 }
 
 variable "CI_BASE_IMAGE_UBUNTU_VERSION" {
-  default = "ubuntu24.04-pg18-2"
+  default = "ubuntu26.04-pg18-1"
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
-  default = "2.2"
+  default = "3.0"
 }
 
 variable "PAAS_PSQL_VERSION" {
