@@ -2,11 +2,11 @@
 # Shared test runner for HAF applications (balance_tracker, reputation_tracker, haf_block_explorer)
 # Provides: Python 3.14, Poetry, Docker CLI, JMeter, PostgreSQL client
 #
-# Based on ci-base-image (Ubuntu) for Python 3.14 support.
+# Based on ci-base-image-ubuntu (Ubuntu 26.04, native Python 3.14).
 # Use with docker-dind service for Docker-in-Docker testing.
 
-ARG CI_BASE_IMAGE_VERSION=ubuntu24.04-py3.14-2
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/ci-base-image:${CI_BASE_IMAGE_VERSION}
+ARG CI_BASE_IMAGE_VERSION=ubuntu26.04-pg18-1
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/ci-base-image-ubuntu:${CI_BASE_IMAGE_VERSION}
 
 # Copy JMeter and m2u from benchmark-test-runner
 COPY --from=registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:latest \
@@ -20,7 +20,7 @@ RUN <<EOF
 
   # Install additional dependencies
   apt-get update && apt-get install -y --no-install-recommends \
-    openjdk-11-jre-headless \
+    openjdk-21-jre-headless \
     postgresql-client \
     docker-compose-v2 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -30,7 +30,7 @@ RUN <<EOF
   ln -s /opt/tools/m2u/m2u /usr/bin/m2u
 
   # Install Python packages needed by HAF app tests
-  pip3 install --no-cache-dir psycopg2-binary
+  pip3 install --no-cache-dir --break-system-packages psycopg2-binary
 
   # Ensure hived user exists with UID 1000 (matching HAF container conventions).
   # The base image should have hived at UID 1000, but if not, create it.

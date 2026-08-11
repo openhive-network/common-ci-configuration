@@ -395,7 +395,7 @@ build_haf_app_test_runner_image:
   needs:
     - job: build_docker_dind_image
       optional: true
-    - job: build_ci_base_image
+    - job: build_ci_base_image_ubuntu
       optional: true
     - job: build_benchmark_test_runner_image
       optional: true
