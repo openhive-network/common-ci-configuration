@@ -1,6 +1,6 @@
-ARG PYTHON_VERSION=3.12-24.04_stable
+ARG PYTHON_VERSION=3.14-26.04_stable
 
-FROM ubuntu:24.04 AS python_dev
+FROM ubuntu:26.04 AS python_dev
 
 # renovate: datasource=pypi depName=poetry versioning=semver
 ARG POETRY_VERSION=2.1.3
@@ -9,9 +9,7 @@ ENV APT_CACHE_DIR=/var/cache/buildkit/apt
 
 RUN --mount=type=cache,mode=0777,sharing=locked,target=${APT_CACHE_DIR} \
     apt-get update && \
-    apt-get install -y wget git bash sudo python3.12 python3.12-venv python3-pip && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
+    apt-get install -y wget git bash sudo python3.14 python3.14-venv python3-pip && \
     python3 -m venv --system-site-packages /python_venv && \
     mkdir -vp /packages_to_install && cd /packages_to_install && \
     cp -v /usr/bin/dpkg* \
@@ -29,18 +27,31 @@ RUN --mount=type=cache,mode=0777,sharing=locked,target=${APT_CACHE_DIR} \
           /lib/x86_64-linux-gnu/libacl.so.1 \
           . \
     && \
-    wget \
-      http://launchpadlibrarian.net/742374370/dpkg_1.22.11ubuntu1_amd64.deb \
-      https://launchpad.net/ubuntu/+source/perl/5.38.2-5/+build/28504793/+files/perl-base_5.38.2-5_amd64.deb \
-      https://launchpad.net/ubuntu/+source/debconf/1.5.86ubuntu1/+build/28052301/+files/debconf_1.5.86ubuntu1_all.deb \
-      https://launchpad.net/ubuntu/+source/sudo/1.9.15p5-3ubuntu5/+build/28035899/+files/sudo_1.9.15p5-3ubuntu5_amd64.deb \
-      http://launchpadlibrarian.net/743048427/coreutils_9.4-3.1ubuntu1_amd64.deb \
-      https://launchpad.net/ubuntu/+source/apparmor/4.1.0~beta1-0ubuntu3/+build/29135383/+files/libapparmor1_4.1.0~beta1-0ubuntu3_amd64.deb \
-      https://launchpad.net/~ubuntu-security/+archive/ubuntu/ppa/+build/30939880/+files/libpam0g_1.5.3-5ubuntu5.4_amd64.deb \
-      https://launchpad.net/~ubuntu-security/+archive/ubuntu/ppa/+build/30939880/+files/libpam-modules_1.5.3-5ubuntu5.4_amd64.deb \
-      https://launchpad.net/~ubuntu-security/+archive/ubuntu/ppa/+build/30939880/+files/libpam-modules-bin_1.5.3-5ubuntu5.4_amd64.deb \
-      https://launchpad.net/~ubuntu-security/+archive/ubuntu/ppa/+build/30939880/+files/libpam-runtime_1.5.3-5ubuntu5.4_all.deb \
-      https://launchpad.net/ubuntu/+source/apparmor/4.1.0~beta1-0ubuntu3/+build/29135383/+files/libpam-apparmor_4.1.0~beta1-0ubuntu3_amd64.deb
+    # Download the bootstrap packages for the runtime stage from the archive of
+    # the release we are building on (replaces the old hardcoded launchpad URLs)
+    apt-get download \
+      dpkg \
+      perl-base \
+      debconf \
+      sudo \
+      sudo-common \
+      coreutils \
+      coreutils-from-uutils \
+      rust-coreutils \
+      libapparmor1 \
+      libpam0g \
+      libpam-modules \
+      libpam-modules-bin \
+      libpam-runtime \
+      libpam-apparmor \
+      # pam_limits.so links libsystemd on 26.04 (pam >= 1.7)
+      libsystemd0 \
+      libcap2 \
+      liblz4-1 \
+      liblzma5 \
+      libzstd1 && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 SHELL ["/bin/bash", "-c"]
 
@@ -48,7 +59,7 @@ RUN set -ex; python3 -m venv --system-site-packages /poetry_venv && \
     source /poetry_venv/bin/activate && \
     pip install --no-cache-dir poetry==$POETRY_VERSION
 
-FROM ubuntu/python:${PYTHON_VERSION} AS python_u24_runtime
+FROM ubuntu/python:${PYTHON_VERSION} AS python_u26_runtime
 
 USER 0:0
 
@@ -87,6 +98,8 @@ COPY --from=python_dev \
   /lib/x86_64-linux-gnu/libsemanage.so.2 \
   /lib/x86_64-linux-gnu/libsepol.so.2 \
   /lib/x86_64-linux-gnu/libaudit.so.1 \
+  /lib/x86_64-linux-gnu/libacl.so.1 \
+  /lib/x86_64-linux-gnu/libbz2.so.1.0 \
   /lib/x86_64-linux-gnu/
 
 
@@ -108,17 +121,25 @@ RUN ln -sf /bin/bash /bin/sh && \
   export DEBIAN_FRONTEND=noninteractive && \
   pushd /packages_to_install && \
   dpkg --force-depends  -i \
-    dpkg_1.22.11ubuntu1_amd64.deb \
-    perl-base_5.38.2-5_amd64.deb \
-    debconf_1.5.86ubuntu1_all.deb \
-    libpam0g_1.5.3-5ubuntu5.4_amd64.deb \
-    libpam-modules-bin_1.5.3-5ubuntu5.4_amd64.deb \
-    libpam-modules_1.5.3-5ubuntu5.4_amd64.deb \
-    libpam-runtime_1.5.3-5ubuntu5.4_all.deb \
-    libapparmor1_4.1.0~beta1-0ubuntu3_amd64.deb \
-    libpam-apparmor_4.1.0~beta1-0ubuntu3_amd64.deb \
-    coreutils_9.4-3.1ubuntu1_amd64.deb \
-    sudo_1.9.15p5-3ubuntu5_amd64.deb \
+    dpkg_*.deb \
+    perl-base_*.deb \
+    debconf_*.deb \
+    libpam0g_*.deb \
+    libpam-modules-bin_*.deb \
+    libpam-modules_*.deb \
+    libpam-runtime_*.deb \
+    libapparmor1_*.deb \
+    libpam-apparmor_*.deb \
+    libsystemd0_*.deb \
+    libcap2_*.deb \
+    liblz4-1_*.deb \
+    liblzma5_*.deb \
+    libzstd1_*.deb \
+    rust-coreutils_*.deb \
+    coreutils-from-uutils_*.deb \
+    coreutils_*.deb \
+    sudo-common_*.deb \
+    sudo_*.deb \
     && \
     dpkg --force-remove-essential --purge \
        perl-base \
@@ -128,5 +149,5 @@ RUN ln -sf /bin/bash /bin/sh && \
   popd
 
 # Compile so __pycache__ will be already created for standard Python modules
-# Will work similar as e.g. `python -m compileall /urs/lib/python3.12` but is more flexible
+# Will work similar as e.g. `python -m compileall /usr/lib/python3.14` but is more flexible
 RUN python3 -c "import sysconfig, compileall; compileall.compile_dir(sysconfig.get_path('stdlib'))"
