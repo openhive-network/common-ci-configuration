@@ -207,6 +207,12 @@ target "ci-base-image-ubuntu" {
 
 target "haf-app-test-runner" {
   dockerfile = "Dockerfile.haf-app-test-runner"
+  # The version tag of ci-base-image-ubuntu is only published from the default
+  # branch; on feature branches use the commit-SHA tag pushed by the
+  # build_ci_base_image_ubuntu job in the same pipeline.
+  args = {
+    CI_BASE_IMAGE_VERSION = (CI_COMMIT_BRANCH == "" || CI_COMMIT_BRANCH == CI_DEFAULT_BRANCH) ? CI_BASE_IMAGE_UBUNTU_VERSION : CI_COMMIT_SHA
+  }
   tags = generate-tags("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
   cache-from = generate-cache-from("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
   cache-to = generate-cache-to("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
