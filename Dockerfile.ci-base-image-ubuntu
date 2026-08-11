@@ -1,17 +1,19 @@
 # CI Base Image (Ubuntu) for HAF development and testing
-# Ubuntu-based variant needed because HAF builds hived on Ubuntu 24.04
+# Ubuntu-based variant needed because HAF builds hived on Ubuntu
 # and replay/test jobs must run those binaries directly.
 #
 # The manylinux-based ci-base-image (AlmaLinux 8, glibc 2.28) cannot run
-# Ubuntu 24.04-built binaries due to glibc version mismatch.
+# Ubuntu-built binaries due to glibc version mismatch.
+#
+# Ubuntu 26.04 ships Python 3.14 as the system python3 and LLVM 21 as the
+# distro toolchain, so no deadsnakes PPA or apt.llvm.org repo is needed.
 #
 # Build:
-#   docker build -f Dockerfile.ci-base-image-ubuntu -t ci-base-image-ubuntu:ubuntu24.04-pg18-1 .
+#   docker build -f Dockerfile.ci-base-image-ubuntu -t ci-base-image-ubuntu:ubuntu26.04-pg18-1 .
 
-ARG BASE_IMAGE=phusion/baseimage:noble-1.0.1
+ARG BASE_IMAGE=phusion/baseimage:resolute-1.0.11
 FROM ${BASE_IMAGE}
 
-ARG PYTHON_VERSION=3.14
 ARG POETRY_VERSION=2.1.3
 ARG DOCKER_CLI_VERSION=28.0.1
 ARG BUILDX_VERSION=v0.24.0
@@ -39,12 +41,9 @@ RUN apt-get update && \
         ca-certificates \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install LLVM/Clang ${CLANG_VERSION} from apt.llvm.org
+# Install LLVM/Clang ${CLANG_VERSION} from the Ubuntu archive (LLVM 21 is the
+# distro default on 26.04)
 RUN apt-get update && \
-    apt-get install -y wget gnupg software-properties-common && \
-    wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
-    echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-${CLANG_VERSION} main" > /etc/apt/sources.list.d/llvm.list && \
-    apt-get update && \
     apt-get install -y \
         clang-${CLANG_VERSION} \
         clang-tidy-${CLANG_VERSION} \
@@ -67,11 +66,8 @@ RUN apt-get update && \
         libpq-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install development packages and Python ${PYTHON_VERSION}
+# Install development packages and Python (system python3 is 3.14 on 26.04)
 RUN apt-get update && \
-    apt-get install -y software-properties-common && \
-    add-apt-repository -y ppa:deadsnakes/ppa && \
-    apt-get update && \
     apt-get install -y \
         # Build tools
         git \
@@ -91,10 +87,10 @@ RUN apt-get update && \
         libbz2-dev \
         libsnappy-dev \
         libssl-dev \
-        libncurses5-dev \
+        libncurses-dev \
         libreadline-dev \
         liburing-dev \
-        # Python (base packages from system)
+        # Python (system python3 = 3.14)
         python3 \
         python3-pip \
         python3-venv \
@@ -102,10 +98,6 @@ RUN apt-get update && \
         python3-jinja2 \
         python3-dateutil \
         python3-setuptools \
-        # Python (specific version from deadsnakes PPA)
-        python${PYTHON_VERSION} \
-        python${PYTHON_VERSION}-venv \
-        python${PYTHON_VERSION}-dev \
         # Misc
         parallel \
         perl \
@@ -116,14 +108,14 @@ RUN apt-get update && \
         libgirepository-1.0-1 \
         libglib2.0-0 \
         libglib2.0-data \
-        libxml2 \
+        libxml2-16 \
         shared-mime-info \
         xdg-user-dirs \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install libpqxx 7.8.1 (PostgreSQL C++ connector)
-RUN git clone --depth 1 --branch 7.8.1 https://github.com/jtv/libpqxx.git /tmp/libpqxx && \
+# Install libpqxx 7.10.7 (PostgreSQL C++ connector; 7.8.x does not configure
+# with CMake >= 3.31 as shipped on 26.04)
+RUN git clone --depth 1 --branch 7.10.7 https://github.com/jtv/libpqxx.git /tmp/libpqxx && \
     cd /tmp/libpqxx && \
     mkdir build && cd build && \
     cmake -DCMAKE_BUILD_TYPE=Release -GNinja -DBUILD_TEST=OFF .. && \
