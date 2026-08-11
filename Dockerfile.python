@@ -1,4 +1,6 @@
-ARG PYTHON_VERSION=3.12.9-slim-bookworm
+# DEPRECATED: kept only for hivesense (submodules/hivemind). All other
+# consumers use ci-base-image (Python 3.14). Retire once hivesense migrates.
+ARG PYTHON_VERSION=3.14.2-slim-bookworm
 FROM python:${PYTHON_VERSION}
 
 # renovate: datasource=pypi depName=poetry versioning=semver

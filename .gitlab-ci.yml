@@ -4,7 +4,7 @@ variables:
   DOCKER_DIND_TAG: "$CI_COMMIT_SHA"
   IMAGE_REMOVER_TAG: "$CI_COMMIT_SHA"
   TOX_IMAGE_TAG: "$CI_COMMIT_SHA"
-  PYTHON_IMAGE_TAG: 3.12.12
+  PYTHON_IMAGE_TAG: 3.14-slim
   SHELLCHECK_ALPINE_TAG: v0.11.0
   # =============================================================================
   # Skip Docker Builds - Set to "true" to skip all Docker image builds
