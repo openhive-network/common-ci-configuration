@@ -88,6 +88,9 @@ RUN apt-get update && \
         libsnappy-dev \
         libssl-dev \
         libncurses-dev \
+        libzstd-dev \
+        # provides the static libjitterentropy.a linked by fc/hived
+        libjitterentropy3-dev \
         libreadline-dev \
         liburing-dev \
         # Python (system python3 = 3.14)

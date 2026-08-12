@@ -34,11 +34,11 @@ variable "CI_BASE_IMAGE_VERSION" {
 }
 
 variable "CI_BASE_IMAGE_UBUNTU_VERSION" {
-  default = "ubuntu26.04-pg18-1"
+  default = "ubuntu26.04-pg18-2"
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
-  default = "3.0"
+  default = "3.1"
 }
 
 variable "PAAS_PSQL_VERSION" {
