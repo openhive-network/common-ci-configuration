@@ -417,33 +417,6 @@ build_haf_app_test_runner_image:
           - Dockerfile.haf-app-test-runner
         compare_to: 'refs/heads/develop'
 
-build_tox_test_runner_image:
-  extends: .build_docker_image
-  stage: build
-  variables:
-    BUILD_TARGET: "tox-test-runner"
-    DOCKER_DIND_TAG: "latest"
-    DOCKER_BUILDER_TAG: "latest"
-  needs:
-    - job: build_docker_dind_image
-      optional: true
-  rules:
-    - *skip_on_renovate_rule
-    - if: $SKIP_DOCKER_BUILDS == "true"
-      when: never
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      exists:
-        - Dockerfile.tox-test-runner
-      changes:
-        paths:
-          - Dockerfile.tox-test-runner
-    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
-      exists:
-        - Dockerfile.tox-test-runner
-      changes:
-        paths:
-          - Dockerfile.tox-test-runner
-        compare_to: 'refs/heads/develop'
 
 build_nginx_image:
   extends: .build_docker_image
@@ -795,7 +768,7 @@ buildkit_cache_cleanup:
   variables:
     # Use latest tag since the image may not be built in this pipeline (change detection)
     IMAGE_REMOVER_TAG: latest
-    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,tox-test-runner/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache,ci-base-image-ubuntu/cache"
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache,ci-base-image-ubuntu/cache"
 
 # =============================================================================
 # Renovate Bot
