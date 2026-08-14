@@ -116,7 +116,8 @@ RUN rm -rf /tmp/rocksdb-build
 # --- aarch64 cross toolchain builder ---
 # Builds a buildroot cross toolchain (x86_64 host -> aarch64 target) used to
 # cross-compile hived for ARM: GCC 14.2.0 / binutils 2.43.1 / glibc 2.35, with an
-# aarch64 sysroot carrying Boost 1.88 (matching the x64 build), OpenSSL, snappy,
+# aarch64 sysroot carrying Boost 1.88 (NOTE: native build moved to 1.90; the
+# prebuilt buildroot toolchain still ships 1.88 until it is regenerated), OpenSSL, snappy,
 # zlib, bzip2, readline, liburing, icu. Definition lives in aarch64-toolchain/
 # (config + patches + Toolchain.cmake). buildroot must build as a non-root user.
 # This stage is heavy (~20 min) but fully cached by BuildKit until the toolchain
@@ -350,8 +351,8 @@ ENV OPENSSL_INCLUDE_DIR=/usr/local/include
 ENV OPENSSL_CRYPTO_LIBRARY=/usr/local/lib/libcrypto.a
 ENV OPENSSL_SSL_LIBRARY=/usr/local/lib/libssl.a
 
-# Build and install Boost 1.88.0
-ARG BOOST_VERSION=1.88.0
+# Build and install Boost
+ARG BOOST_VERSION=1.90.0
 RUN set -e && \
     BOOST_VERSION_UNDERSCORE=$(echo ${BOOST_VERSION} | tr '.' '_') && \
     curl -fsSL "https://archives.boost.io/release/${BOOST_VERSION}/source/boost_${BOOST_VERSION_UNDERSCORE}.tar.gz" \
