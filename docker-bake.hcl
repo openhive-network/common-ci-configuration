@@ -30,7 +30,7 @@ variable "CI_BASE_IMAGE_VERSION" {
   # -4: canonical tag consolidating pypa_2_28-4 / pypa_2_28-pg18-3 /
   # pypa_2_28-pg18-arm-1 (includes the prebuilt aarch64 buildroot cross
   # toolchain, see aarch64-toolchain/)
-  default = "pypa_2_28-pg18-4"
+  default = "pypa_2_28-pg18-5"
 }
 
 variable "CI_BASE_IMAGE_UBUNTU_VERSION" {
