@@ -117,13 +117,6 @@ target "python-scripts" {
   cache-to = generate-cache-to("python-scripts", "${tag}")
 }
 
-target "tox-test-runner" {
-  dockerfile = "Dockerfile.tox-test-runner"
-  tags = generate-tags("tox-test-runner", "${tag}")
-  cache-from = generate-cache-from("tox-test-runner", "${tag}")
-  cache-to = generate-cache-to("tox-test-runner", "${tag}")
-}
-
 target "emsdk" {
   dockerfile = "Dockerfile.emscripten"
   tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}-3")

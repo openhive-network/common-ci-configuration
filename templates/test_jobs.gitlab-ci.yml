@@ -153,27 +153,6 @@ include:
       done
       echo "Service app:${HAF_APP_PORT} is ready"
 
-.tox_test_job:
-  extends: .job-defaults
-  image: registry.gitlab.syncad.com/hive/common-ci-configuration/tox-test-runner:${TOX_IMAGE_TAG}
-
-.pattern_tests_template:
-  extends: .tox_test_job
-  variables:
-    ENDPOINT: app:$APP_PORT
-    HIVED_COMMIT: $HIVED_COMMIT
-  services:
-    - name: $HAF_IMAGE_NAME
-      alias: haf-instance
-      variables:
-        # Allow access from any network to eliminate CI IP addressing problems
-        PG_ACCESS: "host    haf_block_log    haf_app_admin    0.0.0.0/0    trust"
-        DATA_SOURCE: "${DATA_CACHE_HIVE_PREFIX}_${HIVED_COMMIT}"
-        LOG_FILE: $CI_JOB_NAME.log
-      command: ["--stop-at-block=5000000"]
-    - name: $APP_IMAGE
-      alias: app
-
 .comparison_tests_template:
   extends: .haf_app_pattern_tests_template
   variables:
