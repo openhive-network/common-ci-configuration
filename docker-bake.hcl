@@ -10,7 +10,7 @@ variable "EMSCRIPTEN_VERSION" {
   default = "5.0.2"
 }
 variable "PSQL_IMAGE_VERSION" {
-  default = "14-2" # After updating tag here, remeber to also update it in job 'psql_image_test'
+  default = "14-3" # After updating tag here, remeber to also update it in job 'psql_image_test'
 }
 variable "DOCKERFILE_IMAGE_VERSION" {
   default = "1.11"
