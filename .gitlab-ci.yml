@@ -661,13 +661,40 @@ build_psql_image:
           - haf-app-tools/scripts/haf_app_driver.py
         compare_to: 'refs/heads/develop'
 
+# Exercises the psql client image. Normally the published version tag; when the
+# image sources changed on this branch, the image build_psql_image just pushed
+# for this commit (the version tag is only published from the default branch,
+# so a version bump could never pass otherwise).
 psql_image_test:
   stage: test
   rules:
     - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: on_success
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        paths:
+          - Dockerfile.psql
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
+      variables:
+        PSQL_TEST_IMAGE: $CI_REGISTRY_IMAGE/psql:$CI_COMMIT_SHA
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      changes:
+        paths:
+          - Dockerfile.psql
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
+        compare_to: 'refs/heads/develop'
+      variables:
+        PSQL_TEST_IMAGE: $CI_REGISTRY_IMAGE/psql:$CI_COMMIT_SHA
     - when: on_success
+  variables:
+    PSQL_TEST_IMAGE: registry.gitlab.syncad.com/hive/common-ci-configuration/psql:14-3
   image:
-    name: registry.gitlab.syncad.com/hive/common-ci-configuration/psql:14-3
+    name: $PSQL_TEST_IMAGE
     entrypoint: [""]
   services:
     - postgres:14
@@ -701,7 +728,7 @@ psql_image_test:
 psql_image_assert_wrapper:
   stage: test
   image:
-    name: $CI_REGISTRY_IMAGE/psql:$CI_COMMIT_SHORT_SHA
+    name: $CI_REGISTRY_IMAGE/psql:$CI_COMMIT_SHA
     entrypoint: [""]
   needs:
     - job: build_psql_image
