@@ -649,6 +649,7 @@ build_psql_image:
           - Dockerfile.psql
           - haf-app-tools/scripts/run_with_reconnect.sh
           - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH # for other branches compare to develop and run if there are diffrences
       exists:
         - Dockerfile.psql
@@ -657,6 +658,7 @@ build_psql_image:
           - Dockerfile.psql
           - haf-app-tools/scripts/run_with_reconnect.sh
           - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
         compare_to: 'refs/heads/develop'
 
 psql_image_test:
@@ -665,7 +667,7 @@ psql_image_test:
     - *skip_on_renovate_rule
     - when: on_success
   image:
-    name: registry.gitlab.syncad.com/hive/common-ci-configuration/psql:14-2
+    name: registry.gitlab.syncad.com/hive/common-ci-configuration/psql:14-3
     entrypoint: [""]
   services:
     - postgres:14
@@ -715,6 +717,7 @@ psql_image_assert_wrapper:
           - Dockerfile.psql
           - haf-app-tools/scripts/run_with_reconnect.sh
           - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.psql
@@ -723,12 +726,17 @@ psql_image_assert_wrapper:
           - Dockerfile.psql
           - haf-app-tools/scripts/run_with_reconnect.sh
           - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
         compare_to: 'refs/heads/develop'
   script:
     - |
       set -e
       echo "=== Wrapper file present? ==="
       test -f /usr/local/bin/install_with_app_lock.py || { echo "FAIL: /usr/local/bin/install_with_app_lock.py missing"; exit 1; }
+      echo "OK"
+      echo "=== Block-processing driver present and importable? ==="
+      test -x /usr/local/bin/haf_app_driver.py || { echo "FAIL: /usr/local/bin/haf_app_driver.py missing"; exit 1; }
+      haf_app_driver.py --help > /dev/null || { echo "FAIL: haf_app_driver.py --help failed"; exit 1; }
       echo "OK"
 
       echo "=== python3 available? ==="

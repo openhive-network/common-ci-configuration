@@ -13,6 +13,7 @@ These tools were previously located in the `haf` repository and required apps to
 | `common.sh` | Shared bash utilities: `log_exec_params`, `do_clone_commit`, `do_clone_branch` |
 | `create_haf_app_role.sh` | Creates HAF application PostgreSQL roles with proper group membership |
 | `copy_datadir.sh` | Copies HAF data directories with NFS cache fallback and symlink fixing |
+| `haf_app_driver.py` | Generic block-processing driver for registered HAF applications (replaces eternal `CALL main()`, haf#341); shipped in the `psql` image as `/usr/local/bin/haf_app_driver.py` |
 
 ### Python (`python/`)
 

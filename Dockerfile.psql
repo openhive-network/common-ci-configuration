@@ -16,6 +16,7 @@ EOF
 
 COPY haf-app-tools/scripts/run_with_reconnect.sh /usr/local/bin/run_with_reconnect.sh
 COPY haf-app-tools/scripts/install_with_app_lock.py /usr/local/bin/install_with_app_lock.py
+COPY haf-app-tools/scripts/haf_app_driver.py /usr/local/bin/haf_app_driver.py
 
 USER haf_admin
 WORKDIR /home/haf_admin
