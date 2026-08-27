@@ -110,6 +110,13 @@ class Driver:
         if self.procedure is None:
             raise SystemExit(f"application '{self.app}' is self-driven (no process procedure registered)")
         self.lead = self.contexts[0]
+        if self.args.lock:
+            # Shared advisory locks that application installers check before
+            # touching the schema (hive.try_acquire_app_install_lock); held by
+            # this session until it disconnects, so re-taken on every reconnect.
+            # Blocks while an installer holds the exclusive lock.
+            cur.execute("SELECT hive.acquire_app_block_processor_locks(%s)", (self.args.lock,))
+            self.drain_notices()
         cur.execute("SELECT to_regprocedure('hive.app_perform_maintenance(hive.contexts_group)') IS NOT NULL")
         self.have_maintenance = cur.fetchone()[0]
         cur.execute("SELECT hive.app_get_current_block_num(%s)", (self.lead,))
@@ -118,6 +125,7 @@ class Driver:
         log(
             f"application '{self.app}': contexts {self.contexts}, procedure {self.procedure}, "
             f"current block {current}{' (paused)' if paused else ''}"
+            + (f", holding block-processor lock(s) {self.args.lock}" if self.args.lock else "")
         )
         if not self.have_maintenance:
             log("warning: hive.app_perform_maintenance is not available; shadow tables will not be vacuumed")
@@ -295,6 +303,8 @@ def main():
     p.add_argument("--user", default=os.environ.get("POSTGRES_USER", "haf_admin"))
     p.add_argument("--database", default="haf_block_log")
     p.add_argument("--stop-at-block", type=int, default=None, help="stop after this block is processed")
+    p.add_argument("--lock", action="append", default=[], metavar="APP_LOCK_NAME",
+                   help="block-processor advisory lock to hold (hive.acquire_app_block_processor_locks); repeatable")
     p.add_argument("--override-max-batch", type=int, default=None, help="cap the blocks per iteration")
     p.add_argument("--poll-interval", type=float, default=1.0,
                    help="seconds between polls while paused or waiting for a dependency (their progress does not notify)")
