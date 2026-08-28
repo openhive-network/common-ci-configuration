@@ -36,12 +36,27 @@ import psycopg2
 import psycopg2.extensions
 
 NOTIFY_CHANNELS = ("haf_new_block", "haf_new_irreversible")
+SERVER_LEVELS = {"DEBUG": 0, "LOG": 1, "INFO": 2, "NOTICE": 3, "WARNING": 4}
+
+
+LOG_FILE = None  # opened by main() when --log-file is given
+
+
+def emit(line):
+    """Write one line to stdout and, when configured, the log file (appended,
+    line-buffered; logrotate's copytruncate works with O_APPEND writers)."""
+    if not line.endswith("\n"):
+        line += "\n"
+    sys.stdout.write(line)
+    sys.stdout.flush()
+    if LOG_FILE is not None:
+        LOG_FILE.write(line)
+        LOG_FILE.flush()
 
 
 def log(msg):
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-    sys.stdout.write(f"{ts} {msg}\n")
-    sys.stdout.flush()
+    emit(f"{ts} {msg}")
 
 
 def parse_range(text):
@@ -78,6 +93,7 @@ class Driver:
         self.live_last = None
         self.live_time = 0.0
         self.iterations = 0          # app_next_iteration calls since the last summary
+        self.min_server_level = SERVER_LEVELS[args.server_messages]
         self.have_maintenance = False
         self.was_paused = False
         self.was_gated = False
@@ -132,12 +148,24 @@ class Driver:
         self.was_paused = paused
 
     def drain_notices(self):
-        # server-side RAISE NOTICE/INFO/WARNING from the application
-        if self.conn.notices:
-            for n in self.conn.notices:
-                sys.stdout.write(n if n.endswith("\n") else n + "\n")
-            sys.stdout.flush()
-            del self.conn.notices[:]
+        """Server-side RAISE INFO/NOTICE/WARNING from the application. Multi-line
+        messages are kept together; empty trailing lines are dropped; messages
+        below --server-messages are discarded."""
+        if not self.conn.notices:
+            return
+        for n in self.conn.notices:
+            lines = [l.rstrip() for l in n.rstrip("\n").split("\n")]
+            lines = [l for l in lines if l]
+            if not lines:
+                continue
+            level = lines[0].split(":", 1)[0].strip().upper()
+            if SERVER_LEVELS.get(level, 99) < self.min_server_level:
+                continue
+            ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+            emit(f"{ts} {lines[0]}")
+            for extra in lines[1:]:
+                emit(f"    {extra}")
+        del self.conn.notices[:]
 
     # -- one iteration -----------------------------------------------------
     def iterate(self):
@@ -155,6 +183,15 @@ class Driver:
                 started = time.monotonic()
                 cur.execute(f"CALL {self.procedure}(%s::hive.blocks_range)", (f"({blocks[0]},{blocks[1]})",))
                 elapsed = time.monotonic() - started
+                # the stage's processing alarm threshold; HAF's own SLOW_PROCESSING
+                # check measures the gap between iterations, which for a client
+                # that idles between blocks is just the block interval
+                cur.execute(
+                    "SELECT EXTRACT(EPOCH FROM ((loop).current_stage).processing_alarm_threshold) FROM hafd.contexts WHERE name = %s",
+                    (self.lead,),
+                )
+                row = cur.fetchone()
+                threshold = float(row[0]) if row and row[0] is not None else None
             cur.execute("COMMIT")
         except Exception:
             try:
@@ -166,6 +203,8 @@ class Driver:
             self.drain_notices()
 
         if blocks is not None:
+            if threshold is not None and elapsed >= threshold:
+                log(f"SLOW_PROCESSING: blocks {blocks[0]}..{blocks[1]} took {elapsed:.2f}s (stage threshold {threshold:.0f}s)")
             self.report(blocks, elapsed)
             if self.have_maintenance:
                 cur.execute("SELECT hive.app_perform_maintenance(%s::hive.contexts_group)", (self.contexts,))
@@ -315,7 +354,14 @@ def main():
     p.add_argument("--max-retry-delay", type=float, default=60.0)
     p.add_argument("--startup-marker", default="/tmp/block_processing_startup_time.txt",
                    help="file stamped with the start time for health checks ('' to disable)")
+    p.add_argument("--log-file", default=os.environ.get("LOG_FILE", ""),
+                   help="also append all output to this file (env LOG_FILE; empty or STDOUT for none)")
+    p.add_argument("--server-messages", default="INFO", choices=list(SERVER_LEVELS),
+                   help="lowest server message level to show (RAISE INFO/NOTICE/WARNING)")
     args = p.parse_args()
+    global LOG_FILE
+    if args.log_file and args.log_file != "STDOUT":
+        LOG_FILE = open(args.log_file, "a", buffering=1)
     if args.stop_at_block is not None and args.stop_at_block <= 0:
         args.stop_at_block = None
     if not args.postgres_url:
