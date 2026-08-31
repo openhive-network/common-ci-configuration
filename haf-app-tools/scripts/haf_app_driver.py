@@ -94,6 +94,7 @@ class Driver:
         self.live_time = 0.0
         self.iterations = 0          # app_next_iteration calls since the last summary
         self.min_server_level = SERVER_LEVELS[args.server_messages]
+        self.process_python = None
         self.have_maintenance = False
         self.was_paused = False
         self.was_gated = False
@@ -123,8 +124,15 @@ class Driver:
         if row is None:
             raise SystemExit(f"application '{self.app}' is not registered (hive.app_register)")
         self.contexts, self.procedure, paused = row
-        if self.procedure is None:
-            raise SystemExit(f"application '{self.app}' is self-driven (no process procedure registered)")
+        if self.args.process_python:
+            module_name, _, func_name = self.args.process_python.partition(":")
+            import importlib
+            self.process_python = getattr(importlib.import_module(module_name), func_name or "process_blocks")
+        elif self.procedure is None:
+            raise SystemExit(
+                f"application '{self.app}' is self-driven (no process procedure registered) - "
+                "run it with --process-python to supply a client-side range processor"
+            )
         self.lead = self.contexts[0]
         if self.args.lock:
             # Shared advisory locks that application installers check before
@@ -181,7 +189,13 @@ class Driver:
             self.iterations += 1
             if blocks is not None:
                 started = time.monotonic()
-                cur.execute(f"CALL {self.procedure}(%s::hive.blocks_range)", (f"({blocks[0]},{blocks[1]})",))
+                if self.process_python is not None:
+                    # client-side range processor: runs inside this transaction on
+                    # this connection (may use additional connections of its own);
+                    # must not COMMIT the driver's transaction
+                    self.process_python(self.conn, blocks[0], blocks[1])
+                else:
+                    cur.execute(f"CALL {self.procedure}(%s::hive.blocks_range)", (f"({blocks[0]},{blocks[1]})",))
                 elapsed = time.monotonic() - started
                 # the stage's processing alarm threshold; HAF's own SLOW_PROCESSING
                 # check measures the gap between iterations, which for a client
@@ -358,6 +372,11 @@ def main():
                    help="also append all output to this file (env LOG_FILE; empty or STDOUT for none)")
     p.add_argument("--server-messages", default="INFO", choices=list(SERVER_LEVELS),
                    help="lowest server message level to show (RAISE INFO/NOTICE/WARNING)")
+    p.add_argument("--process-python", default=None, metavar="MODULE[:FUNCTION]",
+                   help="process ranges with a Python callable f(conn, first_block, last_block) "
+                        "imported from MODULE (default FUNCTION: process_blocks) instead of the "
+                        "registered SQL procedure; for applications whose per-range work involves "
+                        "client-side calls (e.g. embedding HTTP requests)")
     args = p.parse_args()
     global LOG_FILE
     if args.log_file and args.log_file != "STDOUT":
