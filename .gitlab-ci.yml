@@ -691,14 +691,14 @@ psql_image_test:
       variables:
         PSQL_TEST_IMAGE: $CI_REGISTRY_IMAGE/psql:$CI_COMMIT_SHA
     - when: on_success
+  # ONE variables block. An earlier revision declared PSQL_TEST_IMAGE in its own
+  # `variables:` above `image:` and the PostgreSQL settings in a second one below
+  # `services:`; YAML keeps the last duplicate key, so the default image silently
+  # vanished and any pipeline whose rules did not set PSQL_TEST_IMAGE (tag
+  # pipelines, develop pushes not touching the psql sources) ran on the runner's
+  # default image with no psql on it (1.29.0-rc2 tag pipeline: "psql: not found").
   variables:
     PSQL_TEST_IMAGE: registry.gitlab.syncad.com/hive/common-ci-configuration/psql:14-3
-  image:
-    name: $PSQL_TEST_IMAGE
-    entrypoint: [""]
-  services:
-    - postgres:14
-  variables:
     POSTGRES_DB: haf
     POSTGRES_USER: haf_admin
     POSTGRES_PASSWORD: password
@@ -709,6 +709,11 @@ psql_image_test:
     PGUSER: $POSTGRES_USER
     PGPASSWORD: $POSTGRES_PASSWORD
     CI_DEBUG_SERVICES: "false"
+  image:
+    name: $PSQL_TEST_IMAGE
+    entrypoint: [""]
+  services:
+    - postgres:14
   script:
     - |
       set -e
