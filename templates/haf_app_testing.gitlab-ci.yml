@@ -1223,12 +1223,23 @@ include:
       # Smart mode waits for clients to disconnect voluntarily, which times out
       # when app containers are still running (they poll in sleep loops).
       # Since we've already done CHECKPOINT in the wait script, fast mode is safe.
-      echo "Stopping PostgreSQL with pg_ctl (fast mode, 60s timeout)..."
-      if ! docker compose "${COMPOSE_OPTIONS[@]}" exec -T --user postgres "$HAF_CONTAINER" \
-          /usr/lib/postgresql/17/bin/pg_ctl stop -D /home/hived/datadir/haf_db_store/pgdata -m fast -t 60 2>&1; then
-        echo "WARNING: pg_ctl fast stop failed, trying immediate mode..."
-        docker compose "${COMPOSE_OPTIONS[@]}" exec -T --user postgres "$HAF_CONTAINER" \
-          /usr/lib/postgresql/17/bin/pg_ctl stop -D /home/hived/datadir/haf_db_store/pgdata -m immediate -t 30 2>&1 || true
+      # pg_ctl lives under /usr/lib/postgresql/<major>/bin; locate it in the
+      # running HAF image instead of hardcoding the major (the default image
+      # moved from PostgreSQL 17 to 18 in 1.29, and the pg17 variant is still
+      # published), so this block works whichever HAF image the app tests.
+      PG_CTL=$(docker compose "${COMPOSE_OPTIONS[@]}" exec -T --user postgres "$HAF_CONTAINER" \
+          bash -c 'find /usr/lib/postgresql -name pg_ctl -type f 2>/dev/null | head -1' 2>/dev/null | tr -d '\r\n')
+      echo "Found pg_ctl at: ${PG_CTL:-not found}"
+      if [[ -z "$PG_CTL" ]]; then
+        echo "WARNING: pg_ctl not found in the HAF container; relying on docker compose down for shutdown"
+      else
+        echo "Stopping PostgreSQL with pg_ctl (fast mode, 60s timeout)..."
+        if ! docker compose "${COMPOSE_OPTIONS[@]}" exec -T --user postgres "$HAF_CONTAINER" \
+            "$PG_CTL" stop -D /home/hived/datadir/haf_db_store/pgdata -m fast -t 60 2>&1; then
+          echo "WARNING: pg_ctl fast stop failed, trying immediate mode..."
+          docker compose "${COMPOSE_OPTIONS[@]}" exec -T --user postgres "$HAF_CONTAINER" \
+            "$PG_CTL" stop -D /home/hived/datadir/haf_db_store/pgdata -m immediate -t 30 2>&1 || true
+        fi
       fi
 
       # Collect logs before stopping containers
