@@ -114,7 +114,7 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
       typedoc@~0.27.6 \
       typedoc-plugin-markdown@~4.4.1 \
       protobufjs@~7.2.5 && \
-    pnpm dlx playwright install chromium chromium-headless-shell && \
+    pnpm dlx playwright@1.59.1 install chromium chromium-headless-shell && \
     git config --global advice.detachedHead false && \
     git config --global --add safe.directory '*' && \
     chmod -c o+x "${HOME}" && \
@@ -129,7 +129,7 @@ ENV PATH="${PNPM_HOME}:${PATH}"
 
 RUN [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
   nvm use "${NODEJS_VERSION}" && \
-  pnpm dlx playwright install-deps && apt-get clean && rm -r /var/lib/apt/lists/*
+  pnpm dlx playwright@1.59.1 install-deps && apt-get clean && rm -r /var/lib/apt/lists/*
 
 USER emscripten
 WORKDIR /home/emscripten
