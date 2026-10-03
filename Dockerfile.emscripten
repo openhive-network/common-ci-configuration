@@ -72,7 +72,7 @@ COPY --from=wasm_tools_builder /usr/local/bin/bloaty /usr/local/bin/
 
 FROM supplemented_emscripten_sdk AS supplemented_node_sdk
 
-ARG NODEJS_VERSION=v22.21.1
+ARG NODEJS_VERSION=v24.21.0
 ENV NODEJS_VERSION=${NODEJS_VERSION}
 
 USER emscripten

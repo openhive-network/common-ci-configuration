@@ -102,11 +102,11 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 
 **Includes:**
 - Emscripten SDK (version configured in docker-bake.hcl)
-- Node.js 22.x with pnpm
+- Node.js 24.x (LTS) with pnpm
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf
 
-**Current version:** `5.0.2-3`
+**Current version:** `5.0.2-4` (Node 24; `5.0.2-3` has Node 22)
 
 **Used by:** wax and other WASM projects for building JavaScript/TypeScript packages.
 
