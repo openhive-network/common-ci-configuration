@@ -18,6 +18,7 @@ Detailed documentation is available in `docs/`:
 - `common-ci-images.md` - Docker images, their purposes, and Python versions
 - `haf-app-testing.md` - Templates for HAF-dependent application testing
 - `image-cache-lookup.md` - Scripts for finding pre-built images and avoiding rebuilds
+- `npmjs-staged-publishing.md` - Staged (2FA-approved) publishing of @hiveio packages to npmjs: token, variable, approval
 
 ## Validation Commands
 
