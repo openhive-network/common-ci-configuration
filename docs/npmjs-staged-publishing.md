@@ -38,8 +38,9 @@ when the project next bumps its common-ci-configuration ref.
    - skips it if `npm view <name>@<version>` shows it is already published;
    - skips it if `npm stage list <name> --json` shows that version is already staged;
    - otherwise runs `npm stage publish --access public --tag <dist-tag>`.
-5. Keeps the tarballs it staged as job artifacts (`npmjs-staged/tarballs/*.tgz`, 1 month) and
-   logs each one's sha512.
+5. Keeps the `pnpm pack` tarballs as job artifacts (`npmjs-staged/tarballs/*.tgz`, 1 month) and
+   logs each one's sha512. That hash is of the `pnpm pack` tarball. `npm stage publish` re-packs
+   the unpacked folder, so the staged tarball's hash and integrity differ; compare contents instead.
 
 Re-running the job is safe: already staged or published versions are skipped.
 
@@ -63,8 +64,10 @@ The GitLab-registry package of a tag build has the same version as the npmjs one
 `deploy_*` dev package job publishes it, and the build job's `*.tgz` artifact is the same file.
 Expect differences only in `package.json` (`publishConfig.registry`, and `name` if the GitLab
 scope differs). Any other difference means the staged content is not what was built and
-tested, so reject it with `npm stage reject <stage-id> --otp <code>`. You can also compare
-against `npmjs-staged/tarballs/*.tgz` from the CI job's artifacts and the sha512 in its log.
+tested, so reject it with `npm stage reject <stage-id> --otp <code>`. You can also diff the
+contents against `npmjs-staged/tarballs/*.tgz` from the CI job's artifacts. Don't compare
+hashes: the sha512 in the job log is of the `pnpm pack` tarball, and `npm stage publish` re-packs,
+so the staged tarball never matches it byte for byte. The content diff is the check that works.
 
 Then approve:
 

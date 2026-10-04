@@ -307,7 +307,7 @@ variables:
         VERSION="$(jq -r '.version' package.json)"
         PACKAGE_DIST_TAG="$(jq -r '.publishConfig.tag // empty' package.json)"
         PACKAGE_DIST_TAG="${PACKAGE_DIST_TAG:-${BUILT_PACKAGE_DIST_TAG:-latest}}"
-        echo "Package ${NAME}@${VERSION} (dist-tag: ${PACKAGE_DIST_TAG}), sha512: $(sha512sum "${TARBALL}" | cut -d' ' -f1)"
+        echo "Package ${NAME}@${VERSION} (dist-tag: ${PACKAGE_DIST_TAG}), pnpm-pack sha512 (not the staged tarball; npm re-packs - compare contents): $(sha512sum "${TARBALL}" | cut -d' ' -f1)"
 
         # Published versions are public metadata - query without the token so a token problem cannot hide them
         if [ "$(NPM_CONFIG_USERCONFIG=/dev/null npm view "${NAME}@${VERSION}" version --registry "${NPMJS_REGISTRY}" 2>/dev/null || true)" = "${VERSION}" ]; then
