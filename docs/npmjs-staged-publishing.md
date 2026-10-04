@@ -20,9 +20,11 @@ The GitLab package registry deploy (`.npm_deploy_package_template`, `npm_publish
   with **Protected** and **Masked** set. Protected means it is only exposed to pipelines on
   protected branches and tags, which is where the npmjs job runs (manual job, protected tags only).
 
-The template reads `NPM_STAGE_TOKEN` first and falls back to `NPM_PUBLISH_TOKEN`, so existing
-derived jobs that set `NPM_PUBLISH_TOKEN: "$INTERNAL_HIDDEN_PUBLISH_TOKEN"` keep working: once
-the group variable exists, it wins. Those job-level lines can be removed later.
+The template reads only `NPM_STAGE_TOKEN`; there is no fallback to `NPM_PUBLISH_TOKEN`, and
+no project should hold its own npmjs token (the per-project `INTERNAL_HIDDEN_PUBLISH_TOKEN`
+variables were removed, see #24). A derived job that still sets
+`NPM_PUBLISH_TOKEN: "$INTERNAL_HIDDEN_PUBLISH_TOKEN"` is harmless but dead; drop the line
+when the project next bumps its common-ci-configuration ref.
 
 ## What the job does
 

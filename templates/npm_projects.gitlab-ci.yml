@@ -229,7 +229,7 @@ variables:
 # The job uses npm STAGED PUBLISHING (`npm stage publish`, npm >= 11.15). CI only stages the release; it does not go
 # live until a maintainer approves it with 2FA. See docs/npmjs-staged-publishing.md for the full procedure. In short:
 #   - token: npm granular access token, permission "Read and write (stage only)", scoped to the @hiveio packages/org
-#   - stored as the protected, masked GitLab group variable `NPM_STAGE_TOKEN` (falls back to `NPM_PUBLISH_TOKEN`)
+#   - stored as the protected, masked GitLab group variable `NPM_STAGE_TOKEN` (the only token this job reads)
 #   - approve: `npm stage list <name>`, `npm stage download <id>`, compare with the GitLab-registry tarball,
 #     then `npm stage approve <id> --otp <code>` (or approve it on npmjs.com)
 #
@@ -251,9 +251,6 @@ variables:
     NPM_PACKAGE_NAME: ""
     # Path to the built package tarball - it should be overrided by derived job
     PACKAGE_TGZ_PATH: ""
-    # Legacy registry.npmjs.org token variable. The group variable NPM_STAGE_TOKEN takes precedence when set;
-    # whichever is used must be a stage-only granular token (see docs/npmjs-staged-publishing.md).
-    NPM_PUBLISH_TOKEN: ""
     # Directory (inside the project, so it can be kept as an artifact) holding the tarballs that were staged
     NPMJS_STAGE_DIR: "${CI_PROJECT_DIR}/npmjs-staged"
 
@@ -273,7 +270,7 @@ variables:
         exit 1
       fi
 
-      STAGE_TOKEN="${NPM_STAGE_TOKEN:-${NPM_PUBLISH_TOKEN:-}}"
+      STAGE_TOKEN="${NPM_STAGE_TOKEN:-}"
       if [ -z "${STAGE_TOKEN}" ]; then
         echo "ERROR: no npmjs token. Set the protected, masked group variable NPM_STAGE_TOKEN (stage-only granular token)."
         exit 1
