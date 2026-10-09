@@ -185,12 +185,15 @@ lint_python_scripts:
   extends: .validation_job
   image: python:${PYTHON_IMAGE_TAG}
   before_script:
-    - pip install pylint==2.17.7 pylint_junit==0.3.2
+    - pip install pylint==4.1.2
   script:
     - pip install -r scripts/python/requirements.txt
-    - pylint --output-format=text,pylint_junit.JUnitReporter:pylint-junit-result.xml scripts/python/*.py
+    - pylint --output-format=text,json2:pylint-result.json scripts/python/*.py
+  after_script:
+    - python3 misc/pylint2junit.py pylint-result.json pylint-junit-result.xml scripts/python/*.py
   artifacts:
     paths:
+     - pylint-result.json
      - pylint-junit-result.xml
     reports:
       junit: pylint-junit-result.xml
@@ -201,11 +204,15 @@ lint_python_scripts:
         paths:
           - scripts/python/**/*.py
           - scripts/python/requirements.txt
+          - misc/pylint2junit.py
+          - .pylintrc
     - if: $CI_COMMIT_BRANCH
       changes:
         paths:
           - scripts/python/**/*.py
           - scripts/python/requirements.txt
+          - misc/pylint2junit.py
+          - .pylintrc
         compare_to: 'refs/heads/develop'
 
 # =============================================================================

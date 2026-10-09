@@ -16,12 +16,12 @@ the failure body. `tests` also writes one case per test (`tests.xml`).
 |---|---|
 | `shellcheck` | ShellCheck on `scripts/**/*.sh`, expanded by `sh` as `.gitlab-ci.yml`'s `lint_bash_scripts` does (so `scripts/*/*.sh`), plus `.aidev/`'s own scripts |
 | `yamllint` | `yamllint` on `templates/` with the repository's `.yamllint`, as `lint_ci_templates` runs it; warnings don't fail |
-| `py-compile` | parses every `scripts/python/*.py`. `lint_python_scripts` pins pylint 2.17.7, which crashes on python 3.14 (the CI image), so syntax is what can be checked today |
-| `tests` | `pytest tests/`. The repository has no `tests/` yet; until it does, the step is a recorded skip |
+| `pylint` | pylint 4.1.2 on `scripts/python/*.py` with the repository's `.pylintrc`, as `lint_python_scripts` runs it, then `misc/pylint2junit.py` on its json2 output (`pylint.xml`, one case per module) |
+| `tests` | `pytest tests/`; a recorded skip when the repository has no `tests/` |
 
 | Slot | Steps |
 |---|---|
-| quick, full, canary | shellcheck, yamllint, py-compile, tests |
+| quick, full, canary | shellcheck, yamllint, pylint, tests |
 | baseline, coverage | tests |
 
 `static` and `system` are unbound: AIDEV runs neither for a project. Not covered: the
@@ -34,14 +34,14 @@ To run the checks by hand:
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/w" -w /w \
     "$(grep -o 'registry[^"]*aidev-tests@sha256:[0-9a-f]*' .aidev/project.yaml)" \
-    .aidev/run-checks.sh full shellcheck yamllint py-compile tests
+    .aidev/run-checks.sh full shellcheck yamllint pylint tests
 ```
 
 ## The test runtime image (`runtime/`)
 
 `python:3.14-slim` (the CI's `PYTHON_IMAGE_TAG`) with `git` and `bash`, the `shellcheck`
 binary of `koalaman/shellcheck:v0.11.0` (the CI's `SHELLCHECK_ALPINE_TAG`), and
-`scripts/python/requirements.txt` plus yamllint and pytest. Every base is pinned by digest.
+`scripts/python/requirements.txt` plus pylint, yamllint and pytest. Every base is pinned by digest.
 
 When `runtime/Dockerfile` or `scripts/python/requirements.txt` changes, rebuild and
 re-pin **in the same commit**:

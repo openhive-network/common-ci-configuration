@@ -26,7 +26,7 @@ environment:
   kind: "container"
   # Built by .aidev/runtime/build.sh from .aidev/runtime/Dockerfile and
   # scripts/python/requirements.txt.
-  image: "registry.gitlab.syncad.com/hive/common-ci-configuration/aidev-tests@sha256:ebc2800ee002e18fa05792c723fbfdaaf0e42905bd92309a728ad56e075bc51b"
+  image: "registry.gitlab.syncad.com/hive/common-ci-configuration/aidev-tests@sha256:42aa25e850df741467e0674bba6cc800f5047af271c3eaaa161aba2f9ad48d7f"
   inputs: [".aidev/runtime/Dockerfile", "scripts/python/requirements.txt"]
 
 issues:
@@ -49,11 +49,11 @@ issues:
 verification:
   quick:
     adapter: command
-    args: [".aidev/run-checks.sh", "quick", "shellcheck", "yamllint", "py-compile", "tests"]
+    args: [".aidev/run-checks.sh", "quick", "shellcheck", "yamllint", "pylint", "tests"]
     artifacts: ["test-results/quick/"]
   full:
     adapter: command
-    args: [".aidev/run-checks.sh", "full", "shellcheck", "yamllint", "py-compile", "tests"]
+    args: [".aidev/run-checks.sh", "full", "shellcheck", "yamllint", "pylint", "tests"]
     artifacts: ["test-results/full/"]
   baseline:
     adapter: command
@@ -61,7 +61,7 @@ verification:
     artifacts: ["test-results/baseline/"]
   canary:
     adapter: command
-    args: [".aidev/run-checks.sh", "canary", "shellcheck", "yamllint", "py-compile", "tests"]
+    args: [".aidev/run-checks.sh", "canary", "shellcheck", "yamllint", "pylint", "tests"]
     artifacts: ["test-results/canary/"]
   coverage:
     adapter: command

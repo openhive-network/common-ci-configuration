@@ -10,12 +10,13 @@
 #                 .gitlab-ci.yml's lint_bash_scripts runs it, plus .aidev/'s scripts
 #   - yamllint    yamllint on templates/ with the repository's .yamllint, as
 #                 lint_ci_templates runs it (warnings don't fail)
-#   - py-compile  byte-compiles scripts/python/*.py (lint_python_scripts' pylint
-#                 2.17.7 crashes on python 3.14, so syntax is what can be checked)
+#   - pylint      pylint on scripts/python/*.py, as lint_python_scripts runs it,
+#                 and misc/pylint2junit.py on its json2 output (pylint.xml)
 #   - tests       pytest on tests/ (one junit case per test in tests.xml); a
 #                 skipped case when the repository has no tests/ yet
 #
-# Reports go to test-results/<suite>/: junit.xml (one case per step) plus tests.xml.
+# Reports go to test-results/<suite>/: junit.xml (one case per step) plus tests.xml
+# and pylint.xml.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 root="$PWD"
@@ -58,12 +59,11 @@ run_yamllint() {
     yamllint --format parsable templates/
 }
 
-py_compile() {
-    local f rc=0
-    for f in scripts/python/*.py; do
-        python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' "$f" || rc=1
-    done
-    [ "$rc" -eq 0 ] && echo "scripts/python/*.py compile"
+run_pylint() {
+    pylint --version
+    local rc=0
+    pylint --output-format=text,json2:"$out/pylint-result.json" scripts/python/*.py || rc=$?
+    python3 misc/pylint2junit.py "$out/pylint-result.json" "$out/pylint.xml" scripts/python/*.py || rc=1
     return "$rc"
 }
 
@@ -75,7 +75,9 @@ for s in "$@"; do
     case "$s" in
         shellcheck) step shellcheck run_shellcheck ;;
         yamllint) step yamllint run_yamllint ;;
-        py-compile) step py-compile py_compile ;;
+        # py-compile, the step pylint replaced, is what an approved slot binding
+        # predating project.yaml's pylint names.
+        pylint|py-compile) step pylint run_pylint ;;
         tests)
             if [ -d tests ]; then
                 step tests run_tests

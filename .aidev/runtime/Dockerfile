@@ -1,9 +1,8 @@
 # The image AIDEV runs this project's checks in (`environment.image` in
 # .aidev/project.yaml). It carries the tools .gitlab-ci.yml's validation jobs use:
 #   shellcheck v0.11.0 (lint_bash_scripts: koalaman/shellcheck-alpine:v0.11.0)
-#   python 3.14 + yamllint (lint_ci_templates) + scripts/python/requirements.txt
-#   (lint_python_scripts' pylint 2.17.7 crashes on python 3.14, so the checks
-#   byte-compile scripts/python/ instead)
+#   python 3.14 + yamllint (lint_ci_templates) + pylint 4.1.2 and
+#   scripts/python/requirements.txt (lint_python_scripts)
 #   + pytest for tests/, git and bash.
 # Its inputs are this file and scripts/python/requirements.txt (the only file in the
 # build context). Build and pin it with .aidev/runtime/build.sh; see .aidev/README.md.
@@ -18,7 +17,7 @@ RUN apt-get update \
 COPY --from=shellcheck /bin/shellcheck /usr/local/bin/shellcheck
 
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt yamllint==1.37.1 pytest==8.4.2 \
+RUN pip install --no-cache-dir -r /tmp/requirements.txt pylint==4.1.2 yamllint==1.37.1 pytest==8.4.2 \
     && rm /tmp/requirements.txt
 
 ENV HOME=/tmp PYTHONDONTWRITEBYTECODE=1
