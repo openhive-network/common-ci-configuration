@@ -98,6 +98,13 @@ find-upstream-image.sh \
 - `--image=NAME` - Image name within registry
 - `--require-hit` - Exit with error if image not found
 
+If no commit has an image, the script falls back to an image tagged with the
+branch name (`<registry>[/<image>]:<branch>`, e.g. a release branch
+`1.28.8-rc3`). Registry cleanup policies typically delete old commit tags but
+keep release tags. A commit tag always wins when present. A fallback hit sets
+`UPSTREAM_FALLBACK=release-tag` and `UPSTREAM_TAG=<branch>`, while
+`UPSTREAM_COMMIT` stays the latest source commit.
+
 **Output (upstream-image.env):**
 ```bash
 UPSTREAM_BRANCH=develop

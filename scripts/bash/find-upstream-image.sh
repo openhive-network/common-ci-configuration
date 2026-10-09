@@ -5,7 +5,10 @@
 # This script fetches an upstream repository, finds commits that changed source
 # files, and checks if a Docker image exists for those commits. It automatically
 # falls back to older commits if the latest doesn't have an image yet (e.g., when
-# upstream pipeline is still building after a squash merge).
+# upstream pipeline is still building after a squash merge). When no commit has
+# an image, it falls back to an image tagged with the branch name itself (e.g. a
+# release branch "1.28.8-rc3"), since registry cleanup may delete commit tags
+# while keeping release tags.
 #
 # Usage:
 #   find-upstream-image.sh [OPTIONS]
@@ -24,6 +27,7 @@
 #   --work-dir=PATH      Working directory for git clone (default: /tmp/upstream-repo-$$)
 #   --keep-repo          Don't delete cloned repo after completion
 #   --require-hit        Exit with error if no image found after checking all commits
+#                        and the branch-name tag fallback
 #   --quiet              Suppress status messages
 #   --help               Show this help message
 #
@@ -45,11 +49,14 @@
 # Output Environment File (upstream-image.env):
 #   UPSTREAM_CACHE_HIT=true|false    Whether image was found
 #   UPSTREAM_COMMIT=<hash>           Full 40-char commit hash (for cache keys)
-#   UPSTREAM_TAG=<tag>               Abbreviated commit for image tag (8 chars)
+#   UPSTREAM_TAG=<tag>               Abbreviated commit for image tag (8 chars),
+#                                    or the branch name for the release-tag fallback
 #   UPSTREAM_IMAGE=<full name>       Full image name with tag
 #   UPSTREAM_REGISTRY=<path>         Registry path without tag
 #   UPSTREAM_BRANCH=<branch>         Branch that was checked
-#   UPSTREAM_FALLBACK=true|false     Whether a fallback commit was used
+#   UPSTREAM_FALLBACK=true|false|release-tag
+#                                    Whether a fallback commit was used, or
+#                                    release-tag when the branch-name tag was used
 #
 # Exit Codes:
 #   0 - Success (image found, possibly via fallback)
@@ -294,6 +301,39 @@ if [[ "$FOUND_IMAGE" == "true" ]]; then
 
     exit 0
 else
+    LATEST_COMMIT="${SOURCE_COMMITS[0]}"
+    if [[ -n "$IMAGE" ]]; then
+        FULL_REGISTRY="${REGISTRY}/${IMAGE}"
+    else
+        FULL_REGISTRY="${REGISTRY}"
+    fi
+
+    # Registry cleanup may delete commit tags while keeping release tags, so
+    # an image tagged with the branch name is the last resort.
+    BRANCH_IMAGE="${FULL_REGISTRY}:${BRANCH}"
+    if docker manifest inspect "$BRANCH_IMAGE" >/dev/null 2>&1; then
+        log ""
+        log "NOTE: No commit tag found after checking $CHECKED_COUNT commit(s); using release tag $BRANCH_IMAGE"
+
+        cat > "$OUTPUT_FILE" << EOF
+UPSTREAM_BRANCH=$BRANCH
+UPSTREAM_FALLBACK=release-tag
+UPSTREAM_CACHE_HIT=true
+UPSTREAM_COMMIT=$LATEST_COMMIT
+UPSTREAM_TAG=$BRANCH
+UPSTREAM_IMAGE=$BRANCH_IMAGE
+UPSTREAM_REGISTRY=$FULL_REGISTRY
+EOF
+
+        log ""
+        log "Output written to: $OUTPUT_FILE"
+        if [[ "$QUIET" != "true" ]]; then
+            cat "$OUTPUT_FILE" >&2
+        fi
+
+        exit 0
+    fi
+
     # No image found for any commit
     log ""
     log "ERROR: No image found after checking $CHECKED_COUNT commit(s)"
@@ -301,15 +341,8 @@ else
     log "       This usually means the upstream pipeline hasn't finished building yet."
 
     # Write output with CACHE_HIT=false for the latest commit
-    LATEST_COMMIT="${SOURCE_COMMITS[0]}"
     LATEST_TAG="${LATEST_COMMIT:0:8}"
-    if [[ -n "$IMAGE" ]]; then
-        FULL_IMAGE="${REGISTRY}/${IMAGE}:${LATEST_TAG}"
-        FULL_REGISTRY="${REGISTRY}/${IMAGE}"
-    else
-        FULL_IMAGE="${REGISTRY}:${LATEST_TAG}"
-        FULL_REGISTRY="${REGISTRY}"
-    fi
+    FULL_IMAGE="${FULL_REGISTRY}:${LATEST_TAG}"
 
     cat > "$OUTPUT_FILE" << EOF
 UPSTREAM_BRANCH=$BRANCH
