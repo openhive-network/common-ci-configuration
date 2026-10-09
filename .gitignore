@@ -1,2 +1,4 @@
 .vscode/
 tmp/
+# AIDEV check reports (.aidev/run-checks.sh)
+test-results/
