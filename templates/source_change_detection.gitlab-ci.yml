@@ -55,12 +55,14 @@ variables:
 # Extend this in your CI and customize the patterns as needed
 .detect_source_changes:
   stage: .pre
-  image: alpine:latest
+  # Gates the whole pipeline, so no runtime package install: docker-builder
+  # already has git and bash
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:${DOCKER_BUILDER_TAG}
   needs: []
   variables:
     GIT_DEPTH: 50
   before_script:
-    - apk add --no-cache git
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
   script:
     - |
       echo "=== Source Change Detection ==="
