@@ -352,11 +352,13 @@ include:
 .haf_app_detect_changes:
   extends: .job-defaults
   stage: detect
-  image: alpine:latest
+  # Gates the sync/test jobs, so no runtime package install: docker-builder
+  # already has git and bash
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:${DOCKER_BUILDER_TAG}
   variables:
     GIT_SUBMODULE_STRATEGY: none
   before_script:
-    - apk add --no-cache git
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
   script:
     - |
       set -e
@@ -473,14 +475,15 @@ include:
 .haf_commit_validation:
   extends: .job-defaults
   stage: build
-  image: alpine:latest
+  # docker-builder already has git and bash: no runtime package install
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-builder:${DOCKER_BUILDER_TAG}
   variables:
     # HAF_COMMIT should come from global variables or be set in derived job
     # Do NOT set a default here as it would override global variables
     HAF_INCLUDE_REF: ""      # Should match the 'ref' in your HAF include
     HAF_SUBMODULE_PATH: "haf"  # Path to HAF submodule
   before_script:
-    - apk add --no-cache git
+    - git config --global --add safe.directory '*'
   script:
     - |
       set -euo pipefail
