@@ -170,6 +170,10 @@ variables:
 #   UNSTABLE_VERSION_PATTERN  - Regex pattern to detect unstable versions (default: "dev")
 #   ALLOWED_PACKAGE_PATTERN   - Package name pattern to allow unstable versions (default: "" = none)
 #   COMMON_CI_REF             - Branch/ref to fetch script from (default: "develop")
+#   ALLOW_UNSTABLE_DEPS       - Set to "true" to make this job non-blocking (allow_failure).
+#                                Useful on feature branches that depend on unreleased packages
+#                                from other repos not yet merged to stable branches.
+#                                Can be overridden via pipeline variables when manually running a pipeline.
 #
 .verify_poetry_lock_stability_template:
   extends: .job-defaults
@@ -178,7 +182,12 @@ variables:
     UNSTABLE_VERSION_PATTERN: "dev"
     ALLOWED_PACKAGE_PATTERN: ""
     COMMON_CI_REF: "develop"
+    ALLOW_UNSTABLE_DEPS: "false"
   image: "${PYTHON_IMAGE}"
+  rules:
+    - if: $ALLOW_UNSTABLE_DEPS == "true"
+      allow_failure: true
+    - when: on_success
   script:
     - |
       SCRIPT_URL="${CI_SERVER_URL}/hive/common-ci-configuration/-/raw/${COMMON_CI_REF}/scripts/bash/verify_poetry_lock_stability.sh"
