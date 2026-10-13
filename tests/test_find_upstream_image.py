@@ -142,3 +142,28 @@ def test_image_type_not_satisfied_by_mainnet_release_tag(tmp_path: Path, upstrea
                      "--image=testnet", "--require-hit")
     assert proc.returncode == 1
     assert out["UPSTREAM_CACHE_HIT"] == "false"
+
+
+def test_no_image_diagnostic_lists_search_and_causes(tmp_path: Path, upstream: Tuple[Path, str]) -> None:
+    repo, sha = upstream
+    proc, _ = _run(tmp_path, repo, RELEASE, [], "--require-hit")
+    assert proc.returncode == 1
+    assert f"No image found in {REGISTRY} for branch/tag '{RELEASE}'" in proc.stderr
+    assert "Searched 1 source commit(s) (at most 10)" in proc.stderr
+    assert f"newest: {sha}" in proc.stderr
+    assert f"oldest: {sha}" in proc.stderr
+    assert f"Release tag {REGISTRY}:{RELEASE}: looked up, not found" in proc.stderr
+    assert f"1. The upstream pipeline for the newest source commit {sha[:8]}" in proc.stderr
+    assert "2. Registry cleanup deleted the commit tags" in proc.stderr
+    assert "fell back to 'develop'" not in proc.stderr
+    assert "This usually means the upstream pipeline hasn't finished building yet" not in proc.stderr
+
+
+def test_no_image_diagnostic_states_branch_fallback(tmp_path: Path, upstream: Tuple[Path, str]) -> None:
+    repo, _ = upstream
+    proc, out = _run(tmp_path, repo, "no-such-tag", [], "--require-hit")
+    assert proc.returncode == 1
+    assert out["UPSTREAM_BRANCH"] == "develop"
+    assert "Requested branch/tag 'no-such-tag' could not be cloned upstream; searched 'develop' instead" in proc.stderr
+    assert f"Release tag {REGISTRY}:develop: looked up, not found" in proc.stderr
+    assert "3. Branch/tag 'no-such-tag' does not exist upstream, so the clone fell back to 'develop'" in proc.stderr
