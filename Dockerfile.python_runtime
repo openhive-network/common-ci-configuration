@@ -100,6 +100,7 @@ COPY --from=python_dev \
   /lib/x86_64-linux-gnu/libaudit.so.1 \
   /lib/x86_64-linux-gnu/libacl.so.1 \
   /lib/x86_64-linux-gnu/libbz2.so.1.0 \
+  /lib/x86_64-linux-gnu/libsystemd.so.0 \
   /lib/x86_64-linux-gnu/
 
 
