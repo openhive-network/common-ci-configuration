@@ -185,6 +185,9 @@ IFS=',' read -ra PATTERN_ARRAY <<< "$PATTERNS"
 
 log "Fetching upstream repo: $REPO_URL (branch: $BRANCH)"
 
+REQUESTED_BRANCH="$BRANCH"
+CLONE_FELL_BACK=false
+
 # Clone the repository (shallow, single branch)
 if [[ -d "$WORK_DIR" ]]; then
     log "Removing existing work directory: $WORK_DIR"
@@ -196,6 +199,7 @@ if ! git clone --depth="$DEPTH" --branch="$BRANCH" --single-branch "$REPO_URL" "
     if [[ "$BRANCH" != "develop" ]]; then
         log "WARNING: Branch '$BRANCH' not found, falling back to 'develop'"
         BRANCH="develop"
+        CLONE_FELL_BACK=true
         git clone --depth="$DEPTH" --branch="$BRANCH" --single-branch "$REPO_URL" "$WORK_DIR" 2>&1 | \
             while IFS= read -r line; do log "  $line"; done
     else
@@ -335,10 +339,23 @@ EOF
     fi
 
     # No image found for any commit
+    OLDEST_COMMIT="${SOURCE_COMMITS[$((CHECKED_COUNT - 1))]}"
     log ""
-    log "ERROR: No image found after checking $CHECKED_COUNT commit(s)"
-    log "       Latest source commit: ${SOURCE_COMMITS[0]}"
-    log "       This usually means the upstream pipeline hasn't finished building yet."
+    log "ERROR: No image found in $FULL_REGISTRY for branch/tag '$BRANCH'"
+    if [[ "$CLONE_FELL_BACK" == "true" ]]; then
+        log "       Requested branch/tag '$REQUESTED_BRANCH' could not be cloned upstream; searched 'develop' instead"
+    fi
+    log "       Searched $CHECKED_COUNT source commit(s) (at most $MAX_SEARCH)"
+    log "         newest: $LATEST_COMMIT"
+    log "         oldest: $OLDEST_COMMIT"
+    log "       Release tag $BRANCH_IMAGE: looked up, not found"
+    log ""
+    log "       Candidate causes:"
+    log "       1. The upstream pipeline for the newest source commit ${LATEST_COMMIT:0:8} has not finished yet - check its pipeline."
+    log "       2. Registry cleanup deleted the commit tags - check whether older commit tags exist in $FULL_REGISTRY; pin a release tag."
+    if [[ "$CLONE_FELL_BACK" == "true" ]]; then
+        log "       3. Branch/tag '$REQUESTED_BRANCH' does not exist upstream, so the clone fell back to 'develop' - check the name."
+    fi
 
     # Write output with CACHE_HIT=false for the latest commit
     LATEST_TAG="${LATEST_COMMIT:0:8}"
