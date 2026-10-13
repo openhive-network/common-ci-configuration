@@ -174,7 +174,7 @@ target "python" {
 target "python_runtime" {
   dockerfile = "Dockerfile.python_runtime"
   tags = generate-tags("python_runtime", "${PYTHON_RUNTIME_VERSION}")
-  cache-from = generate-cache-from("python_rutime", "${PYTHON_RUNTIME_VERSION}")
+  cache-from = generate-cache-from("python_runtime", "${PYTHON_RUNTIME_VERSION}")
   cache-to = generate-cache-to("python_runtime", "${PYTHON_RUNTIME_VERSION}")
 }
 
