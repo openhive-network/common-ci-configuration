@@ -83,33 +83,38 @@ install_all_dev_packages() {
   # Hive's test tooling requires Python 3.14. Ubuntu 26.04+ ships it as the
   # system python3; on older releases install it side by side from the
   # deadsnakes PPA, leaving the distro python3 untouched.
-  local python314_packages=""
+  local python314_packages=()
   # Package renames on 26.04: libxml2 -> libxml2-16; python3-lib2to3 dropped
   # (lib2to3 was removed from Python 3.13+).
   # 26.04's OpenSSL 3.5 is built with zstd and the jitterentropy seed source,
   # so linking its static libcrypto.a (as hived does) also needs -lzstd and
   # the static libjitterentropy.a (Libs.private in libcrypto.pc).
-  local compat_packages="libxml2-16 libzstd-dev libjitterentropy3-dev"
+  local compat_packages=(libxml2-16 libzstd-dev libjitterentropy3-dev)
   if [ "$ubuntu_major" -lt 26 ]; then
-    compat_packages="libxml2 python3-lib2to3"
+    compat_packages=(libxml2 python3-lib2to3)
     if ! apt-cache policy python3.14 2>/dev/null | grep -q "Candidate:"; then
       apt-get install -y software-properties-common
       add-apt-repository -y ppa:deadsnakes/ppa
       apt-get update
     fi
-    python314_packages="python3.14 python3.14-venv python3.14-dev"
+    python314_packages=(python3.14 python3.14-venv python3.14-dev)
   fi
 
-  apt-get install -y \
-  git python3 build-essential gir1.2-glib-2.0 libgirepository-1.0-1 libglib2.0-0 libglib2.0-data ${compat_packages} python3-pkg-resources shared-mime-info xdg-user-dirs ca-certificates \
-  autoconf automake cmake clang clang-tidy g++ git libbz2-dev libsnappy-dev libssl-dev libtool make pkg-config python3-jinja2 libboost-all-dev doxygen libncurses5-dev libreadline-dev perl ninja-build zopfli \
-  xxd liburing-dev \
-  \
-  screen python3-pip python3-dateutil tzdata python3-junit.xml python3-venv python3-dateutil \
-  python3-dev p7zip-full \
-  \
-  ${python314_packages} \
-  && \
+  local dev_packages=(
+    # Build tools; clang, clang-tidy and lld are the distro's default LLVM (21 on 26.04)
+    git build-essential autoconf automake cmake g++ make libtool pkg-config ninja-build doxygen xxd
+    clang clang-tidy lld
+    # Libraries
+    libboost-all-dev libbz2-dev libsnappy-dev libssl-dev libncurses-dev libreadline-dev liburing-dev
+    # Python
+    python3 python3-dev python3-pip python3-venv python3-jinja2 python3-dateutil python3-pkg-resources python3-junit.xml
+    # Tools (curl is also needed by --user and --docker-cli)
+    ca-certificates curl parallel perl p7zip-full screen tzdata zopfli
+    # GLib runtime and shared data
+    gir1.2-glib-2.0 libgirepository-1.0-1 libglib2.0-0 libglib2.0-data shared-mime-info xdg-user-dirs
+  )
+
+  apt-get install -y "${dev_packages[@]}" "${compat_packages[@]}" "${python314_packages[@]}" && \
   (if [ "$ubuntu_major" -ge 24 ]; then apt-get install -y python3-setuptools; else apt-get install -y python3-distutils; fi) && \
   apt-get clean && rm -r /var/lib/apt/lists/*
 
@@ -148,7 +153,7 @@ install_user_packages() {
   wget https://github.com/vi/websocat/releases/download/v1.11.0/websocat.x86_64-unknown-linux-musl
   chmod a+x ./websocat.x86_64-unknown-linux-musl
 
-  sudo cp ./websocat.x86_64-unknown-linux-musl /usr/local/bin/
+  sudo cp ./websocat.x86_64-unknown-linux-musl /usr/local/bin/websocat
 
   popd
 
