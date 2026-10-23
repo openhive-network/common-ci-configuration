@@ -1,0 +1,234 @@
+#! /bin/bash
+
+set -euo pipefail
+
+SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+
+# This script installs all packages required to build and run a hived instance.
+# The docker images built from this repo's Dockerfile use only the --runtime path.
+# CI build images (which cover the --dev toolchain) are defined separately in
+# https://gitlab.syncad.com/hive/common-ci-configuration - keep the package lists
+# in sync when changing dev dependencies here.
+
+
+print_help () {
+cat <<EOF
+Usage: $0 [OPTION[=VALUE]]...
+
+Setup this machine for hived installation
+OPTIONS:
+  --hived-account=NAME        Specify the account name to be used for hived process (UID 1000, with sudo).
+  --runtime                   Installs all packages required to run a pre-built hived binary.
+  --dev                       Installs all packages required to build and test hived project (in addition to the required runtime packages).
+  --user                      Installs all packages to the user's home directory).
+  --docker-cli=VERSION        Installs standalone Docker CLI.
+  --help                      Display this help screen and exit.
+EOF
+}
+
+hived_unix_account="hived"
+
+assert_is_root() {
+  if [ "$EUID" -ne 0 ]
+    then echo "Please run as root"
+    exit 1
+  fi
+}
+
+install_all_runtime_packages() {
+  echo "Attempting to install all runtime packages..."
+  assert_is_root
+
+  apt-get update && apt-get install -y language-pack-en && apt-get install -y sudo screen libsnappy1v5 libreadline8 wget && apt-get clean && rm -r /var/lib/apt/lists/*
+
+  #Additionally fix OpenSSL configuration issues caused by OpenSSL 3.0
+  # TODO REMOVE the additional openssl configuaration when OpenSSL 3.0.7 or above will be distributed by Ubuntu.
+  if [ "$(lsb_release -rs | cut -d. -f1)" -lt 24 ]; then
+    cp "${SCRIPTPATH}/openssl.conf" /etc/ssl/hive-openssl.conf
+    echo -e "\n.include /etc/ssl/hive-openssl.conf\n" >> /etc/ssl/openssl.cnf
+  fi
+}
+
+# Earlier versions of this script repointed /usr/bin/python3 to python3.14 via
+# update-alternatives. That breaks apt on Ubuntu <= 24.04: apt's helper tooling
+# (apt_pkg, add-apt-repository, command-not-found, py3compile) is built only for
+# the distro's own Python, so the system can no longer install or update
+# packages. Undo the damage if present.
+repair_python3_symlink() {
+  if update-alternatives --query python3 &>/dev/null; then
+    echo "Repairing /usr/bin/python3 (was repointed by an earlier version of this script)..."
+    local distro_python
+    distro_python=$(dpkg-query -W -f='${Depends}' python3 2>/dev/null | grep -oE 'python3\.[0-9]+' | head -1 || true)
+    update-alternatives --remove-all python3 2>/dev/null || true
+    if [ -n "$distro_python" ] && [ -x "/usr/bin/$distro_python" ]; then
+      ln -sf "$distro_python" /usr/bin/python3
+      echo "Restored /usr/bin/python3 -> $distro_python"
+    else
+      echo "WARNING: could not determine the distro python3; restore the /usr/bin/python3 symlink manually."
+    fi
+  fi
+}
+
+install_all_dev_packages() {
+  echo "Attempting to install all dev packages..."
+  assert_is_root
+
+  repair_python3_symlink
+
+  apt-get update
+
+  local ubuntu_major
+  ubuntu_major=$(lsb_release -rs | cut -d. -f1)
+
+  # Hive's test tooling requires Python 3.14. Ubuntu 26.04+ ships it as the
+  # system python3; on older releases install it side by side from the
+  # deadsnakes PPA, leaving the distro python3 untouched.
+  local python314_packages=""
+  # Package renames on 26.04: libxml2 -> libxml2-16; python3-lib2to3 dropped
+  # (lib2to3 was removed from Python 3.13+).
+  # 26.04's OpenSSL 3.5 is built with zstd and the jitterentropy seed source,
+  # so linking its static libcrypto.a (as hived does) also needs -lzstd and
+  # the static libjitterentropy.a (Libs.private in libcrypto.pc).
+  local compat_packages="libxml2-16 libzstd-dev libjitterentropy3-dev"
+  if [ "$ubuntu_major" -lt 26 ]; then
+    compat_packages="libxml2 python3-lib2to3"
+    if ! apt-cache policy python3.14 2>/dev/null | grep -q "Candidate:"; then
+      apt-get install -y software-properties-common
+      add-apt-repository -y ppa:deadsnakes/ppa
+      apt-get update
+    fi
+    python314_packages="python3.14 python3.14-venv python3.14-dev"
+  fi
+
+  apt-get install -y \
+  git python3 build-essential gir1.2-glib-2.0 libgirepository-1.0-1 libglib2.0-0 libglib2.0-data ${compat_packages} python3-pkg-resources shared-mime-info xdg-user-dirs ca-certificates \
+  autoconf automake cmake clang clang-tidy g++ git libbz2-dev libsnappy-dev libssl-dev libtool make pkg-config python3-jinja2 libboost-all-dev doxygen libncurses5-dev libreadline-dev perl ninja-build zopfli \
+  xxd liburing-dev \
+  \
+  screen python3-pip python3-dateutil tzdata python3-junit.xml python3-venv python3-dateutil \
+  python3-dev p7zip-full \
+  \
+  ${python314_packages} \
+  && \
+  (if [ "$ubuntu_major" -ge 24 ]; then apt-get install -y python3-setuptools; else apt-get install -y python3-distutils; fi) && \
+  apt-get clean && rm -r /var/lib/apt/lists/*
+
+  # NEVER repoint /usr/bin/python3 (e.g. via update-alternatives) to a non-distro
+  # Python: apt depends on helpers built for the distro interpreter and the
+  # system becomes unable to install or update packages.
+  if [ "$ubuntu_major" -lt 26 ]; then
+    echo "Python 3.14 installed as 'python3.14'; system python3 left unchanged."
+  fi
+}
+
+preconfigure_faketime() {
+  git clone --depth 1 --branch bw_timer_settime_fix https://gitlab.syncad.com/hive/faketime.git
+  pushd faketime && CFLAGS="-O2 -DFAKE_STATELESS=1" make
+
+  sudo make install # install it into default location path.
+
+  popd
+}
+
+preconfigure_git_safe_direcories() {
+  git config --global --add safe.directory '*'
+}
+
+install_user_packages() {
+  base_dir=${1}
+  echo "Attempting to install user packages in directory: ${base_dir}"
+
+  mkdir -p "${base_dir}"
+  pushd "${base_dir}"
+
+  preconfigure_faketime
+  preconfigure_git_safe_direcories
+
+  # update path once it will be invalidated (hopefully not): https://github.com/vi/websocat/releases
+  wget https://github.com/vi/websocat/releases/download/v1.11.0/websocat.x86_64-unknown-linux-musl
+  chmod a+x ./websocat.x86_64-unknown-linux-musl
+
+  sudo cp ./websocat.x86_64-unknown-linux-musl /usr/local/bin/
+
+  popd
+
+  # Install poetry in an isolated environment, based on Python 3.14 (falls back
+  # to the system python3, which is already 3.14 on Ubuntu 26.04+).
+  local poetry_python
+  poetry_python=$(command -v python3.14 || command -v python3)
+  curl -sSL https://install.python-poetry.org | "$poetry_python" -
+  poetry self update 2.1.3
+  poetry self add "poetry-dynamic-versioning[plugin]@>=1.0.0,<2.2.0"
+}
+
+install_docker_cli() {
+  DOCKER_VERSION=$1
+  BUILDX_VERSION="v0.24.0"
+
+  curl -fsSLO "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz"
+  sudo tar xzvf "docker-${DOCKER_VERSION}.tgz" --strip 1 -C /usr/local/bin docker/docker
+  rm "docker-${DOCKER_VERSION}.tgz"
+
+  curl -fsSLO "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-amd64"
+  sudo mkdir -p /usr/libexec/docker/cli-plugins
+  sudo mv "buildx-${BUILDX_VERSION}.linux-amd64" /usr/libexec/docker/cli-plugins/docker-buildx
+  sudo chmod +x /usr/libexec/docker/cli-plugins/docker-buildx
+}
+
+create_hived_account() {
+  echo "Attempting to create $hived_unix_account account..."
+  assert_is_root
+
+  if id "$hived_unix_account" &>/dev/null; then
+      echo "Account $hived_unix_account already exists. Ensuring UID 1000 and sudo access..."
+      usermod -o -u 1000 "$hived_unix_account" 2>/dev/null || true
+      mkdir -p "/home/$hived_unix_account"
+      chown -R "$hived_unix_account":users "/home/$hived_unix_account"
+      # Always ensure NOPASSWD sudo (idempotent - sed removes old entry first)
+      sed -i "/^$hived_unix_account /d" /etc/sudoers 2>/dev/null || true
+      echo "$hived_unix_account ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+  else
+      useradd -ms /bin/bash -u 1000 -g users -c "Hived daemon account" "$hived_unix_account" && echo "$hived_unix_account ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+  fi
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --runtime)
+        install_all_runtime_packages
+        ;;
+    --dev)
+        install_all_dev_packages
+        ;;
+    --user)
+        install_user_packages "${HOME}/hive_base_config"
+        ;;
+    --docker-cli=*)
+        install_docker_cli "${1#*=}"
+        ;;
+    --hived-account=*)
+        hived_unix_account="${1#*=}"
+        create_hived_account
+        ;;
+    --help)
+        print_help
+        exit 0
+        ;;
+    -*)
+        echo "ERROR: '$1' is not a valid option"
+        echo
+        print_help
+        exit 1
+        ;;
+    *)
+        echo "ERROR: '$1' is not a valid argument"
+        echo
+        print_help
+        exit 2
+        ;;
+    esac
+    shift
+done
+
+
+
