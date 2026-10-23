@@ -28,6 +28,7 @@ variable "PYTHON_RUNTIME_VERSION" {
 }
 
 variable "CI_BASE_IMAGE_VERSION" {
+  # -5: Boost 1.88.0 -> 1.90.0 (the prebuilt aarch64 toolchain still ships 1.88)
   # -4: canonical tag consolidating pypa_2_28-4 / pypa_2_28-pg18-3 /
   # pypa_2_28-pg18-arm-1 (includes the prebuilt aarch64 buildroot cross
   # toolchain, see aarch64-toolchain/)
