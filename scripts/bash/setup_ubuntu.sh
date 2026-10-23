@@ -5,10 +5,12 @@ set -euo pipefail
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
 # This script installs all packages required to build and run a hived instance.
-# The docker images built from this repo's Dockerfile use only the --runtime path.
-# CI build images (which cover the --dev toolchain) are defined separately in
-# https://gitlab.syncad.com/hive/common-ci-configuration - keep the package lists
-# in sync when changing dev dependencies here.
+#
+# It is a copy of hive's scripts/setup_ubuntu.sh (hive/hive#896).
+# Dockerfile.ci-base-image-ubuntu is built by running it and only adds the
+# HAF-specific layers itself. A change here changes that image: bump
+# CI_BASE_IMAGE_UBUNTU_VERSION in docker-bake.hcl and make the same change in
+# hive's copy.
 
 
 print_help () {

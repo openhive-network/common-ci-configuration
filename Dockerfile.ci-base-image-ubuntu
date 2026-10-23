@@ -8,16 +8,18 @@
 # Ubuntu 26.04 ships Python 3.14 as the system python3 and LLVM 21 as the
 # distro toolchain, so no deadsnakes PPA or apt.llvm.org repo is needed.
 #
+# The build/test environment (packages, the hived account, Docker CLI,
+# websocat, faketime, Poetry) is installed by scripts/bash/setup_ubuntu.sh, a
+# copy of hive's scripts/setup_ubuntu.sh. Only the HAF-specific layers
+# (PostgreSQL, libpqxx, sccache) are written out here.
+#
 # Build:
-#   docker build -f Dockerfile.ci-base-image-ubuntu -t ci-base-image-ubuntu:ubuntu26.04-pg18-1 .
+#   docker build -f Dockerfile.ci-base-image-ubuntu -t ci-base-image-ubuntu:ubuntu26.04-pg18-3 .
 
 ARG BASE_IMAGE=phusion/baseimage:resolute-1.0.11
 FROM ${BASE_IMAGE}
 
-ARG POETRY_VERSION=2.1.3
 ARG DOCKER_CLI_VERSION=28.0.1
-ARG BUILDX_VERSION=v0.24.0
-ARG CLANG_VERSION=21
 ARG PG_MAJOR=18
 
 ENV LANG=en_US.UTF-8
@@ -28,31 +30,10 @@ SHELL ["/bin/bash", "-c"]
 USER root
 WORKDIR /usr/local/src
 
-# Install runtime packages
-RUN apt-get update && \
-    apt-get install -y \
-        language-pack-en \
-        sudo \
-        screen \
-        libsnappy1v5 \
-        libreadline8 \
-        wget \
-        curl \
-        ca-certificates \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY scripts/bash/setup_ubuntu.sh scripts/bash/openssl.conf /usr/local/src/scripts/
 
-# Install LLVM/Clang ${CLANG_VERSION} from the Ubuntu archive (LLVM 21 is the
-# distro default on 26.04)
-RUN apt-get update && \
-    apt-get install -y \
-        clang-${CLANG_VERSION} \
-        clang-tidy-${CLANG_VERSION} \
-        lld-${CLANG_VERSION} \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${CLANG_VERSION} 100 \
-    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${CLANG_VERSION} 100 \
-    && update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-${CLANG_VERSION} 100 \
-    && update-alternatives --install /usr/bin/lld lld /usr/bin/lld-${CLANG_VERSION} 100
+# Install runtime and development packages (LLVM/Clang, Python 3.14, build tools, libraries)
+RUN ./scripts/setup_ubuntu.sh --runtime --dev
 
 # Install PostgreSQL ${PG_MAJOR} development packages from PGDG
 RUN apt-get update && \
@@ -64,56 +45,6 @@ RUN apt-get update && \
     apt-get install -y \
         postgresql-server-dev-${PG_MAJOR} \
         libpq-dev \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install development packages and Python (system python3 is 3.14 on 26.04)
-RUN apt-get update && \
-    apt-get install -y \
-        # Build tools
-        git \
-        build-essential \
-        autoconf \
-        automake \
-        cmake \
-        g++ \
-        libtool \
-        make \
-        pkg-config \
-        ninja-build \
-        doxygen \
-        xxd \
-        # Libraries
-        libboost-all-dev \
-        libbz2-dev \
-        libsnappy-dev \
-        libssl-dev \
-        libncurses-dev \
-        libzstd-dev \
-        # provides the static libjitterentropy.a linked by fc/hived
-        libjitterentropy3-dev \
-        libreadline-dev \
-        liburing-dev \
-        # Python (system python3 = 3.14)
-        python3 \
-        python3-pip \
-        python3-venv \
-        python3-dev \
-        python3-jinja2 \
-        python3-dateutil \
-        python3-setuptools \
-        # Misc
-        parallel \
-        perl \
-        p7zip-full \
-        tzdata \
-        zopfli \
-        gir1.2-glib-2.0 \
-        libgirepository-1.0-1 \
-        libglib2.0-0 \
-        libglib2.0-data \
-        libxml2-16 \
-        shared-mime-info \
-        xdg-user-dirs \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install libpqxx 7.10.7 (PostgreSQL C++ connector; 7.8.x does not configure
@@ -133,43 +64,16 @@ RUN curl -fsSL https://github.com/mozilla/sccache/releases/download/v0.8.1/sccac
 # Remove default ubuntu user (UID 1000) from phusion/baseimage to free UID 1000 for hived
 RUN userdel --remove ubuntu 2>/dev/null || true
 
-# Create hived user for running hived daemon
-# UID 1000 matches hive's setup_ubuntu.sh convention. NOPASSWD sudo required for
-# runtime operations (e.g. chown in entrypoint scripts).
-RUN useradd -ms /bin/bash -u 1000 -g users -c "Hived daemon account" hived && \
-    echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
-# Install Docker CLI
-RUN curl -fsSLO "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" && \
-    tar xzvf "docker-${DOCKER_CLI_VERSION}.tgz" --strip 1 -C /usr/local/bin docker/docker && \
-    rm "docker-${DOCKER_CLI_VERSION}.tgz" && \
-    mkdir -p /usr/libexec/docker/cli-plugins && \
-    curl -fsSL "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-amd64" \
-        -o /usr/libexec/docker/cli-plugins/docker-buildx && \
-    chmod +x /usr/libexec/docker/cli-plugins/docker-buildx
-
-# Install websocat
-RUN wget -q https://github.com/vi/websocat/releases/download/v1.11.0/websocat.x86_64-unknown-linux-musl \
-        -O /usr/local/bin/websocat && \
-    chmod +x /usr/local/bin/websocat
-
-# Install faketime (Syncad fork with bw_timer_settime_fix)
-RUN git clone --depth 1 --branch bw_timer_settime_fix https://gitlab.syncad.com/hive/faketime.git /tmp/faketime && \
-    cd /tmp/faketime && \
-    CFLAGS="-O2 -DFAKE_STATELESS=1" make && \
-    make install && \
-    cd / && rm -rf /tmp/faketime
+# Create the hived account (UID 1000, NOPASSWD sudo) and install Docker CLI + buildx
+RUN ./scripts/setup_ubuntu.sh --hived-account=hived --docker-cli=${DOCKER_CLI_VERSION}
 
 USER hived
 WORKDIR /home/hived
 
-# Configure git
-RUN git config --global --add safe.directory '*'
-
-# Install Poetry
-RUN curl -sSL https://install.python-poetry.org | python3 - && \
-    /home/hived/.local/bin/poetry self update ${POETRY_VERSION} && \
-    /home/hived/.local/bin/poetry self add "poetry-dynamic-versioning[plugin]@>=1.0.0,<2.2.0"
+# Install faketime and websocat, configure git safe.directory and install Poetry.
+# The directory --user builds in is removed: images built on top of this one
+# (e.g. HAF's ci-base-image) run --user again, which clones faketime into it.
+RUN /usr/local/src/scripts/setup_ubuntu.sh --user && rm -rf /home/hived/hive_base_config
 
 # Compile Python bytecode for faster startup
 RUN python3 -c "import sysconfig, compileall; compileall.compile_dir(sysconfig.get_path('stdlib'))"
