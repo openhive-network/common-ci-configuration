@@ -118,13 +118,13 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 
 ### haf-app-test-runner
 
-**Base:** ci-base-image-ubuntu (Ubuntu 26.04, Python 3.14)
+**Base:** ci-base-image-ubuntu `ubuntu26.04-pg18-3` (Ubuntu 26.04, Python 3.14)
 
 Shared test runner for HAF applications. Adds JMeter + m2u (copied from
 benchmark-test-runner), openjdk 21, PostgreSQL client, docker-compose-v2 and
 psycopg2.
 
-**Current version:** `3.0`
+**Current version:** `3.2`
 
 **Used by:** balance_tracker, reputation_tracker, haf_block_explorer.
 
@@ -265,8 +265,8 @@ Image versions are defined in `docker-bake.hcl`:
 | Variable | Current Value | Description |
 |----------|---------------|-------------|
 | `CI_BASE_IMAGE_VERSION` | pypa_2_28-pg18-4 | manylinux CI base image |
-| `CI_BASE_IMAGE_UBUNTU_VERSION` | ubuntu26.04-pg18-1 | Ubuntu CI base image (HAF) |
-| `HAF_APP_TEST_RUNNER_VERSION` | 3.0 | HAF app test runner |
+| `CI_BASE_IMAGE_UBUNTU_VERSION` | ubuntu26.04-pg18-3 | Ubuntu CI base image (HAF) |
+| `HAF_APP_TEST_RUNNER_VERSION` | 3.2 | HAF app test runner |
 | `PYTHON_RUNTIME_VERSION` | 3.14-u26.04-1 | python_runtime / python_development |
 | `PYTHON_VERSION` | 3.14.2-1 | python image (deprecated) |
 | `EMSCRIPTEN_VERSION` | 5.0.2 | Emscripten SDK version |
