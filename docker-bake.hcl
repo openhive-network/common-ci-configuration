@@ -38,7 +38,7 @@ variable "CI_BASE_IMAGE_UBUNTU_VERSION" {
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
-  default = "3.1"
+  default = "3.2"
 }
 
 variable "PAAS_PSQL_VERSION" {
