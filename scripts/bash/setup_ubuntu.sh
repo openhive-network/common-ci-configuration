@@ -8,9 +8,10 @@ SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 #
 # It is a copy of hive's scripts/setup_ubuntu.sh (hive/hive#896).
 # Dockerfile.ci-base-image-ubuntu is built by running it and only adds the
-# HAF-specific layers itself. A change here changes that image: bump
-# CI_BASE_IMAGE_UBUNTU_VERSION in docker-bake.hcl and make the same change in
-# hive's copy.
+# HAF-specific layers itself. Add packages here, not to the Dockerfile.
+# A change here changes that image: bump CI_BASE_IMAGE_UBUNTU_VERSION in
+# docker-bake.hcl, rebuild the images built on it (docs/common-ci-images.md,
+# "Updating a base image") and make the same change in hive's copy.
 
 
 print_help () {
