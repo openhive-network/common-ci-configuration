@@ -29,13 +29,15 @@ variable (`select-python` wrapper).
 
 **Includes:**
 - C++ build toolchain (gcc-toolset, cmake 3.28.6, ninja, sccache, clang 21)
-- Boost (built from source, static, -fPIC), OpenSSL, snappy, zopfli
+- Boost 1.90.0 (built from source, static, -fPIC), OpenSSL, snappy, zopfli
 - Prebuilt RocksDB (commit-hash-indexed) and the aarch64 buildroot cross
-  toolchain (`/opt/hive/cross/aarch64`)
+  toolchain (`/opt/hive/cross/aarch64`), whose sysroot still carries Boost
+  1.88 until the toolchain is regenerated
 - Poetry, Docker CLI + buildx (`DOCKER_VERSION`, `DOCKER_BUILDX_PLUGIN_VERSION`), PostgreSQL 18 client libraries
 
-**Current version:** `pypa_2_28-pg18-4` (canonical tag; supersedes
-`pypa_2_28-4`, `pypa_2_28-pg18-3` and `pypa_2_28-pg18-arm-1`)
+**Current version:** `pypa_2_28-pg18-5` (Boost 1.88.0 -> 1.90.0). The
+previous `pypa_2_28-pg18-4` was the canonical tag that superseded
+`pypa_2_28-4`, `pypa_2_28-pg18-3` and `pypa_2_28-pg18-arm-1`.
 
 **Used by:** hive and wax build/test pipelines, and all Python jobs via
 `templates/python_projects.gitlab-ci.yml` (`PYTHON_IMAGE`).
@@ -273,9 +275,11 @@ Contains Python utilities for CI operations:
 
 **Base:** Alpine (ghcr.io/alphagov/paas/psql)
 
-PostgreSQL client for database operations in CI jobs.
+PostgreSQL client for database operations in CI jobs. It also ships the HAF
+application helpers from `haf-app-tools/scripts/`: `run_with_reconnect.sh`,
+`install_with_app_lock.py` and, since `14-3`, `haf_app_driver.py`.
 
-**Current version:** `14-2`
+**Current version:** `14-3`
 
 **Used by:** Jobs that need to run SQL queries or manage PostgreSQL databases.
 
@@ -345,13 +349,13 @@ Image versions are defined in `docker-bake.hcl`:
 
 | Variable | Current Value | Description |
 |----------|---------------|-------------|
-| `CI_BASE_IMAGE_VERSION` | pypa_2_28-pg18-4 | manylinux CI base image |
+| `CI_BASE_IMAGE_VERSION` | pypa_2_28-pg18-5 | manylinux CI base image |
 | `CI_BASE_IMAGE_UBUNTU_VERSION` | ubuntu26.04-pg18-3 | Ubuntu CI base image (HAF) |
 | `HAF_APP_TEST_RUNNER_VERSION` | 4.0 | HAF app test runner (also tagged `develop` and `HAF_APP_TEST_RUNNER_PINNED_TAG`) |
 | `PYTHON_RUNTIME_VERSION` | 3.14-u26.04-1 | python_runtime / python_development |
 | `PYTHON_VERSION` | 3.14.2-1 | python image (deprecated) |
 | `EMSCRIPTEN_VERSION` | 5.0.2 | Emscripten SDK version |
-| `PSQL_IMAGE_VERSION` | 14-2 | PostgreSQL client version |
+| `PSQL_IMAGE_VERSION` | 14-3 | PostgreSQL client version |
 | `POSTGREST_VERSION` | v12.0.2 | PostgREST version |
 | `ALPINE_VERSION` | 3.21.3 | Alpine base version |
 | `DOCKERFILE_IMAGE_VERSION` | 1.11 | Dockerfile frontend version |
