@@ -50,6 +50,8 @@ docker buildx bake <target>
 
 Version pinning is managed in `docker-bake.hcl` - update variables there when bumping versions.
 
+Packages of `ci-base-image-ubuntu` are defined in `scripts/bash/setup_ubuntu.sh`, not in `Dockerfile.ci-base-image-ubuntu`. After changing a base image, bump its version and rebuild the images built on it: see "Updating a base image" in `docs/common-ci-images.md`.
+
 ## Key Templates
 
 Templates are in `templates/` and are included by downstream projects:

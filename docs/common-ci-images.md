@@ -58,9 +58,12 @@ Ubuntu-built binaries).
 - libpqxx 7.10 (built from source), PostgreSQL 18 dev packages (pgdg)
 - Poetry, Docker CLI + buildx, sccache, websocat, faketime
 
-Everything except the HAF-specific layers (PostgreSQL, libpqxx, sccache) is
-installed by `scripts/bash/setup_ubuntu.sh`, a copy of hive's
-`scripts/setup_ubuntu.sh`.
+**Packages:** the build/test environment is defined only in
+`scripts/bash/setup_ubuntu.sh`, a copy of hive's `scripts/setup_ubuntu.sh`.
+Add, remove or change packages and tools there, never as separate `apt-get`
+or `RUN` steps in `Dockerfile.ci-base-image-ubuntu`, and make the same change
+in hive's copy. The Dockerfile only adds the HAF-specific layers that hive's
+build does not need: PostgreSQL from PGDG, libpqxx and sccache.
 
 **Current version:** `ubuntu26.04-pg18-3`
 
@@ -278,6 +281,26 @@ Image versions are defined in `docker-bake.hcl`:
 | `POSTGREST_VERSION` | v12.0.2 | PostgREST version |
 | `ALPINE_VERSION` | 3.21.3 | Alpine base version |
 | `DOCKERFILE_IMAGE_VERSION` | 1.11 | Dockerfile frontend version |
+
+### Updating a base image
+
+A change to `ci-base-image` or `ci-base-image-ubuntu` needs a new version in
+`docker-bake.hcl` (never new content under an existing tag), and every image
+built on it has to be rebuilt:
+
+- **In this repo:** a dependent image's build job runs only when its own
+  Dockerfile changes, so in the same MR move its base tag and bump its version.
+  `haf-app-test-runner` is built on `ci-base-image-ubuntu`
+  (`ARG CI_BASE_IMAGE_VERSION` in `Dockerfile.haf-app-test-runner`,
+  `HAF_APP_TEST_RUNNER_VERSION`).
+- **In other repos:** they pin the tag and pick up a new version only when
+  they bump it.
+  - `ci-base-image-ubuntu`: HAF's `ci-base-image` stage (built `FROM` it),
+    HAfAH (`BUILDER_IMAGE_TAG`) and hive's fc canary job.
+  - `ci-base-image`: `PYTHON_IMAGE_TAG` in
+    `templates/python_projects.gitlab-ci.yml`, hive (`CI_BASE_IMAGE_TAG` in
+    `scripts/ci-helpers/ci_image_tag_vars.yml`) and wax, whose own
+    ci-base-image is built on it (`COMMON_CI_BASE_IMAGE_TAG`).
 
 ## Building Images Locally
 

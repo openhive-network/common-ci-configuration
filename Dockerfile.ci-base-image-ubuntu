@@ -11,7 +11,8 @@
 # The build/test environment (packages, the hived account, Docker CLI,
 # websocat, faketime, Poetry) is installed by scripts/bash/setup_ubuntu.sh, a
 # copy of hive's scripts/setup_ubuntu.sh. Only the HAF-specific layers
-# (PostgreSQL, libpqxx, sccache) are written out here.
+# (PostgreSQL, libpqxx, sccache) are written out here; add other packages to
+# the script, not as RUN steps in this file.
 #
 # Build:
 #   docker build -f Dockerfile.ci-base-image-ubuntu -t ci-base-image-ubuntu:ubuntu26.04-pg18-3 .
