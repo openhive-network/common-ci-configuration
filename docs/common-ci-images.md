@@ -64,7 +64,9 @@ builder images) and hive's fc canary job.
 ### docker-builder
 
 **Base:** python-test-tools (Ubuntu 26.04, Python 3.14), plus the static docker
-CLI, buildx and compose of docker:26.1.4-cli and its entrypoint
+CLI, buildx and compose of docker:<DOCKER_VERSION>-cli (`DOCKER_VERSION`,
+`DOCKER_COMPOSE_PLUGIN_VERSION`, `DOCKER_BUILDX_PLUGIN_VERSION` in
+docker-bake.hcl) and its entrypoint
 
 CI image for building Docker images using BuildKit and for jobs that drive a
 DinD service (HAF-app e2e/tavern tests). Runs as non-root user `hived`
@@ -96,7 +98,8 @@ build_image:
 
 ### docker-dind
 
-**Base:** Alpine (docker:26.1.4-dind)
+**Base:** Alpine (docker:<DOCKER_VERSION>-dind, `DOCKER_VERSION` from docker-bake.hcl -
+the same version as the CLI in docker-builder and haf-app-test-runner)
 
 Docker-in-Docker service image. Used as a sidecar service for jobs that need to build/run Docker containers.
 
@@ -172,7 +175,7 @@ the docker-bake.hcl versions
 Shared test runner for HAF applications' sync and tavern jobs. Adds JMeter + m2u
 (copied from benchmark-test-runner), openjdk 21 (with the `JAVA_TOOL_OPTIONS`
 m2u needs), the static Docker CLI with the compose and buildx plugins (from the
-official `docker:26.1.4-cli` image, like docker-builder) and psycopg2 in the
+official `docker:<DOCKER_VERSION>-cli` image, like docker-builder) and psycopg2 in the
 tools venv. `hived` (UID 1000) owns the venv, so jobs can `pip install` their
 own test packages next to the tools.
 
