@@ -36,11 +36,15 @@ TOOL_VARIABLES = (
     "PLAYWRIGHT_VERSION",
     "TYPESCRIPT_VERSION",
     "DOCKER_VERSION",
-    "DOCKER_COMPOSE_VERSION",
-    "DOCKER_BUILDX_VERSION",
+    "DOCKER_COMPOSE_PLUGIN_VERSION",
+    "DOCKER_BUILDX_PLUGIN_VERSION",
 )
 # Versions no file but docker-bake.hcl (and the CI variable below) may spell out
-REPO_WIDE_VARIABLES = ("DOCKER_VERSION", "DOCKER_COMPOSE_VERSION", "DOCKER_BUILDX_VERSION")
+REPO_WIDE_VARIABLES = (
+    "DOCKER_VERSION",
+    "DOCKER_COMPOSE_PLUGIN_VERSION",
+    "DOCKER_BUILDX_PLUGIN_VERSION",
+)
 # .gitlab-ci.yml image and service tags cannot read bake variables; it pins these
 # through a CI variable of the same name that must hold the same value
 CI_PINNED_VARIABLES = ("DOCKER_VERSION",)

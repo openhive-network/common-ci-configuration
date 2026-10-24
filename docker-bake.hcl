@@ -128,11 +128,13 @@ variable "DOCKER_VERSION" {
   default = "29.9.2"
 }
 # The compose and buildx plugins docker:<DOCKER_VERSION>-cli ships; the builds
-# fail when the copied plugins report other versions
-variable "DOCKER_COMPOSE_VERSION" {
+# fail when the copied plugins report other versions. Not named like the
+# DOCKER_COMPOSE_VERSION / DOCKER_BUILDX_VERSION env of the docker:*-cli job
+# image, which bake would read in place of these defaults.
+variable "DOCKER_COMPOSE_PLUGIN_VERSION" {
   default = "v5.6.1"
 }
-variable "DOCKER_BUILDX_VERSION" {
+variable "DOCKER_BUILDX_PLUGIN_VERSION" {
   default = "v0.38.1"
 }
 # Image version tags, bumped when an image changes in a way consumers should be
@@ -213,8 +215,8 @@ target "docker-builder" {
   args = {
     PYTHON_TEST_TOOLS_TAG = TEST_TOOLS_MOVING_TAG,
     DOCKER_VERSION = DOCKER_VERSION,
-    DOCKER_COMPOSE_VERSION = DOCKER_COMPOSE_VERSION,
-    DOCKER_BUILDX_VERSION = DOCKER_BUILDX_VERSION,
+    DOCKER_COMPOSE_PLUGIN_VERSION = DOCKER_COMPOSE_PLUGIN_VERSION,
+    DOCKER_BUILDX_PLUGIN_VERSION = DOCKER_BUILDX_PLUGIN_VERSION,
   }
   contexts = {
     "registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${TEST_TOOLS_MOVING_TAG}" = "target:python-test-tools"
@@ -347,8 +349,8 @@ target "haf-app-test-runner" {
   args = {
     PYTHON_TEST_TOOLS_TAG = TEST_TOOLS_MOVING_TAG,
     DOCKER_VERSION = DOCKER_VERSION,
-    DOCKER_COMPOSE_VERSION = DOCKER_COMPOSE_VERSION,
-    DOCKER_BUILDX_VERSION = DOCKER_BUILDX_VERSION,
+    DOCKER_COMPOSE_PLUGIN_VERSION = DOCKER_COMPOSE_PLUGIN_VERSION,
+    DOCKER_BUILDX_PLUGIN_VERSION = DOCKER_BUILDX_PLUGIN_VERSION,
   }
   contexts = {
     "registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${TEST_TOOLS_MOVING_TAG}" = "target:python-test-tools"

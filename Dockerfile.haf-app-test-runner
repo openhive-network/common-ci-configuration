@@ -13,8 +13,8 @@ FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-${DO
 
 FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${PYTHON_TEST_TOOLS_TAG}
 ARG DOCKER_VERSION
-ARG DOCKER_COMPOSE_VERSION
-ARG DOCKER_BUILDX_VERSION
+ARG DOCKER_COMPOSE_PLUGIN_VERSION
+ARG DOCKER_BUILDX_PLUGIN_VERSION
 
 # Static docker CLI, buildx and compose (Ubuntu's docker-compose-v2 and
 # docker-buildx pull in the whole docker.io package)
@@ -50,8 +50,8 @@ RUN <<EOF
   docker compose version
   docker buildx version
   test "$(docker --version | cut -d' ' -f3)" = "${DOCKER_VERSION},"
-  test "$(docker compose version --short)" = "${DOCKER_COMPOSE_VERSION#v}"
-  test "$(docker buildx version | cut -d' ' -f2)" = "${DOCKER_BUILDX_VERSION}"
+  test "$(docker compose version --short)" = "${DOCKER_COMPOSE_PLUGIN_VERSION#v}"
+  test "$(docker buildx version | cut -d' ' -f2)" = "${DOCKER_BUILDX_PLUGIN_VERSION}"
 EOF
 
 # hived (UID 1000) comes from python-test-tools and owns the tools venv;

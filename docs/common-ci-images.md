@@ -65,8 +65,8 @@ builder images) and hive's fc canary job.
 
 **Base:** python-test-tools (Ubuntu 26.04, Python 3.14), plus the static docker
 CLI, buildx and compose of docker:<DOCKER_VERSION>-cli (`DOCKER_VERSION`,
-`DOCKER_COMPOSE_VERSION`, `DOCKER_BUILDX_VERSION` in docker-bake.hcl) and its
-entrypoint
+`DOCKER_COMPOSE_PLUGIN_VERSION`, `DOCKER_BUILDX_PLUGIN_VERSION` in
+docker-bake.hcl) and its entrypoint
 
 CI image for building Docker images using BuildKit and for jobs that drive a
 DinD service (HAF-app e2e/tavern tests). Runs as non-root user `hived`

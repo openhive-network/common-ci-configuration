@@ -9,8 +9,8 @@ FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-${DO
 
 FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${PYTHON_TEST_TOOLS_TAG} AS docker-builder
 ARG DOCKER_VERSION
-ARG DOCKER_COMPOSE_VERSION
-ARG DOCKER_BUILDX_VERSION
+ARG DOCKER_COMPOSE_PLUGIN_VERSION
+ARG DOCKER_BUILDX_PLUGIN_VERSION
 
 # Disable buildx attestations (provenance/SBOM) to avoid panic in buildkit
 # when parsing empty digests. Can be removed when buildkit bug is fixed.
@@ -51,8 +51,8 @@ RUN <<EOF
     docker compose version
     docker buildx version
     test "$(docker --version | cut -d' ' -f3)" = "${DOCKER_VERSION},"
-    test "$(docker compose version --short)" = "${DOCKER_COMPOSE_VERSION#v}"
-    test "$(docker buildx version | cut -d' ' -f2)" = "${DOCKER_BUILDX_VERSION}"
+    test "$(docker compose version --short)" = "${DOCKER_COMPOSE_PLUGIN_VERSION#v}"
+    test "$(docker buildx version | cut -d' ' -f2)" = "${DOCKER_BUILDX_PLUGIN_VERSION}"
 EOF
 
 # hived (UID 1000, owner of the tools venv) comes from python-test-tools
