@@ -10,7 +10,7 @@ import re
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Self, Union
 
 import pytest
 import yaml
@@ -197,16 +197,16 @@ def test_a_recorded_exception_is_not_drift() -> None:
 
 
 class _Response:
-    def __init__(self, body: bytes) -> None:
+    def __init__(self: Self, body: bytes) -> None:
         self._body = body
 
-    def __enter__(self) -> "_Response":
+    def __enter__(self: Self) -> "_Response":
         return self
 
-    def __exit__(self, *_: Any) -> None:
+    def __exit__(self: Self, *_: Any) -> None:
         pass
 
-    def read(self) -> bytes:
+    def read(self: Self) -> bytes:
         return self._body
 
 
