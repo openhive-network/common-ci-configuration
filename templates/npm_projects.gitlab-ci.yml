@@ -163,7 +163,8 @@ variables:
     - tar -xf "${PACKAGE_TGZ_PATH}" -C "${SOURCE_DIR}" --strip-components=1
     - echo -e "\e[0Ksection_end:$(date +%s):package_tgz_unpack\r\e[0K"
 
-# Runs in node-test-tools (node, pnpm, TypeScript, Playwright with Chromium).
+# Runs in node-test-tools (node, pnpm, TypeScript, Playwright with the Chromium
+# headless shell).
 # Tests that need the emsdk toolchain or its preinstalled browser extensions set
 # `image: ${EMSCRIPTEN_IMAGE}`.
 .npm_test_template:

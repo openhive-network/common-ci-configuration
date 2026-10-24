@@ -51,6 +51,16 @@ RUN curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SHELL
     curl -fsSL "https://github.com/PostgREST/postgrest/releases/download/${POSTGREST_VERSION}/postgrest-${POSTGREST_VERSION}-linux-static-x64.tar.xz" \
         | tar xJ -C /usr/local/bin postgrest
 
+# hived at UID 1000 (HAF container convention): without an explicit -u 1000,
+# useradd picks the next free UID (e.g. 2001) and tar-extracted files get the
+# wrong ownership inside HAF containers. hived owns the tools venv so jobs can
+# `pip install` their own test packages next to the tools.
+RUN (userdel --remove ubuntu 2>/dev/null || true) && \
+    useradd -ms /bin/bash -u 1000 -g users hived && \
+    echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# The venv is chowned in the layer that fills it: a chown in a later layer
+# would copy the whole venv into that layer
 RUN pip install --no-cache-dir \
         "pytest==${PYTEST_VERSION}" \
         "pytest-xdist==${PYTEST_XDIST_VERSION}" \
@@ -65,7 +75,8 @@ RUN pip install --no-cache-dir \
         "yamllint==${YAMLLINT_VERSION}" \
         "sqlfluff==${SQLFLUFF_VERSION}" \
         "tox==${TOX_VERSION}" && \
-    python3 -c "import sysconfig, compileall; compileall.compile_dir(sysconfig.get_path('purelib'), quiet=1)"
+    python3 -c "import sysconfig, compileall; compileall.compile_dir(sysconfig.get_path('purelib'), quiet=1)" && \
+    chown -R hived:users "${VIRTUAL_ENV}"
 
 # poetry (from python_development's own venv) for jobs that install a project's
 # dependencies next to the tools, e.g. mypy needing the project's packages
