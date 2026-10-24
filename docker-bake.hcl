@@ -88,7 +88,7 @@ variable "MYPY_VERSION" {
   default = "2.4.0"
 }
 variable "PYLINT_VERSION" {
-  default = "4.1.2"
+  default = "4.1.3"
 }
 variable "YAMLLINT_VERSION" {
   default = "1.38.0"
@@ -110,14 +110,14 @@ variable "NODE_VERSION" {
   default = "v24.21.0"
 }
 variable "PNPM_VERSION" {
-  default = "10.0.0"
+  default = "10.33.0"
 }
 # >= 1.61: the first release that supports Ubuntu 26.04
 variable "PLAYWRIGHT_VERSION" {
   default = "1.64.1"
 }
 variable "TYPESCRIPT_VERSION" {
-  default = "5.9.3"
+  default = "7.0.2"
 }
 # Image version tags, bumped when an image changes in a way consumers should be
 # able to pin; most consumers follow TEST_TOOLS_MOVING_TAG instead

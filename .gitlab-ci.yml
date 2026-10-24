@@ -242,6 +242,23 @@ lint_python_scripts:
           - .pylintrc
         compare_to: 'refs/heads/develop'
 
+# tests/ on every branch pipeline, not only when a file here changes: it includes
+# the drift check against aidev's public toolchain.yaml, which moves on aidev's side
+# (AIDEV_TOOLCHAIN_URL overrides where that copy is read from, anonymously).
+test_repository:
+  extends: .lint_in_python_test_tools
+  script:
+    - python3 -m pytest -p no:cacheprovider -rs --junitxml=tests-junit-result.xml tests/
+  artifacts:
+    paths:
+     - tests-junit-result.xml
+    reports:
+      junit: tests-junit-result.xml
+  rules:
+    - *skip_on_renovate_rule
+    - !reference [.python_test_tools_from_this_pipeline, rules]
+    - if: $CI_COMMIT_BRANCH
+
 # =============================================================================
 # Skip Rules for Script/Doc-Only Changes
 # =============================================================================
