@@ -115,12 +115,16 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 
 **Includes:**
 - Emscripten SDK (version configured in docker-bake.hcl)
-- Node.js, pnpm, Playwright and TypeScript at the docker-bake.hcl tool versions
+- Node.js, pnpm and Playwright at the docker-bake.hcl tool versions; the only
+  global pnpm packages are `playwright` and `@playwright/test`. TypeScript,
+  rollup, typedoc and the like come from each project's own `package.json` and
+  lockfile (`pnpm exec` / `pnpm run`), not from the image
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf
 
-**Current version:** `5.0.2-5` (`5.0.2-4`: Node 24, Playwright 1.59; `5.0.2-3`
-has Node 22)
+**Current version:** `5.0.2-6` (`5.0.2-5` and older also install TypeScript,
+rollup, typedoc and protobuf tooling globally; `5.0.2-4`: Node 24, Playwright
+1.59; `5.0.2-3` has Node 22)
 
 **Ubuntu release:** the image's Ubuntu (24.04 for emsdk 5.0.2) is chosen by the
 upstream emscripten/emsdk image. The twiggy/bloaty builder stage builds on that
