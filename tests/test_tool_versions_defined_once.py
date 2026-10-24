@@ -5,6 +5,7 @@ test and lint jobs in the tools images instead of pinning or installing tools.
 """
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -98,19 +99,19 @@ def _templates() -> List[Path]:
 
 
 def _repo_files() -> List[Path]:
-    """Text files of the checkout outside hidden directories, plus .gitlab-ci.yml.
+    """Tracked text files of the checkout (not build or test output).
 
     This file is left out: its examples spell versions out.
     """
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True
+    ).stdout.decode()
     files = [
-        path
-        for path in ROOT.rglob("*")
-        if path.is_file()
-        and path != Path(__file__).resolve()
-        and not any(part.startswith(".") for part in path.relative_to(ROOT).parts)
+        ROOT / name
+        for name in listed.split("\0")
+        if name and (ROOT / name).is_file() and ROOT / name != Path(__file__).resolve()
     ]
-    texts = [path for path in files if b"\0" not in path.read_bytes()]
-    return sorted([*texts, GITLAB_CI])
+    return sorted(path for path in files if b"\0" not in path.read_bytes())
 
 
 def _load_template(path: Path) -> Dict[str, Any]:
