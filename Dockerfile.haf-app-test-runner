@@ -49,7 +49,7 @@ RUN <<EOF
   docker --version
   docker compose version
   docker buildx version
-  docker --version | grep -qF "Docker version ${DOCKER_VERSION},"
+  test "$(docker --version | cut -d' ' -f3)" = "${DOCKER_VERSION},"
   test "$(docker compose version --short)" = "${DOCKER_COMPOSE_VERSION#v}"
   test "$(docker buildx version | cut -d' ' -f2)" = "${DOCKER_BUILDX_VERSION}"
 EOF
