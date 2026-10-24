@@ -119,6 +119,12 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
   global pnpm packages are `playwright` and `@playwright/test`. TypeScript,
   rollup, typedoc and the like come from each project's own `package.json` and
   lockfile (`pnpm exec` / `pnpm run`), not from the image
+- Playwright's browsers belong to one Playwright version, so the
+  `playwright-toolset` catalog in `pnpm-config/pnpm-workspace.yaml` (which
+  consumers install their tests from) must equal `PLAYWRIGHT_VERSION`; a bump
+  changes both, enforced by `tests/test_tool_versions_defined_once.py`.
+  Consumers pick up the catalog by bumping their `npm-common-config`
+  submodule; one still on an older catalog cannot launch the image's browsers
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf
 
