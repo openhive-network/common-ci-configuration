@@ -1,10 +1,28 @@
 # syntax=docker/dockerfile:1.4
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-26.1.4-cli AS docker-builder
+# Docker CLI image for jobs that drive a DinD service. Built on python-test-tools
+# (Ubuntu 26.04, Python 3.14, every test/lint tool at the docker-bake.hcl
+# versions), so HAF-app e2e jobs that need Docker run the same tools as the
+# rest of CI. docker-bake.hcl builds the base from this checkout.
+ARG PYTHON_TEST_TOOLS_TAG
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-26.1.4-cli AS docker-cli
+
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${PYTHON_TEST_TOOLS_TAG} AS docker-builder
 
 # Disable buildx attestations (provenance/SBOM) to avoid panic in buildkit
 # when parsing empty digests. Can be removed when buildkit bug is fixed.
 # See: https://github.com/moby/buildkit/issues/4778
 ENV BUILDX_NO_DEFAULT_ATTESTATIONS=1
+# Read by docker-entrypoint.sh, which points DOCKER_HOST at the `docker` DinD
+# service (with TLS when its client certs are mounted)
+ENV DOCKER_TLS_CERTDIR=/certs
+
+# xstream (used by JMeter's m2u converter) needs reflective access to JDK
+# internals, which Java >= 16 denies by default
+ENV JAVA_TOOL_OPTIONS="--add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.text=ALL-UNNAMED --add-opens=java.desktop/java.awt.font=ALL-UNNAMED"
+
+# Static docker CLI, buildx and compose plus the entrypoint of the official image
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker-entrypoint.sh /usr/local/bin/
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins /usr/local/libexec/docker/cli-plugins
 
 # Copy JMeter and m2u from benchmark-test-runner (pre-built)
 COPY --from=registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:latest \
@@ -12,29 +30,31 @@ COPY --from=registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-te
 COPY --from=registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:latest \
     /opt/tools/m2u /opt/tools/m2u
 
-# Install system dependencies:
-# - util-linux: proper flock support for NFS (BusyBox flock fails on NFS)
-# - Python 3.12 + pip: for HAF app tests (tavern, tox) - uses Alpine 3.20 repos
-# - gcompat + libstdc++: glibc compatibility for pre-built Python wheels
-# - openjdk11-jre: Java runtime for JMeter
-# - postgresql-client: for database operations in tests
+# util-linux (flock on NFS) is part of the Ubuntu base; the JRE runs JMeter
 RUN <<EOF
     set -e
-    echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" >> /etc/apk/repositories
-    echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> /etc/apk/repositories
-    apk add --no-cache \
-        bash git coreutils ca-certificates curl sudo util-linux \
-        python3~3.12 py3-pip gcompat libstdc++ \
-        openjdk11-jre postgresql-client
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        openjdk-21-jre-headless sudo
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
 
-    # Create symlinks for JMeter and m2u
+    ln -s /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
     ln -s /opt/tools/jmeter/bin/jmeter.sh /usr/bin/jmeter
     ln -s /opt/tools/m2u/m2u /usr/bin/m2u
 EOF
+
+# hived at UID 1000 (HAF container convention); owns the tools venv so jobs can
+# `pip install` their own test packages next to the tools
 RUN <<EOF
     set -e
-    adduser -D hived
+    userdel --remove ubuntu 2>/dev/null || true
+    useradd -ms /bin/bash -u 1000 -g users hived
     echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    chown -R hived:users "${VIRTUAL_ENV}"
 EOF
 USER hived
 WORKDIR /home/hived
+
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["/bin/bash"]

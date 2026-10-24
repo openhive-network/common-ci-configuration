@@ -2,7 +2,7 @@ include:
   - local: templates/base.gitlab-ci.yml
 
 variables:
-  # uses registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:5.0.2-4 (Node 24.21.0)
+  # emsdk's node, pnpm, Playwright and TypeScript versions come from docker-bake.hcl
   EMSCRIPTEN_IMAGE_TAG: "5.0.2-4@sha256:966dd9e9da494d184fcc7f622bb24d93c41b8d58c814156aa79cd1d70f31d9ab"
   EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG"
 
@@ -19,8 +19,9 @@ variables:
 
   before_script:
     - git config --global --add safe.directory '*'
-    - . "${NVM_DIR}/nvm.sh"  # This loads nvm environment
-    - nvm use "${NODEJS_VERSION}"  # Force usage of preconfigured NodeJS version
+    # emsdk: load nvm and force the preconfigured NodeJS version; node-test-tools
+    # has no nvm, its node is on PATH
+    - if [ -s "${NVM_DIR:-}/nvm.sh" ]; then . "${NVM_DIR}/nvm.sh" && nvm use "${NODEJS_VERSION}"; fi
     - cd "${SOURCE_DIR}"  # move to the project directory (where package.json file is located)
 
 .npm_based_job_base:
@@ -162,8 +163,12 @@ variables:
     - tar -xf "${PACKAGE_TGZ_PATH}" -C "${SOURCE_DIR}" --strip-components=1
     - echo -e "\e[0Ksection_end:$(date +%s):package_tgz_unpack\r\e[0K"
 
+# Runs in node-test-tools (node, pnpm, TypeScript, Playwright with Chromium).
+# Tests that need the emsdk toolchain or its preinstalled browser extensions set
+# `image: ${EMSCRIPTEN_IMAGE}`.
 .npm_test_template:
   extends: .npm_process_built_package_tarball
+  image: "${NODE_TEST_TOOLS_IMAGE}"
   variables:
     # Path pointing the source directory containing a package.json file - it can be overrided by derived job
     SOURCE_DIR: "${CI_PROJECT_DIR}"

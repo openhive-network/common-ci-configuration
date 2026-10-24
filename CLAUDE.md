@@ -45,7 +45,8 @@ docker buildx bake <target>
 
 # Available targets: benchmark-test-runner, docker-builder, docker-dind,
 # python-scripts, tox-test-runner, emsdk, psql, dockerfile, nginx,
-# postgrest, alpine, python, python_runtime, python_development
+# postgrest, alpine, python, python_runtime, python_development,
+# python-test-tools, node-test-tools
 ```
 
 Version pinning is managed in `docker-bake.hcl` - update variables there when bumping versions.
@@ -120,6 +121,7 @@ find-upstream-image.sh \
 - Python version: `docker-bake.hcl` (`PYTHON_VERSION`, `PYTHON_RUNTIME_VERSION`)
 - Emscripten version: `docker-bake.hcl` (`EMSCRIPTEN_VERSION`)
 - emsdk image tag for consumers: `templates/npm_projects.gitlab-ci.yml` (`EMSCRIPTEN_IMAGE_TAG`)
+- Test/lint tool versions (pytest, ruff, node, pnpm, ...): `docker-bake.hcl` only - passed as build args to python-test-tools, node-test-tools, docker-builder (built on python-test-tools) and emsdk; Dockerfiles have no defaults and templates never pin a tool (see README "CI/test tool versions")
 
 ## CI Builder Infrastructure
 
@@ -130,7 +132,7 @@ Jobs run on builders `hive-builder-5` through `hive-builder-11`. Key paths:
 
 ## NFS Locking Requirement
 
-Alpine-based images (`docker-builder`, `docker-dind`) must include `util-linux` for NFS flock support. BusyBox flock fails on NFS with "Bad file descriptor".
+Alpine-based images (`docker-dind`) must include `util-linux` for NFS flock support (`docker-builder` is Ubuntu-based, util-linux is in its base). BusyBox flock fails on NFS with "Bad file descriptor".
 
 ## HAF App Testing Templates
 
@@ -167,7 +169,7 @@ The `templates/haf_app_testing.gitlab-ci.yml` provides composable building block
 
 **Tavern Test Components:**
 - `.tavern_test_variables` - pytest workers, tavern version, directories
-- `.tavern_install_deps` - Install tavern in a venv
+- `.tavern_install_deps` - Check the job image provides tavern/pytest (python-test-tools or docker-builder; nothing is installed)
 - `.tavern_run_tests` - Run pytest with tavern
 - `.tavern_test_artifacts` - Artifacts for tavern tests
 

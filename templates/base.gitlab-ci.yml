@@ -1,3 +1,12 @@
+variables:
+  # Test/lint tools images. Tool versions are defined once, in this project's
+  # docker-bake.hcl; `develop` is the moving tag the default branch republishes.
+  # Override a tag only for a deliberate exception.
+  PYTHON_TEST_TOOLS_TAG: "develop"
+  PYTHON_TEST_TOOLS_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${PYTHON_TEST_TOOLS_TAG}"
+  NODE_TEST_TOOLS_TAG: "develop"
+  NODE_TEST_TOOLS_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/node-test-tools:${NODE_TEST_TOOLS_TAG}"
+
 default:
   interruptible: true
   timeout: 1 hour

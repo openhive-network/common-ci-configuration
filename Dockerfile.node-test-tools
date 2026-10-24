@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1.5
+# Node test tools for hive repos: Ubuntu 26.04 with node, pnpm, TypeScript and
+# Playwright (Chromium and its headless shell, with their system dependencies).
+#
+# Every version is a build arg without a default: docker-bake.hcl is the only
+# place they are defined. Build with `docker buildx bake node-test-tools`.
+FROM ubuntu:26.04 AS node-test-tools
+
+ARG NODE_VERSION
+ARG PNPM_VERSION
+ARG PLAYWRIGHT_VERSION
+ARG TYPESCRIPT_VERSION
+
+ENV LANG=C.UTF-8
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates curl git jq xz-utils && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz" \
+        | tar xJ -C /usr/local --strip-components=1 --exclude='*.md' --exclude=LICENSE && \
+    npm install -g \
+        "pnpm@${PNPM_VERSION}" \
+        "typescript@${TYPESCRIPT_VERSION}" \
+        "playwright@${PLAYWRIGHT_VERSION}" \
+        "@playwright/test@${PLAYWRIGHT_VERSION}" && \
+    npm cache clean --force
+
+RUN apt-get update && \
+    playwright install --with-deps chromium chromium-headless-shell && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}"
+
+RUN git config --system --add safe.directory '*'
+
+CMD ["/bin/bash"]

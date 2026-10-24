@@ -1,6 +1,9 @@
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/python-3.12.2 AS python-scripts
+ARG PYTHON_RUNTIME_VERSION
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python_runtime:${PYTHON_RUNTIME_VERSION} AS python-scripts
 
 COPY scripts/python/*.py /
 COPY scripts/python/requirements.txt /
 RUN pip install -r requirements.txt
+# The chiseled base enters through pebble; CI runs the job shell directly
+ENTRYPOINT []
 CMD [ "bash" ]
