@@ -7,7 +7,7 @@ test and lint jobs in the tools images instead of pinning or installing tools.
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import pytest
 import yaml
@@ -15,6 +15,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 BAKE = ROOT / "docker-bake.hcl"
 GITLAB_CI = ROOT / ".gitlab-ci.yml"
+PNPM_CATALOG = ROOT / "pnpm-config" / "pnpm-workspace.yaml"
 TOOL_VARIABLES = (
     "PYTEST_VERSION",
     "PYTEST_XDIST_VERSION",
@@ -52,6 +53,22 @@ CI_PINNED_VARIABLES = ("DOCKER_VERSION",)
 # A docker:<tag>-cli / -dind image or its mirrors/docker-<tag>-cli / -dind copy
 DOCKER_IMAGE_TAG = re.compile(r"\bdocker[:-]([^\s\"'/]+?)-(?:cli|dind)\b")
 DOCKER_TAG_PLACEHOLDERS = ("${DOCKER_VERSION}", "<DOCKER_VERSION>")
+# pnpm catalog (catalog, package) -> docker-bake.hcl variable it must equal:
+# consumers install these from the catalog and run them against the images'
+# copies (Playwright's browsers are per-version)
+CATALOG_PACKAGES = {
+    ("playwright-toolset", "playwright"): "PLAYWRIGHT_VERSION",
+    ("playwright-toolset", "@playwright/test"): "PLAYWRIGHT_VERSION",
+    ("typescript-toolset", "typescript"): "TYPESCRIPT_VERSION",
+}
+# Catalog packages deliberately kept at another version than docker-bake.hcl,
+# each with the reason
+CATALOG_EXCEPTIONS = {
+    ("typescript-toolset", "typescript"): (
+        "consumers' typedoc (0.27/0.28 supports TypeScript up to 6.0) and rollup"
+        " TypeScript plugins need the compiler JS API, which TypeScript 7 does not ship"
+    ),
+}
 TOOL_PACKAGES = (
     "pytest",
     "pytest-xdist",
@@ -88,6 +105,26 @@ def _version_uses(value: str, text: str) -> List[str]:
     bare = re.escape(value.lstrip("v"))
     pattern = re.compile(rf"(?<![\w.])v?{bare}(?![\w.])")
     return [line for line in text.splitlines() if pattern.search(line)]
+
+
+def _catalog_drift(
+    catalogs: Dict[str, Any], bake: Dict[str, str], exceptions: Dict[Tuple[str, str], str]
+) -> List[str]:
+    """`<catalog> <package>: pnpm catalog <version>, docker-bake.hcl <variable>=<version>`
+    per compared package whose versions differ and is not an exception."""
+    drift = []
+    for (catalog, package), variable in CATALOG_PACKAGES.items():
+        version = str((catalogs.get(catalog) or {}).get(package))
+        if (catalog, package) not in exceptions and version != bake[variable]:
+            drift.append(
+                f"{catalog} {package}: pnpm catalog {version},"
+                f" docker-bake.hcl {variable}={bake[variable]}"
+            )
+    return drift
+
+
+def _catalogs() -> Dict[str, Any]:
+    return yaml.safe_load(PNPM_CATALOG.read_text())["catalogs"]
 
 
 def _dockerfiles() -> List[Path]:
@@ -406,3 +443,69 @@ def test_version_uses_matches_whole_versions_only(line: str, value: str, expecte
 )
 def test_tool_install_matches_continued_pip_install(command: str, expected: bool) -> None:
     assert bool(_TOOL_INSTALL.search(command)) is expected
+
+
+def test_pnpm_catalog_matches_bake_versions() -> None:
+    drift = _catalog_drift(_catalogs(), _bake_defaults(), CATALOG_EXCEPTIONS)
+
+    assert not drift, "pnpm catalog differs from docker-bake.hcl:\n" + "\n".join(drift)
+
+
+def test_catalog_exceptions_name_compared_packages_with_a_reason() -> None:
+    assert {
+        key for key, reason in CATALOG_EXCEPTIONS.items() if key in CATALOG_PACKAGES and reason.strip()
+    } == set(CATALOG_EXCEPTIONS)
+
+
+def test_catalog_exceptions_are_still_differences() -> None:
+    drift = _catalog_drift(_catalogs(), _bake_defaults(), {})
+
+    assert [
+        key for key in CATALOG_EXCEPTIONS if not any(d.startswith(f"{key[0]} {key[1]}:") for d in drift)
+    ] == []
+
+
+_FIXTURE_CATALOGS = {
+    "playwright-toolset": {"@playwright/test": "1.64.1", "playwright": "1.64.1"},
+    "typescript-toolset": {"typescript": "7.0.2"},
+}
+_FIXTURE_BAKE = {"PLAYWRIGHT_VERSION": "1.64.1", "TYPESCRIPT_VERSION": "7.0.2"}
+
+
+def test_matching_catalog_has_no_drift() -> None:
+    assert not _catalog_drift(_FIXTURE_CATALOGS, _FIXTURE_BAKE, {})
+
+
+@pytest.mark.parametrize(
+    "catalogs,bake,expected",
+    [
+        (
+            {**_FIXTURE_CATALOGS, "playwright-toolset": {"@playwright/test": "1.64.1", "playwright": "1.59.1"}},
+            _FIXTURE_BAKE,
+            ["playwright-toolset playwright: pnpm catalog 1.59.1, docker-bake.hcl PLAYWRIGHT_VERSION=1.64.1"],
+        ),
+        (
+            _FIXTURE_CATALOGS,
+            {**_FIXTURE_BAKE, "PLAYWRIGHT_VERSION": "1.65.0"},
+            [
+                "playwright-toolset playwright: pnpm catalog 1.64.1, docker-bake.hcl PLAYWRIGHT_VERSION=1.65.0",
+                "playwright-toolset @playwright/test: pnpm catalog 1.64.1,"
+                " docker-bake.hcl PLAYWRIGHT_VERSION=1.65.0",
+            ],
+        ),
+    ],
+)
+def test_catalog_or_bake_change_alone_is_reported_with_both_versions(
+    catalogs: Dict[str, Any], bake: Dict[str, str], expected: List[str]
+) -> None:
+    assert _catalog_drift(catalogs, bake, {}) == expected
+
+
+def test_a_recorded_catalog_exception_is_not_drift() -> None:
+    catalogs = {**_FIXTURE_CATALOGS, "typescript-toolset": {"typescript": "5.7.3"}}
+    key = ("typescript-toolset", "typescript")
+
+    assert _catalog_drift(catalogs, _FIXTURE_BAKE, {}) == [
+        "typescript-toolset typescript: pnpm catalog 5.7.3, docker-bake.hcl TYPESCRIPT_VERSION=7.0.2"
+    ]
+    assert not _catalog_drift(catalogs, _FIXTURE_BAKE, {key: "reason"})

@@ -29,6 +29,8 @@ The tools are published in two images:
 
 Tags: `:develop` is the moving tag the default branch republishes; `:<PYTHON|NODE>_TEST_TOOLS_IMAGE_VERSION` is also published from the default branch, and `:<commit-sha>` from every build. `docker-builder` is built on `python-test-tools`, so jobs that drive a DinD service get the same tools; `emsdk` gets node, pnpm and Playwright from the same variables (TypeScript and other build tools come from each project's own lockfile).
 
+**The pnpm catalog.** Consumers install Playwright and TypeScript from the catalogs in [pnpm-config/pnpm-workspace.yaml](pnpm-config/pnpm-workspace.yaml). `playwright-toolset`'s `playwright` and `@playwright/test` must equal `PLAYWRIGHT_VERSION` (the images ship only that version's browsers), so a Playwright bump changes both; `tests/test_tool_versions_defined_once.py` fails naming both values otherwise. `typescript-toolset` is compared with `TYPESCRIPT_VERSION` the same way, but is a recorded exception (`CATALOG_EXCEPTIONS`): it stays on TypeScript 5.x because consumers' typedoc (0.27/0.28 supports TypeScript up to 6.0) and rollup TypeScript plugins need the compiler JS API, which TypeScript 7 does not ship.
+
 **Consuming them.** The templates already run their test and lint jobs in these images (`.haf_app_lint_bash`, `.haf_app_lint_sql`, the tavern templates via docker-builder, `.lint_code_with_ruff_template`, `.type_check_with_mypy_template`, `.npm_test_template`). Other jobs use the variables from `templates/base.gitlab-ci.yml`:
 
 ```yaml
