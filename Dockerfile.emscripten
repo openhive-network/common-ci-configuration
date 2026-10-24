@@ -2,8 +2,14 @@
 ARG EMSCRIPTEN_VERSION=5.0.2
 FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/emscripten-emsdk-${EMSCRIPTEN_VERSION} AS pure_emscripten_sdk
 
-# Build stage for WASM analysis tools (twiggy and bloaty)
-FROM ubuntu:22.04 AS wasm_tools_builder
+# Build stage for WASM analysis tools (twiggy and bloaty). Built on the emsdk
+# image itself rather than a plain Ubuntu tag: the binaries run in the emsdk
+# image, whose Ubuntu release (and glibc) is chosen upstream, so a builder on a
+# newer release (26.04) would produce binaries it cannot load. bloaty links
+# its bundled capstone/re2/protobuf statically, as the emsdk image ships none.
+FROM pure_emscripten_sdk AS wasm_tools_builder
+
+USER root
 
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -11,9 +17,6 @@ RUN apt-get update && \
     git \
     cmake \
     build-essential \
-    libcapstone-dev \
-    libre2-dev \
-    libprotobuf-dev \
     && \
     apt-get clean && rm -r /var/lib/apt/lists/*
 
@@ -33,7 +36,8 @@ RUN git clone https://github.com/google/bloaty.git /tmp/bloaty && \
 
 FROM pure_emscripten_sdk AS supplemented_emscripten_sdk
 
-ARG PNPM_VERSION=10.0.0
+# Tool versions come from docker-bake.hcl (no defaults here on purpose)
+ARG PNPM_VERSION
 ENV PNPM_VERSION=${PNPM_VERSION}
 
 USER root
@@ -72,8 +76,12 @@ COPY --from=wasm_tools_builder /usr/local/bin/bloaty /usr/local/bin/
 
 FROM supplemented_emscripten_sdk AS supplemented_node_sdk
 
-ARG NODEJS_VERSION=v24.21.0
-ENV NODEJS_VERSION=${NODEJS_VERSION}
+ARG NODE_VERSION
+ARG PLAYWRIGHT_VERSION
+ARG TYPESCRIPT_VERSION
+# NODEJS_VERSION is the name consumers' jobs use (`nvm use "${NODEJS_VERSION}"`)
+ENV NODEJS_VERSION=${NODE_VERSION}
+ENV PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION}
 
 USER emscripten
 WORKDIR /home/emscripten
@@ -100,11 +108,11 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
     pnpm config set global-dir ${PNPM_HOME}/preinstalled-store-g --global && \
     pnpm env use --global "${NODEJS_VERSION}" && \
     pnpm add -g \
-      playwright@1.59.1 \
-      @playwright/test@1.59.1 \
+      playwright@${PLAYWRIGHT_VERSION} \
+      @playwright/test@${PLAYWRIGHT_VERSION} \
       ts-proto@1.172.0 \
       tslib@~2.8.1 \
-      typescript@~5.9.3 \
+      typescript@${TYPESCRIPT_VERSION} \
       rollup@4.24.0 \
       rollup/plugin-node-resolve@15.3.1 \
       rollup/plugin-commonjs@27.0.0 \
@@ -114,7 +122,7 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
       typedoc@~0.27.6 \
       typedoc-plugin-markdown@~4.4.1 \
       protobufjs@~7.2.5 && \
-    pnpm dlx playwright@1.59.1 install chromium chromium-headless-shell && \
+    pnpm dlx playwright@${PLAYWRIGHT_VERSION} install chromium chromium-headless-shell && \
     git config --global advice.detachedHead false && \
     git config --global --add safe.directory '*' && \
     chmod -c o+x "${HOME}" && \
@@ -129,7 +137,7 @@ ENV PATH="${PNPM_HOME}:${PATH}"
 
 RUN [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
   nvm use "${NODEJS_VERSION}" && \
-  pnpm dlx playwright@1.59.1 install-deps && apt-get clean && rm -r /var/lib/apt/lists/*
+  pnpm dlx playwright@${PLAYWRIGHT_VERSION} install-deps && apt-get clean && rm -r /var/lib/apt/lists/*
 
 USER emscripten
 WORKDIR /home/emscripten

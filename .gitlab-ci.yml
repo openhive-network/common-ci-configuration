@@ -4,8 +4,6 @@ variables:
   DOCKER_DIND_TAG: "$CI_COMMIT_SHA"
   IMAGE_REMOVER_TAG: "$CI_COMMIT_SHA"
   TOX_IMAGE_TAG: "$CI_COMMIT_SHA"
-  PYTHON_IMAGE_TAG: 3.14-slim
-  SHELLCHECK_ALPINE_TAG: v0.11.0
   # =============================================================================
   # Skip Docker Builds - Set to "true" to skip all Docker image builds
   # =============================================================================
@@ -117,11 +115,39 @@ default:
   tags:
     - public-runner-docker
 
-lint_bash_scripts:
+# Lint jobs run in python-test-tools. When its sources change, they wait for
+# build_python_test_tools_image and use the image it pushed for this commit, so
+# a tool bump re-lints this repository with the new versions (and the image a
+# branch introduces is usable before develop has published it). Otherwise they
+# start at once (an absent optional need) on the published moving tag. They
+# need a build-stage job, hence the test stage.
+.lint_in_python_test_tools:
   extends: .validation_job
-  image: koalaman/shellcheck-alpine:${SHELLCHECK_ALPINE_TAG}
-  before_script:
-    - apk add xmlstarlet
+  stage: test
+  image: "${PYTHON_TEST_TOOLS_IMAGE}"
+  needs:
+    - job: build_python_test_tools_image
+      optional: true
+
+.python_test_tools_from_this_pipeline:
+  rules:
+    - if: $SKIP_DOCKER_BUILDS != "true" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        paths: &python_test_tools_sources
+          - Dockerfile.python-test-tools
+          - Dockerfile.python_runtime
+          - docker-bake.hcl
+      variables:
+        PYTHON_TEST_TOOLS_IMAGE: $CI_REGISTRY_IMAGE/python-test-tools:$CI_COMMIT_SHA
+    - if: $SKIP_DOCKER_BUILDS != "true" && $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      changes:
+        paths: *python_test_tools_sources
+        compare_to: 'refs/heads/develop'
+      variables:
+        PYTHON_TEST_TOOLS_IMAGE: $CI_REGISTRY_IMAGE/python-test-tools:$CI_COMMIT_SHA
+
+lint_bash_scripts:
+  extends: .lint_in_python_test_tools
   script:
     - shellcheck -f checkstyle scripts/**/*.sh > shellcheck-checkstyle-result.xml
   after_script:
@@ -134,6 +160,7 @@ lint_bash_scripts:
       junit: shellcheck-junit-result.xml
   rules:
     - *skip_on_renovate_rule
+    - !reference [.python_test_tools_from_this_pipeline, rules]
     - if: $CI_COMMIT_REF_PROTECTED == "true"
       changes:
         paths:
@@ -147,8 +174,7 @@ lint_bash_scripts:
         compare_to: 'refs/heads/develop'
 
 lint_ci_templates:
-  extends: .validation_job
-  image: python:${PYTHON_IMAGE_TAG}
+  extends: .lint_in_python_test_tools
   before_script:
     - pip install yamllint-junit
   script:
@@ -163,6 +189,7 @@ lint_ci_templates:
       junit: yamllint-junit-result.xml
   rules:
     - *skip_on_renovate_rule
+    - !reference [.python_test_tools_from_this_pipeline, rules]
     - if: $CI_COMMIT_REF_PROTECTED == "true"
       changes:
         paths:
@@ -182,10 +209,9 @@ lint_ci_templates:
         compare_to: 'refs/heads/develop'
 
 lint_python_scripts:
-  extends: .validation_job
-  image: python:${PYTHON_IMAGE_TAG}
+  extends: .lint_in_python_test_tools
   before_script:
-    - pip install pylint==4.1.2
+    - pylint --version
   script:
     - pip install -r scripts/python/requirements.txt
     - pylint --output-format=text,json2:pylint-result.json scripts/python/*.py
@@ -199,6 +225,7 @@ lint_python_scripts:
       junit: pylint-junit-result.xml
   rules:
     - *skip_on_renovate_rule
+    - !reference [.python_test_tools_from_this_pipeline, rules]
     - if: $CI_COMMIT_REF_PROTECTED == "true"
       changes:
         paths:
@@ -329,6 +356,10 @@ build_docker_builder_image:
   needs:
     - job: build_docker_dind_image
       optional: true
+    # bake rebuilds python-test-tools as docker-builder's base; after this job it
+    # comes from the registry cache
+    - job: build_python_test_tools_image
+      optional: true
   rules:
     - *skip_on_renovate_rule
     - if: $SKIP_DOCKER_BUILDS == "true"
@@ -337,14 +368,16 @@ build_docker_builder_image:
       exists:
         - Dockerfile.docker-builder
       changes:
-        paths:
+        paths: &docker_builder_sources
           - Dockerfile.docker-builder
+          - Dockerfile.python-test-tools
+          - Dockerfile.python_runtime
+          - docker-bake.hcl
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.docker-builder
       changes:
-        paths:
-          - Dockerfile.docker-builder
+        paths: *docker_builder_sources
         compare_to: 'refs/heads/develop'
 
 build_image_remover_image:
@@ -368,6 +401,8 @@ build_image_remover_image:
       changes:
         paths:
           - Dockerfile.python-scripts
+          - Dockerfile.python_runtime
+          - docker-bake.hcl
           - scripts/python/**/*
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
@@ -375,6 +410,8 @@ build_image_remover_image:
       changes:
         paths:
           - Dockerfile.python-scripts
+          - Dockerfile.python_runtime
+          - docker-bake.hcl
           - scripts/python/**/*
         compare_to: 'refs/heads/develop'
 
@@ -439,6 +476,52 @@ build_haf_app_test_runner_image:
         compare_to: 'refs/heads/develop'
 
 
+build_python_test_tools_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python-test-tools"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        paths: *python_test_tools_sources
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      changes:
+        paths: *python_test_tools_sources
+        compare_to: 'refs/heads/develop'
+
+build_node_test_tools_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "node-test-tools"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        paths: &node_test_tools_sources
+          - Dockerfile.node-test-tools
+          - docker-bake.hcl
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      changes:
+        paths: *node_test_tools_sources
+        compare_to: 'refs/heads/develop'
+
 build_nginx_image:
   extends: .build_docker_image
   stage: build
@@ -487,12 +570,14 @@ build_postgrest_image:
       changes:
         paths:
           - Dockerfile.postgrest
+          - docker-bake.hcl
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.postgrest
       changes:
         paths:
           - Dockerfile.postgrest
+          - docker-bake.hcl
         compare_to: 'refs/heads/develop'
 
 build_alpine_image:
@@ -632,6 +717,7 @@ build_emsdk_image:
       changes:
         paths:
           - Dockerfile.emscripten
+          - docker-bake.hcl
           - scripts/bash/npm-helpers/*
           - scripts/bash/emscripten/*
           - scripts/bash/emscripten/**/*
@@ -642,6 +728,7 @@ build_emsdk_image:
       changes:
         paths:
           - Dockerfile.emscripten
+          - docker-bake.hcl
           - scripts/bash/npm-helpers/*
           - scripts/bash/emscripten/*
           - scripts/bash/emscripten/**/*
@@ -668,6 +755,7 @@ build_psql_image:
       changes:
         paths:
           - Dockerfile.psql
+          - docker-bake.hcl
           - haf-app-tools/scripts/run_with_reconnect.sh
           - haf-app-tools/scripts/install_with_app_lock.py
           - haf-app-tools/scripts/haf_app_driver.py
@@ -677,6 +765,7 @@ build_psql_image:
       changes:
         paths:
           - Dockerfile.psql
+          - docker-bake.hcl
           - haf-app-tools/scripts/run_with_reconnect.sh
           - haf-app-tools/scripts/install_with_app_lock.py
           - haf-app-tools/scripts/haf_app_driver.py
@@ -696,6 +785,7 @@ psql_image_test:
       changes:
         paths:
           - Dockerfile.psql
+          - docker-bake.hcl
           - haf-app-tools/scripts/run_with_reconnect.sh
           - haf-app-tools/scripts/install_with_app_lock.py
           - haf-app-tools/scripts/haf_app_driver.py
@@ -705,6 +795,7 @@ psql_image_test:
       changes:
         paths:
           - Dockerfile.psql
+          - docker-bake.hcl
           - haf-app-tools/scripts/run_with_reconnect.sh
           - haf-app-tools/scripts/install_with_app_lock.py
           - haf-app-tools/scripts/haf_app_driver.py
@@ -768,6 +859,7 @@ psql_image_assert_wrapper:
       changes:
         paths:
           - Dockerfile.psql
+          - docker-bake.hcl
           - haf-app-tools/scripts/run_with_reconnect.sh
           - haf-app-tools/scripts/install_with_app_lock.py
           - haf-app-tools/scripts/haf_app_driver.py
@@ -777,6 +869,7 @@ psql_image_assert_wrapper:
       changes:
         paths:
           - Dockerfile.psql
+          - docker-bake.hcl
           - haf-app-tools/scripts/run_with_reconnect.sh
           - haf-app-tools/scripts/install_with_app_lock.py
           - haf-app-tools/scripts/haf_app_driver.py
@@ -829,7 +922,7 @@ buildkit_cache_cleanup:
   variables:
     # Use latest tag since the image may not be built in this pipeline (change detection)
     IMAGE_REMOVER_TAG: latest
-    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache,ci-base-image-ubuntu/cache"
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache,ci-base-image-ubuntu/cache,python-test-tools/cache,node-test-tools/cache"
 
 # =============================================================================
 # Renovate Bot

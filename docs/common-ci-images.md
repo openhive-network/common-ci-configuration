@@ -64,11 +64,22 @@ builder images), hive's fc canary job, and as the base of
 
 ### docker-builder
 
-**Base:** Alpine (docker:26.1.4-cli)
+**Base:** python-test-tools (Ubuntu 26.04, Python 3.14), plus the static docker
+CLI, buildx and compose of docker:26.1.4-cli and its entrypoint
 
-CI image for building Docker images using BuildKit. Runs as non-root user with sudo access.
+CI image for building Docker images using BuildKit and for jobs that drive a
+DinD service (HAF-app e2e/tavern tests). Runs as non-root user `hived`
+(UID 1000) with sudo access.
 
-**Includes:** bash, git, coreutils, curl, sudo, util-linux (for NFS flock support)
+**Includes:** everything in python-test-tools (the venv is owned by `hived`, so
+jobs can `pip install` their own test packages), bash, git, curl, sudo,
+util-linux (NFS flock), JMeter + m2u, openjdk 21
+
+It is built on python-test-tools - rather than e2e jobs running
+python-test-tools with a DinD service - because every existing consumer
+already runs docker-builder with the DinD service and expects Python test
+tooling in it (the Alpine image carried Python 3.12 for tavern/tox): keeping
+the image name keeps them working while giving them the shared tool versions.
 
 **Used by:**
 - `prepare_hived_image` jobs in hive/haf
@@ -102,13 +113,49 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 
 **Includes:**
 - Emscripten SDK (version configured in docker-bake.hcl)
-- Node.js 24.x (LTS) with pnpm
+- Node.js, pnpm, Playwright and TypeScript at the docker-bake.hcl tool versions
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf
 
-**Current version:** `5.0.2-4` (Node 24; `5.0.2-3` has Node 22)
+**Current version:** `5.0.2-5` (`5.0.2-4`: Node 24, Playwright 1.59; `5.0.2-3`
+has Node 22)
+
+**Ubuntu release:** the image's Ubuntu (24.04 for emsdk 5.0.2) is chosen by the
+upstream emscripten/emsdk image. The twiggy/bloaty builder stage builds on that
+image itself instead of a separate Ubuntu tag, because binaries built on a
+newer release (26.04, newer glibc) would not load in it.
 
 **Used by:** wax and other WASM projects for building JavaScript/TypeScript packages.
+
+## Test Tools Images
+
+Test and lint tool versions for hive repos are defined once, as variables in
+`docker-bake.hcl` (`PYTEST_VERSION`, `RUFF_VERSION`, `NODE_VERSION`, ...).
+These images are tagged `:<IMAGE_VERSION>` and `:develop` (moving) from the
+default branch, and `:<commit-sha>` on every build. See the README for how
+repos consume them and how to bump a tool.
+
+### python-test-tools
+
+**Base:** python_development (Ubuntu 26.04, Python 3.14)
+
+**Includes:** pytest, pytest-xdist, pytest-timeout, tavern, deepdiff, jsondiff,
+prettytable, ruff, mypy, pylint, yamllint, sqlfluff, tox (in `/python_venv`,
+first on PATH), shellcheck, postgrest, psql (PGDG client), poetry, git, jq,
+xmlstarlet
+
+**Used by:** `.haf_app_lint_bash`, `.haf_app_lint_sql`,
+`.lint_code_with_ruff_template`, `.type_check_with_mypy_template`, this
+repository's lint jobs, and as the base of docker-builder (tavern jobs).
+
+### node-test-tools
+
+**Base:** Ubuntu 26.04
+
+**Includes:** node, pnpm, TypeScript, Playwright with Chromium and its headless
+shell (`PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`)
+
+**Used by:** `.npm_test_template`.
 
 ## Test Runner Images
 
@@ -171,13 +218,13 @@ Lightweight Python environment with poetry and git.
 **Current version:** `3.14.2-1`
 
 **Status:** deprecated. Its historical reason to exist ("api_client_generator
-needs Python 3.12") is obsolete - the generator requires Python >= 3.14 and
+needs an older Python") is obsolete - the generator requires Python >= 3.14 and
 runs in ci-base-image. The only remaining consumer is hivesense; the image
 will be retired once hivesense migrates.
 
 ### python-scripts
 
-**Base:** Debian (python:3.12.2)
+**Base:** python_runtime (Ubuntu 26.04, Python 3.14)
 
 Contains Python utilities for CI operations:
 - `delete-image.py` - GitLab registry cleanup
@@ -251,7 +298,9 @@ removal together with its bake target and template block.
 | python_runtime | 3.14 | minimal Ubuntu 26.04 runtime, used by clive |
 | python_development | 3.14 | Ubuntu 26.04 with dev tools, used by clive |
 | python (deprecated) | 3.14.2 | hivesense only |
-| python-scripts | 3.12.2 | CI utilities (registry cleanup) |
+| python-scripts | 3.14 | CI utilities (registry cleanup), on python_runtime |
+| python-test-tools | 3.14 | test/lint tools, on python_development |
+| docker-builder | 3.14 | inherits python-test-tools |
 | benchmark-test-runner | 3.x | Alpine system Python |
 
 ## Version Management
@@ -270,6 +319,9 @@ Image versions are defined in `docker-bake.hcl`:
 | `POSTGREST_VERSION` | v12.0.2 | PostgREST version |
 | `ALPINE_VERSION` | 3.21.3 | Alpine base version |
 | `DOCKERFILE_IMAGE_VERSION` | 1.11 | Dockerfile frontend version |
+| `PYTHON_TEST_TOOLS_IMAGE_VERSION`, `NODE_TEST_TOOLS_IMAGE_VERSION` | 1 | tools images version tags |
+| `TEST_TOOLS_MOVING_TAG` | develop | tools images moving tag |
+| `PYTEST_VERSION` ... `TYPESCRIPT_VERSION` | see docker-bake.hcl | test/lint tool versions |
 
 ## Building Images Locally
 
@@ -284,7 +336,7 @@ docker buildx bake <target> --set *.tags=myregistry/myimage:mytag
 # docker-builder, docker-dind, ci-base-image, ci-base-image-ubuntu,
 # haf-app-test-runner, emsdk, python, python_runtime, python_development,
 # python-scripts, psql, postgrest, nginx, alpine, dockerfile,
-# benchmark-test-runner
+# benchmark-test-runner, python-test-tools, node-test-tools
 ```
 
 Note: `haf-app-test-runner` builds FROM the published
@@ -295,7 +347,8 @@ branches it uses the commit-SHA tag pushed by the same pipeline (see the
 ## NFS Compatibility
 
 The following Alpine-based images include `util-linux` for proper NFS flock support:
-- `docker-builder`
 - `docker-dind`
+
+(`docker-builder` is Ubuntu-based now; util-linux is part of its base.)
 
 This is required for cache-manager.sh operations on NFS-mounted cache directories. BusyBox flock (Alpine default) returns "Bad file descriptor" on NFS mounts.

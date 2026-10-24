@@ -15,6 +15,7 @@ variable "PSQL_IMAGE_VERSION" {
 variable "DOCKERFILE_IMAGE_VERSION" {
   default = "1.11"
 }
+# PostgREST: the mirrored postgrest image and the binary in python-test-tools
 variable "POSTGREST_VERSION" {
   default = "v12.0.2"
 }
@@ -43,6 +44,85 @@ variable "HAF_APP_TEST_RUNNER_VERSION" {
 
 variable "PAAS_PSQL_VERSION" {
   default = "11251948d5dd4867552f9b9836a9e02110304df5"
+}
+
+# =============================================================================
+# CI/test tool versions - the single definition for every hive repo
+# =============================================================================
+# python-test-tools, node-test-tools, docker-builder and emsdk receive these as
+# build args; templates/ never pin a tool, they run in those images. Bumping a
+# tool = change the value here; the develop pipeline republishes the images
+# under their moving `develop` tag. Python itself comes from PYTHON_RUNTIME_VERSION
+# (python_development is the base of python-test-tools).
+variable "PYTEST_VERSION" {
+  default = "9.1.1"
+}
+variable "PYTEST_XDIST_VERSION" {
+  default = "3.8.0"
+}
+variable "PYTEST_TIMEOUT_VERSION" {
+  default = "2.4.0"
+}
+variable "TAVERN_VERSION" {
+  default = "3.7.1"
+}
+variable "DEEPDIFF_VERSION" {
+  default = "9.1.0"
+}
+variable "JSONDIFF_VERSION" {
+  default = "2.2.1"
+}
+variable "PRETTYTABLE_VERSION" {
+  default = "3.18.0"
+}
+variable "RUFF_VERSION" {
+  default = "0.17.2"
+}
+variable "MYPY_VERSION" {
+  default = "2.4.0"
+}
+variable "PYLINT_VERSION" {
+  default = "4.1.2"
+}
+variable "YAMLLINT_VERSION" {
+  default = "1.38.0"
+}
+variable "SQLFLUFF_VERSION" {
+  default = "4.4.0"
+}
+variable "SHELLCHECK_VERSION" {
+  default = "v0.11.0"
+}
+variable "TOX_VERSION" {
+  default = "4.67.1"
+}
+# PostgreSQL client (psql) major version, from the PGDG apt repository
+variable "PSQL_VERSION" {
+  default = "18"
+}
+variable "NODE_VERSION" {
+  default = "v24.21.0"
+}
+variable "PNPM_VERSION" {
+  default = "10.0.0"
+}
+# >= 1.61: the first release that supports Ubuntu 26.04
+variable "PLAYWRIGHT_VERSION" {
+  default = "1.64.1"
+}
+variable "TYPESCRIPT_VERSION" {
+  default = "5.9.3"
+}
+# Image version tags, bumped when an image changes in a way consumers should be
+# able to pin; most consumers follow TEST_TOOLS_MOVING_TAG instead
+variable "PYTHON_TEST_TOOLS_IMAGE_VERSION" {
+  default = "1"
+}
+variable "NODE_TEST_TOOLS_IMAGE_VERSION" {
+  default = "1"
+}
+variable "TEST_TOOLS_MOVING_TAG" {
+  default = "develop"
 }
 variable "BOOST_VERSION_TAG" {
   default = null
@@ -75,6 +155,13 @@ function "generate-tags" {
   ]
 }
 
+# Tools images also get the moving tag, published (like the version tag) only
+# from the default branch
+function "generate-tools-tags" {
+  params = [target, local_tag]
+  result = distinct(concat(generate-tags(target, local_tag), generate-tags(target, TEST_TOOLS_MOVING_TAG)))
+}
+
 function "generate-cache-from" {
   params = [target, local_tag]
   result = [
@@ -98,6 +185,15 @@ target "benchmark-test-runner" {
 
 target "docker-builder" {
   dockerfile = "Dockerfile.docker-builder"
+  # Built on python-test-tools so HAF-app e2e jobs (docker CLI + DinD) get the
+  # same Python and tool versions as every other test job. The context builds
+  # the base from this checkout, so both images always carry the same versions.
+  args = {
+    PYTHON_TEST_TOOLS_TAG = TEST_TOOLS_MOVING_TAG
+  }
+  contexts = {
+    "registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${TEST_TOOLS_MOVING_TAG}" = "target:python-test-tools"
+  }
   tags = generate-tags("docker-builder", "${tag}")
   cache-from = generate-cache-from("docker-builder", "${tag}")
   cache-to = generate-cache-to("docker-builder", "${tag}")
@@ -112,6 +208,12 @@ target "docker-dind" {
 
 target "python-scripts" {
   dockerfile = "Dockerfile.python-scripts"
+  args = {
+    PYTHON_RUNTIME_VERSION = PYTHON_RUNTIME_VERSION
+  }
+  contexts = {
+    "registry.gitlab.syncad.com/hive/common-ci-configuration/python_runtime:${PYTHON_RUNTIME_VERSION}" = "target:python_runtime"
+  }
   tags = generate-tags("python-scripts", "${tag}")
   cache-from = generate-cache-from("python-scripts", "${tag}")
   cache-to = generate-cache-to("python-scripts", "${tag}")
@@ -119,18 +221,25 @@ target "python-scripts" {
 
 target "emsdk" {
   dockerfile = "Dockerfile.emscripten"
-  tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}-4")
+  tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}-5")
   cache-from = generate-cache-from("emsdk", "${EMSCRIPTEN_VERSION}")
   cache-to = generate-cache-to("emsdk", "${EMSCRIPTEN_VERSION}")
   args = {
     EMSCRIPTEN_VERSION = "${EMSCRIPTEN_VERSION}",
     BOOST_VERSION_TAG = "${BOOST_VERSION_TAG}",
-    OPENSSL_VERSION_TAG = "${OPENSSL_VERSION_TAG}"
+    OPENSSL_VERSION_TAG = "${OPENSSL_VERSION_TAG}",
+    NODE_VERSION = "${NODE_VERSION}",
+    PNPM_VERSION = "${PNPM_VERSION}",
+    PLAYWRIGHT_VERSION = "${PLAYWRIGHT_VERSION}",
+    TYPESCRIPT_VERSION = "${TYPESCRIPT_VERSION}"
   }
 }
 
 target "psql" {
   dockerfile = "Dockerfile.psql"
+  args = {
+    PAAS_PSQL_VERSION = "${PAAS_PSQL_VERSION}"
+  }
   tags = generate-tags("psql", "${PSQL_IMAGE_VERSION}")
   cache-from = generate-cache-from("psql", "${PSQL_IMAGE_VERSION}")
   cache-to = generate-cache-to("psql", "${PSQL_IMAGE_VERSION}")
@@ -152,6 +261,9 @@ target "nginx" {
 
 target "postgrest" {
   dockerfile = "Dockerfile.postgrest"
+  args = {
+    POSTGREST_VERSION = "${POSTGREST_VERSION}"
+  }
   tags = generate-tags("postgrest", "${POSTGREST_VERSION}")
   cache-from = generate-cache-from("postgrest", "${POSTGREST_VERSION}")
   cache-to = generate-cache-to("postgrest", "${POSTGREST_VERSION}")
@@ -211,4 +323,48 @@ target "haf-app-test-runner" {
   tags = generate-tags("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
   cache-from = generate-cache-from("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
   cache-to = generate-cache-to("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
+}
+
+target "python-test-tools" {
+  dockerfile = "Dockerfile.python-test-tools"
+  # The base is built from this checkout's Dockerfile.python_runtime (its
+  # version tag is only published from the default branch)
+  contexts = {
+    "registry.gitlab.syncad.com/hive/common-ci-configuration/python_development:${PYTHON_RUNTIME_VERSION}" = "target:python_development"
+  }
+  args = {
+    PYTHON_RUNTIME_VERSION = PYTHON_RUNTIME_VERSION,
+    PYTEST_VERSION = PYTEST_VERSION,
+    PYTEST_XDIST_VERSION = PYTEST_XDIST_VERSION,
+    PYTEST_TIMEOUT_VERSION = PYTEST_TIMEOUT_VERSION,
+    TAVERN_VERSION = TAVERN_VERSION,
+    DEEPDIFF_VERSION = DEEPDIFF_VERSION,
+    JSONDIFF_VERSION = JSONDIFF_VERSION,
+    PRETTYTABLE_VERSION = PRETTYTABLE_VERSION,
+    RUFF_VERSION = RUFF_VERSION,
+    MYPY_VERSION = MYPY_VERSION,
+    PYLINT_VERSION = PYLINT_VERSION,
+    YAMLLINT_VERSION = YAMLLINT_VERSION,
+    SQLFLUFF_VERSION = SQLFLUFF_VERSION,
+    SHELLCHECK_VERSION = SHELLCHECK_VERSION,
+    TOX_VERSION = TOX_VERSION,
+    POSTGREST_VERSION = POSTGREST_VERSION,
+    PSQL_VERSION = PSQL_VERSION,
+  }
+  tags = generate-tools-tags("python-test-tools", "${PYTHON_TEST_TOOLS_IMAGE_VERSION}")
+  cache-from = generate-cache-from("python-test-tools", "${PYTHON_TEST_TOOLS_IMAGE_VERSION}")
+  cache-to = generate-cache-to("python-test-tools", "${PYTHON_TEST_TOOLS_IMAGE_VERSION}")
+}
+
+target "node-test-tools" {
+  dockerfile = "Dockerfile.node-test-tools"
+  args = {
+    NODE_VERSION = NODE_VERSION,
+    PNPM_VERSION = PNPM_VERSION,
+    PLAYWRIGHT_VERSION = PLAYWRIGHT_VERSION,
+    TYPESCRIPT_VERSION = TYPESCRIPT_VERSION,
+  }
+  tags = generate-tools-tags("node-test-tools", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
+  cache-from = generate-cache-from("node-test-tools", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
+  cache-to = generate-cache-to("node-test-tools", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
 }

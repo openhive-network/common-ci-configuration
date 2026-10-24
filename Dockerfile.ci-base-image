@@ -460,7 +460,8 @@ RUN for pydir in /opt/python/cp3*/bin; do \
     done
 
 # Create Python wrapper script that respects PYTHON_VERSION env var
-# Supports: 3.9, 3.10, 3.11, 3.12, 3.13, 3.14, 3.14t (free-threaded)
+# Supports every CPython the manylinux base ships in /opt/python (default 3.14,
+# 3.14t = free-threaded)
 # Works as python3, pip3, or select-python (outputs path) based on $0
 COPY <<'EOF' /usr/local/bin/select-python
 #!/bin/bash

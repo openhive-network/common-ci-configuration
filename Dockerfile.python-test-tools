@@ -1,0 +1,75 @@
+# syntax=docker/dockerfile:1.5
+# Python test and lint tools for hive repos: Ubuntu 26.04 + Python 3.14 with
+# pytest (+ xdist, timeout), tavern, deepdiff, jsondiff, ruff, mypy, pylint,
+# yamllint, sqlfluff, tox, shellcheck and the postgrest and psql binaries,
+# installed in /python_venv (first on PATH).
+#
+# Every version is a build arg without a default: docker-bake.hcl is the only
+# place they are defined. Build with `docker buildx bake python-test-tools`.
+ARG PYTHON_RUNTIME_VERSION
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python_development:${PYTHON_RUNTIME_VERSION} AS python-test-tools
+
+ARG PYTEST_VERSION
+ARG PYTEST_XDIST_VERSION
+ARG PYTEST_TIMEOUT_VERSION
+ARG TAVERN_VERSION
+ARG DEEPDIFF_VERSION
+ARG JSONDIFF_VERSION
+ARG PRETTYTABLE_VERSION
+ARG RUFF_VERSION
+ARG MYPY_VERSION
+ARG PYLINT_VERSION
+ARG YAMLLINT_VERSION
+ARG SQLFLUFF_VERSION
+ARG SHELLCHECK_VERSION
+ARG TOX_VERSION
+ARG POSTGREST_VERSION
+ARG PSQL_VERSION
+
+ENV LANG=C.UTF-8
+ENV VIRTUAL_ENV=/python_venv
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# psql from PGDG (pins the client major independently of the Ubuntu archive);
+# xmlstarlet and jq for the lint jobs' report conversion
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg xz-utils jq xmlstarlet findutils && \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg && \
+    . /etc/os-release && \
+    echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        "postgresql-client-${PSQL_VERSION}" && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+        | tar xJ -C /usr/local/bin --strip-components=1 "shellcheck-${SHELLCHECK_VERSION}/shellcheck" && \
+    curl -fsSL "https://github.com/PostgREST/postgrest/releases/download/${POSTGREST_VERSION}/postgrest-${POSTGREST_VERSION}-linux-static-x64.tar.xz" \
+        | tar xJ -C /usr/local/bin postgrest
+
+RUN pip install --no-cache-dir \
+        "pytest==${PYTEST_VERSION}" \
+        "pytest-xdist==${PYTEST_XDIST_VERSION}" \
+        "pytest-timeout==${PYTEST_TIMEOUT_VERSION}" \
+        "tavern==${TAVERN_VERSION}" \
+        "deepdiff==${DEEPDIFF_VERSION}" \
+        "jsondiff==${JSONDIFF_VERSION}" \
+        "prettytable==${PRETTYTABLE_VERSION}" \
+        "ruff==${RUFF_VERSION}" \
+        "mypy==${MYPY_VERSION}" \
+        "pylint==${PYLINT_VERSION}" \
+        "yamllint==${YAMLLINT_VERSION}" \
+        "sqlfluff==${SQLFLUFF_VERSION}" \
+        "tox==${TOX_VERSION}" && \
+    python3 -c "import sysconfig, compileall; compileall.compile_dir(sysconfig.get_path('purelib'), quiet=1)"
+
+# poetry (from python_development's own venv) for jobs that install a project's
+# dependencies next to the tools, e.g. mypy needing the project's packages
+RUN ln -s /poetry_venv/bin/poetry /usr/local/bin/poetry && \
+    git config --system --add safe.directory '*'
+
+CMD ["/bin/bash"]

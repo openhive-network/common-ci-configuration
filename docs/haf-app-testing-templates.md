@@ -77,7 +77,7 @@ variables:
 
 ### Tavern Test Components
 - `.tavern_test_variables` - pytest workers, tavern version, directories
-- `.tavern_install_deps` - Install tavern in a venv
+- `.tavern_install_deps` - Check the job image provides tavern/pytest (python-test-tools or docker-builder; nothing is installed)
 - `.tavern_run_tests` - Run pytest with tavern
 - `.tavern_test_artifacts` - Artifacts for tavern tests
 

@@ -194,7 +194,6 @@ api_tests:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PYTEST_WORKERS` | `4` | Number of parallel pytest workers |
-| `TAVERN_VERSION` | `2.2.0` | Tavern package version |
 | `PYTEST_ARGS` | (empty) | Additional pytest arguments |
 | `TEST_DIR` | `tests/api_tests` | Directory containing tests |
 | `JUNIT_REPORT` | `tavern-results.xml` | JUnit output filename |

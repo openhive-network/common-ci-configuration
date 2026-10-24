@@ -16,6 +16,32 @@ This project contains the common CI templates and scripts for Hive and Hive-rela
 - [npm_projects.gitlab-ci.yml](templates/npm_projects.gitlab-ci.yml) - templates for NPM package building and publishing
 - [test_jobs.gitlab-ci.yml](templates/test_jobs.gitlab-ci.yml) - templates for running tests
 
+## CI/test tool versions
+
+Every test and lint tool version used by hive repos is defined **once**, as a variable in [docker-bake.hcl](docker-bake.hcl): `PYTEST_VERSION`, `PYTEST_XDIST_VERSION`, `PYTEST_TIMEOUT_VERSION`, `TAVERN_VERSION`, `DEEPDIFF_VERSION`, `JSONDIFF_VERSION`, `PRETTYTABLE_VERSION`, `RUFF_VERSION`, `MYPY_VERSION`, `PYLINT_VERSION`, `YAMLLINT_VERSION`, `SQLFLUFF_VERSION`, `SHELLCHECK_VERSION`, `TOX_VERSION`, `POSTGREST_VERSION`, `PSQL_VERSION` (PostgreSQL client major), `NODE_VERSION`, `PNPM_VERSION`, `PLAYWRIGHT_VERSION` and `TYPESCRIPT_VERSION`. Python comes from `PYTHON_RUNTIME_VERSION` (Python 3.14 on Ubuntu 26.04). The Dockerfiles receive them as build args and have no defaults of their own; templates never pin a tool.
+
+The tools are published in two images:
+
+| Image | Contents |
+|-------|----------|
+| `registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools` | Ubuntu 26.04 + Python 3.14: pytest (+ xdist, timeout), tavern, deepdiff, jsondiff, ruff, mypy, pylint, yamllint, sqlfluff, tox, shellcheck, postgrest, psql |
+| `registry.gitlab.syncad.com/hive/common-ci-configuration/node-test-tools` | Ubuntu 26.04: node, pnpm, TypeScript, Playwright with Chromium |
+
+Tags: `:develop` is the moving tag the default branch republishes; `:<PYTHON|NODE>_TEST_TOOLS_IMAGE_VERSION` is also published from the default branch, and `:<commit-sha>` from every build. `docker-builder` is built on `python-test-tools`, so jobs that drive a DinD service get the same tools; `emsdk` gets node, pnpm, Playwright and TypeScript from the same variables.
+
+**Consuming them.** The templates already run their test and lint jobs in these images (`.haf_app_lint_bash`, `.haf_app_lint_sql`, the tavern templates via docker-builder, `.lint_code_with_ruff_template`, `.type_check_with_mypy_template`, `.npm_test_template`). Other jobs use the variables from `templates/base.gitlab-ci.yml`:
+
+```yaml
+my_tests:
+  image: "${PYTHON_TEST_TOOLS_IMAGE}"   # or "${NODE_TEST_TOOLS_IMAGE}"
+  script:
+    - pytest -n auto tests/
+```
+
+Don't pin tool versions in your repo. For a deliberate exception, override the tag (`PYTHON_TEST_TOOLS_TAG` / `NODE_TEST_TOOLS_TAG`, e.g. to a commit SHA).
+
+**Bumping a tool.** Change its variable in `docker-bake.hcl` and merge to `develop`. The develop pipeline rebuilds the images that use it (python-test-tools, node-test-tools, docker-builder, emsdk, ...) and moves the `:develop` tag, so every repo picks up the new version on its next pipeline. Fix only the repos the new version actually breaks.
+
 ## Pipeline Skip Variables
 
 The following variables can be set to `"true"` when running a pipeline to skip certain jobs:

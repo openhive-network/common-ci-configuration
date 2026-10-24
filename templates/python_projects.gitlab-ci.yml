@@ -119,8 +119,14 @@ variables:
     paths:
       - "${PYPROJECT_DIR}/poetry.lock"
 
+# ruff and mypy come from python-test-tools, at the versions in
+# common-ci-configuration's docker-bake.hcl, not from the project's environment.
+# ruff needs none of the project's dependencies, so none are installed.
 .lint_code_with_ruff_template:
-  extends: .project_develop_configuration_template
+  extends: .job-defaults
+  image: "${PYTHON_TEST_TOOLS_IMAGE}"
+  before_script:
+    - ruff --version
   script:
     - if [ -z "${PYPROJECT_CONFIG_PATH}" ]; then MAYBE_EXPLICIT_CONFIG=""; else MAYBE_EXPLICIT_CONFIG="--config ${PYPROJECT_CONFIG_PATH}"; fi
     - echo -e "${TXT_BLUE}Linting all sources with Ruff (check)...${TXT_CLEAR}" &&
@@ -135,12 +141,16 @@ variables:
     - echo -e "${TXT_BLUE}Checking code formatting with Black...${TXT_CLEAR}" &&
       black --check --diff --color ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
 
+# The project's dependencies are installed into its venv for import resolution;
+# --python-executable points the tools image's mypy at that venv.
 .type_check_with_mypy_template:
   extends: .project_develop_configuration_template
+  image: "${PYTHON_TEST_TOOLS_IMAGE}"
   script:
     - if [ -z "${PYPROJECT_CONFIG_PATH}" ]; then MAYBE_EXPLICIT_CONFIG=""; else MAYBE_EXPLICIT_CONFIG="--config-file ${PYPROJECT_CONFIG_PATH}"; fi
     - echo -e "${TXT_BLUE}Checking types with mypy...${TXT_CLEAR}" &&
-      mypy ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
+      /python_venv/bin/mypy --version &&
+      /python_venv/bin/mypy --python-executable "$(command -v python3)" ${MAYBE_EXPLICIT_CONFIG} ${PACKAGES_TO_CHECK}
 
 # job template useful to match project local poetry.lock file to pyproject.toml specification
 # and avoid differences, which can potentially cause bugs really not reproducible on clean evironment.
