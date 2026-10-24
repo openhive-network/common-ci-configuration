@@ -25,6 +25,11 @@ variables:
   # docker-builder is built on python-test-tools: jobs that drive DinD get the
   # same Python and test tools as every other job.
   DOCKER_BUILDER_TAG: "latest"
+  # Test runner for HAF-app sync and test jobs: python-test-tools (the tools at
+  # this project's docker-bake.hcl versions) plus Docker CLI/compose, JMeter and
+  # psycopg2. `develop` is the moving tag the default branch republishes.
+  HAF_APP_TEST_RUNNER_TAG: "develop"
+  HAF_APP_TEST_RUNNER_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/haf-app-test-runner:${HAF_APP_TEST_RUNNER_TAG}"
   # specific commit with util-linux for NFS flock support
   DOCKER_DIND_TAG: "3dd346380da7f28cdaf3ef3955559c905d94bd1c"
 
@@ -677,17 +682,22 @@ include:
     JUNIT_REPORT: "tests/tavern/report.xml"
 
 # Checks that the job image provides the tavern tools and prints their versions.
-# They are installed in python-test-tools (and docker-builder, built on it) at
-# the versions in common-ci-configuration's docker-bake.hcl - nothing is
-# installed at job time. The name predates that and is kept for existing users.
+# They are installed in python-test-tools (and docker-builder and
+# haf-app-test-runner, built on it) at the versions in common-ci-configuration's
+# docker-bake.hcl - nothing is installed at job time. The name predates that and
+# is kept for existing users, as is ./venv: jobs written for the old template
+# activate it, so it links to the image's tools venv.
 # Use with: !reference [.tavern_install_deps, script]
 .tavern_install_deps:
   script:
     - |
       echo -e "\e[0Ksection_start:$(date +%s):tavern_deps[collapsed=true]\r\e[0KTavern tools from the job image..."
       if ! python3 -c "import tavern, xdist, deepdiff" 2>/dev/null; then
-        echo "ERROR: the job image lacks tavern/pytest-xdist/deepdiff; use docker-builder or python-test-tools from common-ci-configuration"
+        echo "ERROR: the job image lacks tavern/pytest-xdist/deepdiff; use haf-app-test-runner, docker-builder or python-test-tools from common-ci-configuration"
         exit 1
+      fi
+      if [[ -n "${VIRTUAL_ENV:-}" && ! -e venv ]]; then
+        ln -s "${VIRTUAL_ENV}" venv
       fi
       python3 --version
       python3 -m pip list 2>/dev/null | grep -iE '^(pytest|pytest-xdist|tavern|deepdiff|prettytable) '
@@ -751,6 +761,7 @@ include:
   extends:
     - .haf_app_dind_test_variables
     - .tavern_test_variables
+  image: "${HAF_APP_TEST_RUNNER_IMAGE}"
   stage: test
   timeout: 30 minutes
   before_script:

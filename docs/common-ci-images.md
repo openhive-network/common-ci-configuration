@@ -59,8 +59,7 @@ Ubuntu-built binaries).
 **Current version:** `ubuntu26.04-pg18-1`
 
 **Used by:** haf and hafah pipelines (`HIVE_CI_BASE_IMAGE` / `PYTHON_IMAGE` /
-builder images), hive's fc canary job, and as the base of
-`haf-app-test-runner`.
+builder images) and hive's fc canary job.
 
 ### docker-builder
 
@@ -161,13 +160,26 @@ shell (`PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`)
 
 ### haf-app-test-runner
 
-**Base:** ci-base-image-ubuntu (Ubuntu 26.04, Python 3.14)
+**Base:** python-test-tools (Ubuntu 26.04, Python 3.14), so it carries every
+python-test-tools tool (pytest, xdist, tavern, deepdiff, jsondiff, psql, ...) at
+the docker-bake.hcl versions
 
-Shared test runner for HAF applications. Adds JMeter + m2u (copied from
-benchmark-test-runner), openjdk 21, PostgreSQL client, docker-compose-v2 and
-psycopg2.
+Shared test runner for HAF applications' sync and tavern jobs. Adds JMeter + m2u
+(copied from benchmark-test-runner), openjdk 21 (with the `JAVA_TOOL_OPTIONS`
+m2u needs), docker-compose-v2 with the Docker CLI and buildx, and psycopg2 in
+the tools venv. `hived` (UID 1000) owns the venv, so jobs can `pip install`
+their own test packages next to the tools.
 
-**Current version:** `3.0`
+**Tags:** `develop` (moving; the default branch republishes it whenever the
+image or a tool version changes), `4.0` (`HAF_APP_TEST_RUNNER_VERSION`) and
+`3.1` (`HAF_APP_TEST_RUNNER_PINNED_TAG`). `3.1` is the tag HAF apps pinned
+before the rebuild; it is republished with the current image so those pins get
+the tools until the repos drop them, after which the tag can be retired.
+
+`templates/haf_app_testing.gitlab-ci.yml` sets `HAF_APP_TEST_RUNNER_IMAGE` to
+the `develop` tag (`HAF_APP_TEST_RUNNER_TAG`), and `.haf_app_dind_tavern_tests`
+runs in it. A repo that leaves the variable unset follows tool bumps with no
+change of its own.
 
 **Used by:** balance_tracker, reputation_tracker, haf_block_explorer.
 
@@ -294,7 +306,7 @@ removal together with its bake target and template block.
 |-------|----------------|-------|
 | ci-base-image | 3.9-3.14 selectable, default 3.14 | manylinux; source of truth for `PYTHON_IMAGE` |
 | ci-base-image-ubuntu | 3.14 (native) | Ubuntu 26.04, for HAF glibc-matched builds |
-| haf-app-test-runner | 3.14 | inherits ci-base-image-ubuntu |
+| haf-app-test-runner | 3.14 | inherits python-test-tools |
 | python_runtime | 3.14 | minimal Ubuntu 26.04 runtime, used by clive |
 | python_development | 3.14 | Ubuntu 26.04 with dev tools, used by clive |
 | python (deprecated) | 3.14.2 | hivesense only |
@@ -311,7 +323,7 @@ Image versions are defined in `docker-bake.hcl`:
 |----------|---------------|-------------|
 | `CI_BASE_IMAGE_VERSION` | pypa_2_28-pg18-4 | manylinux CI base image |
 | `CI_BASE_IMAGE_UBUNTU_VERSION` | ubuntu26.04-pg18-1 | Ubuntu CI base image (HAF) |
-| `HAF_APP_TEST_RUNNER_VERSION` | 3.0 | HAF app test runner |
+| `HAF_APP_TEST_RUNNER_VERSION` | 4.0 | HAF app test runner (also tagged `develop` and `HAF_APP_TEST_RUNNER_PINNED_TAG`) |
 | `PYTHON_RUNTIME_VERSION` | 3.14-u26.04-1 | python_runtime / python_development |
 | `PYTHON_VERSION` | 3.14.2-1 | python image (deprecated) |
 | `EMSCRIPTEN_VERSION` | 5.0.2 | Emscripten SDK version |
@@ -339,10 +351,9 @@ docker buildx bake <target> --set *.tags=myregistry/myimage:mytag
 # benchmark-test-runner, python-test-tools, node-test-tools
 ```
 
-Note: `haf-app-test-runner` builds FROM the published
-`ci-base-image-ubuntu:<version>` tag on the default branch; on feature
-branches it uses the commit-SHA tag pushed by the same pipeline (see the
-`args` block in its bake target).
+Note: `haf-app-test-runner` and `docker-builder` build their python-test-tools
+base from the same checkout (a bake `contexts` entry), so they always carry
+that commit's tool versions.
 
 ## NFS Compatibility
 

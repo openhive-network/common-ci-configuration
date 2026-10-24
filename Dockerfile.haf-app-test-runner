@@ -1,12 +1,14 @@
 # syntax=docker/dockerfile:1.4
 # Shared test runner for HAF applications (balance_tracker, reputation_tracker, haf_block_explorer)
-# Provides: Python 3.14, Poetry, Docker CLI, JMeter, PostgreSQL client
+# Provides: every python-test-tools tool (pytest, xdist, tavern, deepdiff, psql,
+# ...) at the docker-bake.hcl versions, plus Docker CLI + compose, JMeter/m2u
+# and psycopg2.
 #
-# Based on ci-base-image-ubuntu (Ubuntu 26.04, native Python 3.14).
-# Use with docker-dind service for Docker-in-Docker testing.
+# Built on python-test-tools (Ubuntu 26.04, Python 3.14); docker-bake.hcl builds
+# the base from this checkout. Use with docker-dind service for Docker-in-Docker testing.
 
-ARG CI_BASE_IMAGE_VERSION=ubuntu26.04-pg18-2
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/ci-base-image-ubuntu:${CI_BASE_IMAGE_VERSION}
+ARG PYTHON_TEST_TOOLS_TAG
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${PYTHON_TEST_TOOLS_TAG}
 
 # Copy JMeter and m2u from benchmark-test-runner
 COPY --from=registry.gitlab.syncad.com/hive/common-ci-configuration/benchmark-test-runner:latest \
@@ -23,30 +25,33 @@ ENV JAVA_TOOL_OPTIONS="--add-opens=java.base/java.util=ALL-UNNAMED --add-opens=j
 RUN <<EOF
   set -e
 
-  # Install additional dependencies
-  apt-get update && apt-get install -y --no-install-recommends \
+  # docker-compose-v2 brings the Docker CLI (docker.io) with it
+  apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     openjdk-21-jre-headless \
-    postgresql-client \
     docker-compose-v2 \
+    docker-buildx \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
   # Create symlinks for JMeter and m2u
   ln -s /opt/tools/jmeter/bin/jmeter.sh /usr/bin/jmeter
   ln -s /opt/tools/m2u/m2u /usr/bin/m2u
 
-  # Install Python packages needed by HAF app tests
-  pip3 install --no-cache-dir --break-system-packages psycopg2-binary
+  # Python packages needed by HAF app tests, next to the tools in the venv
+  pip install --no-cache-dir psycopg2-binary
+EOF
 
-  # Ensure hived user exists with UID 1000 (matching HAF container conventions).
-  # The base image should have hived at UID 1000, but if not, create it.
-  # Without explicit -u 1000, useradd picks next available UID (e.g. 2001),
-  # causing tar-extracted files to have wrong ownership inside HAF containers.
-  if ! id hived 2>/dev/null; then
-    userdel --remove ubuntu 2>/dev/null || true
-    useradd -ms /bin/bash -u 1000 -g users hived
-  fi
+# hived at UID 1000 (HAF container convention): without an explicit -u 1000,
+# useradd picks the next free UID (e.g. 2001) and tar-extracted files get the
+# wrong ownership inside HAF containers. hived owns the tools venv so jobs can
+# `pip install` their own test packages next to the tools.
+RUN <<EOF
+  set -e
+  userdel --remove ubuntu 2>/dev/null || true
+  useradd -ms /bin/bash -u 1000 -g users hived
   echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+  chown -R hived:users "${VIRTUAL_ENV}"
 EOF
 
 USER hived
+WORKDIR /home/hived
 CMD ["/bin/bash"]

@@ -39,6 +39,12 @@ variable "CI_BASE_IMAGE_UBUNTU_VERSION" {
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
+  default = "4.0"
+}
+# Tag HAF apps pinned before the runner was built on python-test-tools; it is
+# republished with the current runner so those pins get the tools too. Drop it
+# once no repo sets HAF_APP_TEST_RUNNER_IMAGE to it.
+variable "HAF_APP_TEST_RUNNER_PINNED_TAG" {
   default = "3.1"
 }
 
@@ -314,13 +320,18 @@ target "ci-base-image-ubuntu" {
 
 target "haf-app-test-runner" {
   dockerfile = "Dockerfile.haf-app-test-runner"
-  # The version tag of ci-base-image-ubuntu is only published from the default
-  # branch; on feature branches use the commit-SHA tag pushed by the
-  # build_ci_base_image_ubuntu job in the same pipeline.
+  # Built on python-test-tools like docker-builder, so HAF-app tavern jobs get
+  # the tool versions defined here
   args = {
-    CI_BASE_IMAGE_VERSION = (CI_COMMIT_BRANCH == "" || CI_COMMIT_BRANCH == CI_DEFAULT_BRANCH) ? CI_BASE_IMAGE_UBUNTU_VERSION : CI_COMMIT_SHA
+    PYTHON_TEST_TOOLS_TAG = TEST_TOOLS_MOVING_TAG
   }
-  tags = generate-tags("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
+  contexts = {
+    "registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${TEST_TOOLS_MOVING_TAG}" = "target:python-test-tools"
+  }
+  tags = distinct(concat(
+    generate-tools-tags("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}"),
+    generate-tags("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_PINNED_TAG}")
+  ))
   cache-from = generate-cache-from("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
   cache-to = generate-cache-to("haf-app-test-runner", "${HAF_APP_TEST_RUNNER_VERSION}")
 }

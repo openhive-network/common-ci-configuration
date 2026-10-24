@@ -54,6 +54,11 @@ TOOLS_IMAGE_JOBS = (
     ".lint_code_with_ruff_template",
     ".type_check_with_mypy_template",
 )
+TAVERN_SCRIPTS = (".tavern_install_deps", ".tavern_run_tests")
+# Images templates define for downstream tavern jobs to run in
+RUNNER_IMAGE_VARIABLES = ("HAF_APP_TEST_RUNNER_IMAGE",)
+REGISTRY = "registry.gitlab.syncad.com/hive/common-ci-configuration/"
+PYTHON_TEST_TOOLS = f"{REGISTRY}python-test-tools:"
 
 
 def _bake_defaults() -> Dict[str, str]:
@@ -76,13 +81,84 @@ def _templates() -> List[Path]:
     return sorted((ROOT / "templates").glob("*.yml"))
 
 
-def _load_jobs() -> Dict[str, Any]:
+def _load_template(path: Path) -> Dict[str, Any]:
     loader: Any = type("_Loader", (yaml.SafeLoader,), {})
     loader.add_constructor("!reference", lambda ldr, node: ldr.construct_sequence(node))
+    return yaml.load(path.read_text(), Loader=loader) or {}
+
+
+def _load_jobs() -> Dict[str, Any]:
     jobs: Dict[str, Any] = {}
     for path in _templates():
-        jobs.update(yaml.load(path.read_text(), Loader=loader) or {})
+        jobs.update(_load_template(path))
     return jobs
+
+
+def _template_variables() -> Dict[str, str]:
+    variables: Dict[str, str] = {}
+    for path in _templates():
+        variables.update(_load_template(path).get("variables") or {})
+    return variables
+
+
+def _resolved(jobs: Dict[str, Any], name: str, key: str) -> Any:
+    """`key` of job `name` after `extends` (the job itself, then later parents, win)."""
+    job = jobs[name]
+    if key in job:
+        return job[key]
+    parents = job.get("extends", [])
+    for parent in reversed([parents] if isinstance(parents, str) else parents):
+        value = _resolved(jobs, parent, key)
+        if value is not None:
+            return value
+    return None
+
+
+def _expand(value: str, variables: Dict[str, str]) -> str:
+    previous = None
+    while previous != value:
+        previous = value
+        value = re.sub(r"\$\{(\w+)\}", lambda m: variables.get(m.group(1), m.group(0)), value)
+    return value
+
+
+def _final_base(dockerfile: str) -> str:
+    """Image of the last FROM of `dockerfile` (the stage the build outputs)."""
+    return re.findall(r"^FROM\s+(?:--\S+\s+)*(\S+)", dockerfile, re.MULTILINE)[-1]
+
+
+def _derives_from_python_test_tools(image: str) -> bool:
+    if image.startswith(PYTHON_TEST_TOOLS):
+        return True
+    if not image.startswith(REGISTRY):
+        return False
+    target = re.split(r"[:@]", image[len(REGISTRY):])[0]
+    bake_dockerfiles = dict(
+        re.findall(r'target "([\w-]+)" \{\s*dockerfile = "([^"]+)"', BAKE.read_text())
+    )
+    if target not in bake_dockerfiles:
+        return False
+    return _final_base((ROOT / bake_dockerfiles[target]).read_text()).startswith(PYTHON_TEST_TOOLS)
+
+
+def _tool_job_images() -> Dict[str, str]:
+    """Image of every template lint and tavern job, and of each runner image variable."""
+    jobs = _load_jobs()
+    variables = _template_variables()
+    tavern_jobs = [
+        name
+        for name, job in jobs.items()
+        if isinstance(job, dict)
+        and name not in TAVERN_SCRIPTS
+        and set(TAVERN_SCRIPTS)
+        & {cmd for key in ("before_script", "script") for cmd in _commands(job.get(key))}
+    ]
+    images = {
+        name: _expand(_resolved(jobs, name, "image") or "", variables)
+        for name in [*TOOLS_IMAGE_JOBS, *tavern_jobs]
+    }
+    images.update({name: _expand(variables[name], variables) for name in RUNNER_IMAGE_VARIABLES})
+    return images
 
 
 # A pip install command (with its backslash-continued lines) naming a tool
@@ -147,6 +223,34 @@ def test_lint_jobs_run_in_python_test_tools(job: str) -> None:
     assert _load_jobs()[job]["image"] == "${PYTHON_TEST_TOOLS_IMAGE}"
 
 
+def test_tavern_jobs_are_checked_for_their_image() -> None:
+    assert {".haf_app_tavern_tests", ".haf_app_dind_tavern_tests"} <= set(_tool_job_images())
+
+
+def test_tavern_and_lint_images_derive_from_python_test_tools() -> None:
+    offenders = {
+        name: image
+        for name, image in _tool_job_images().items()
+        if not _derives_from_python_test_tools(image)
+    }
+
+    assert offenders == {}
+
+
+@pytest.mark.parametrize(
+    "dockerfile,expected",
+    [
+        (
+            f"ARG T\nFROM {REGISTRY}mirrors/docker-cli AS cli\nFROM {PYTHON_TEST_TOOLS}${{T}} AS b\n",
+            True,
+        ),
+        (f"FROM {REGISTRY}ci-base-image-ubuntu:${{V}}\nCOPY --from=x /a /a\n", False),
+    ],
+)
+def test_final_base_is_the_last_from(dockerfile: str, expected: bool) -> None:
+    assert _final_base(dockerfile).startswith(PYTHON_TEST_TOOLS) is expected
+
+
 def test_templates_install_no_test_tool_at_job_time() -> None:
     offenders = {
         name: cmds
@@ -175,7 +279,7 @@ def test_templates_select_no_upstream_tool_image() -> None:
 def test_tavern_install_deps_installs_nothing() -> None:
     script = "\n".join(_commands(_load_jobs()[".tavern_install_deps"]["script"]))
 
-    assert re.search(r"\bpip3?\s+install\b|\bvenv\b", script) is None
+    assert re.search(r"\bpip3?\s+install\b|-m\s+venv\b|\bvirtualenv\b", script) is None
 
 
 @pytest.mark.parametrize(
