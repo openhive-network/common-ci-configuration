@@ -76,8 +76,9 @@ variables:
 - `.haf_app_wait_for_postgrest` - Wait for PostgREST with DNS fix
 
 ### Tavern Test Components
+- `HAF_APP_TEST_RUNNER_IMAGE` - haf-app-test-runner on its moving `develop` tag (python-test-tools + Docker CLI/compose, JMeter, psycopg2); `.haf_app_dind_tavern_tests` runs in it. Leave it unset to follow tool bumps; see `common-ci-images.md`
 - `.tavern_test_variables` - pytest workers, tavern version, directories
-- `.tavern_install_deps` - Check the job image provides tavern/pytest (python-test-tools or docker-builder; nothing is installed)
+- `.tavern_install_deps` - Check the job image provides tavern/pytest (haf-app-test-runner, python-test-tools or docker-builder; nothing is installed) and link `./venv` to its tools venv for jobs that still activate one
 - `.tavern_run_tests` - Run pytest with tavern
 - `.tavern_test_artifacts` - Artifacts for tavern tests
 

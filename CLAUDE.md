@@ -169,7 +169,7 @@ The `templates/haf_app_testing.gitlab-ci.yml` provides composable building block
 
 **Tavern Test Components:**
 - `.tavern_test_variables` - pytest workers, tavern version, directories
-- `.tavern_install_deps` - Check the job image provides tavern/pytest (python-test-tools or docker-builder; nothing is installed)
+- `.tavern_install_deps` - Check the job image provides tavern/pytest (haf-app-test-runner, python-test-tools or docker-builder; nothing is installed) and link `./venv` to its tools venv for jobs that still activate one
 - `.tavern_run_tests` - Run pytest with tavern
 - `.tavern_test_artifacts` - Artifacts for tavern tests
 

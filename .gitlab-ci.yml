@@ -453,7 +453,9 @@ build_haf_app_test_runner_image:
   needs:
     - job: build_docker_dind_image
       optional: true
-    - job: build_ci_base_image_ubuntu
+    # bake rebuilds python-test-tools as the runner's base; after this job it
+    # comes from the registry cache
+    - job: build_python_test_tools_image
       optional: true
     - job: build_benchmark_test_runner_image
       optional: true
@@ -465,14 +467,16 @@ build_haf_app_test_runner_image:
       exists:
         - Dockerfile.haf-app-test-runner
       changes:
-        paths:
+        paths: &haf_app_test_runner_sources
           - Dockerfile.haf-app-test-runner
+          - Dockerfile.python-test-tools
+          - Dockerfile.python_runtime
+          - docker-bake.hcl
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.haf-app-test-runner
       changes:
-        paths:
-          - Dockerfile.haf-app-test-runner
+        paths: *haf_app_test_runner_sources
         compare_to: 'refs/heads/develop'
 
 
