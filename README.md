@@ -42,6 +42,8 @@ Don't pin tool versions in your repo. For a deliberate exception, override the t
 
 **Bumping a tool.** Change its variable in `docker-bake.hcl` and merge to `develop`. The develop pipeline rebuilds the images that use it (python-test-tools, node-test-tools, docker-builder, emsdk, ...) and moves the `:develop` tag, so every repo picks up the new version on its next pipeline. Fix only the repos the new version actually breaks.
 
+**Staying in step with aidev.** The versions follow aidev's toolchain definition, which aidev publishes at https://gitlab.syncad.com/hive/aidev-toolchain/-/raw/main/toolchain.yaml (aidev never reads this repository). `tests/test_aidev_toolchain_drift.py`, run by the `test_repository` job on every branch pipeline, fetches that copy anonymously (`AIDEV_TOOLCHAIN_URL` overrides the URL) and fails listing every tool, and the Python/Ubuntu platform, where `docker-bake.hcl` differs; it skips when the copy can't be fetched or parsed. Its `TOOLS` table maps aidev entries to bake variables, and a deliberate difference goes in its `EXCEPTIONS` with the reason. On drift, bump whichever side is behind.
+
 ## Pipeline Skip Variables
 
 The following variables can be set to `"true"` when running a pipeline to skip certain jobs:
