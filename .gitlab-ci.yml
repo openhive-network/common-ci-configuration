@@ -4,6 +4,10 @@ variables:
   DOCKER_DIND_TAG: "$CI_COMMIT_SHA"
   IMAGE_REMOVER_TAG: "$CI_COMMIT_SHA"
   TOX_IMAGE_TAG: "$CI_COMMIT_SHA"
+  # Docker cli image and dind service of the image builds; must equal
+  # DOCKER_VERSION in docker-bake.hcl (checked by
+  # tests/test_tool_versions_defined_once.py), which bake also reads from here
+  DOCKER_VERSION: "29.9.2"
   # =============================================================================
   # Skip Docker Builds - Set to "true" to skip all Docker image builds
   # =============================================================================
@@ -273,7 +277,7 @@ lint_python_scripts:
 
 .build_docker_image:
   extends: .pure_docker_image_builder_job_template
-  image: docker:26.1.4-cli
+  image: docker:${DOCKER_VERSION}-cli
   variables:
     BUILD_TARGET: ""
   before_script:
@@ -334,17 +338,17 @@ build_docker_dind_image:
       exists:
         - Dockerfile.docker-dind
       changes:
-        paths:
+        paths: &docker_dind_sources
           - Dockerfile.docker-dind
+          - docker-bake.hcl
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.docker-dind
       changes:
-        paths:
-          - Dockerfile.docker-dind
+        paths: *docker_dind_sources
         compare_to: 'refs/heads/develop'
   services:
-    - docker:26.1.4-dind
+    - docker:${DOCKER_VERSION}-dind
 
 build_docker_builder_image:
   extends: .build_docker_image

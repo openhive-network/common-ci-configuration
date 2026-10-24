@@ -30,8 +30,9 @@ variables:
   # psycopg2. `develop` is the moving tag the default branch republishes.
   HAF_APP_TEST_RUNNER_TAG: "develop"
   HAF_APP_TEST_RUNNER_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/haf-app-test-runner:${HAF_APP_TEST_RUNNER_TAG}"
-  # specific commit with util-linux for NFS flock support
-  DOCKER_DIND_TAG: "3dd346380da7f28cdaf3ef3955559c905d94bd1c"
+  # docker-dind (with util-linux for NFS flock support) at docker-bake.hcl's
+  # DOCKER_VERSION, as published from the default branch
+  DOCKER_DIND_TAG: "latest"
 
   # Cache manager configuration
   CACHE_MANAGER: "/tmp/cache-manager.sh"

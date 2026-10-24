@@ -4,9 +4,13 @@
 # versions), so HAF-app e2e jobs that need Docker run the same tools as the
 # rest of CI. docker-bake.hcl builds the base from this checkout.
 ARG PYTHON_TEST_TOOLS_TAG
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-26.1.4-cli AS docker-cli
+ARG DOCKER_VERSION
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-${DOCKER_VERSION}-cli AS docker-cli
 
 FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${PYTHON_TEST_TOOLS_TAG} AS docker-builder
+ARG DOCKER_VERSION
+ARG DOCKER_COMPOSE_VERSION
+ARG DOCKER_BUILDX_VERSION
 
 # Disable buildx attestations (provenance/SBOM) to avoid panic in buildkit
 # when parsing empty digests. Can be removed when buildkit bug is fixed.
@@ -42,6 +46,13 @@ RUN <<EOF
     ln -s /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
     ln -s /opt/tools/jmeter/bin/jmeter.sh /usr/bin/jmeter
     ln -s /opt/tools/m2u/m2u /usr/bin/m2u
+
+    docker --version
+    docker compose version
+    docker buildx version
+    docker --version | grep -qF "Docker version ${DOCKER_VERSION},"
+    test "$(docker compose version --short)" = "${DOCKER_COMPOSE_VERSION#v}"
+    test "$(docker buildx version | cut -d' ' -f2)" = "${DOCKER_BUILDX_VERSION}"
 EOF
 
 # hived (UID 1000, owner of the tools venv) comes from python-test-tools

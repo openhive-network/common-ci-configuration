@@ -119,6 +119,22 @@ variable "PLAYWRIGHT_VERSION" {
 variable "TYPESCRIPT_VERSION" {
   default = "5.9.3"
 }
+# Docker: the docker:<DOCKER_VERSION>-cli mirror whose CLI docker-builder and
+# haf-app-test-runner copy, and the docker:<DOCKER_VERSION>-dind mirror
+# docker-dind is built on. .gitlab-ci.yml pins its cli image and dind service
+# with a CI variable of the same name and value
+# (tests/test_tool_versions_defined_once.py checks it).
+variable "DOCKER_VERSION" {
+  default = "29.9.2"
+}
+# The compose and buildx plugins docker:<DOCKER_VERSION>-cli ships; the builds
+# fail when the copied plugins report other versions
+variable "DOCKER_COMPOSE_VERSION" {
+  default = "v5.6.1"
+}
+variable "DOCKER_BUILDX_VERSION" {
+  default = "v0.38.1"
+}
 # Image version tags, bumped when an image changes in a way consumers should be
 # able to pin; most consumers follow TEST_TOOLS_MOVING_TAG instead
 variable "PYTHON_TEST_TOOLS_IMAGE_VERSION" {
@@ -195,7 +211,10 @@ target "docker-builder" {
   # same Python and tool versions as every other test job. The context builds
   # the base from this checkout, so both images always carry the same versions.
   args = {
-    PYTHON_TEST_TOOLS_TAG = TEST_TOOLS_MOVING_TAG
+    PYTHON_TEST_TOOLS_TAG = TEST_TOOLS_MOVING_TAG,
+    DOCKER_VERSION = DOCKER_VERSION,
+    DOCKER_COMPOSE_VERSION = DOCKER_COMPOSE_VERSION,
+    DOCKER_BUILDX_VERSION = DOCKER_BUILDX_VERSION,
   }
   contexts = {
     "registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${TEST_TOOLS_MOVING_TAG}" = "target:python-test-tools"
@@ -207,6 +226,9 @@ target "docker-builder" {
 
 target "docker-dind" {
   dockerfile = "Dockerfile.docker-dind"
+  args = {
+    DOCKER_VERSION = DOCKER_VERSION
+  }
   tags = generate-tags("docker-dind", "${tag}")
   cache-from = generate-cache-from("docker-dind", "${tag}")
   cache-to = generate-cache-to("docker-dind", "${tag}")
@@ -323,7 +345,10 @@ target "haf-app-test-runner" {
   # Built on python-test-tools like docker-builder, so HAF-app tavern jobs get
   # the tool versions defined here
   args = {
-    PYTHON_TEST_TOOLS_TAG = TEST_TOOLS_MOVING_TAG
+    PYTHON_TEST_TOOLS_TAG = TEST_TOOLS_MOVING_TAG,
+    DOCKER_VERSION = DOCKER_VERSION,
+    DOCKER_COMPOSE_VERSION = DOCKER_COMPOSE_VERSION,
+    DOCKER_BUILDX_VERSION = DOCKER_BUILDX_VERSION,
   }
   contexts = {
     "registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${TEST_TOOLS_MOVING_TAG}" = "target:python-test-tools"

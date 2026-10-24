@@ -13,6 +13,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 BAKE = ROOT / "docker-bake.hcl"
+GITLAB_CI = ROOT / ".gitlab-ci.yml"
 TOOL_VARIABLES = (
     "PYTEST_VERSION",
     "PYTEST_XDIST_VERSION",
@@ -34,7 +35,18 @@ TOOL_VARIABLES = (
     "PNPM_VERSION",
     "PLAYWRIGHT_VERSION",
     "TYPESCRIPT_VERSION",
+    "DOCKER_VERSION",
+    "DOCKER_COMPOSE_VERSION",
+    "DOCKER_BUILDX_VERSION",
 )
+# Versions no file but docker-bake.hcl (and the CI variable below) may spell out
+REPO_WIDE_VARIABLES = ("DOCKER_VERSION", "DOCKER_COMPOSE_VERSION", "DOCKER_BUILDX_VERSION")
+# .gitlab-ci.yml image and service tags cannot read bake variables; it pins these
+# through a CI variable of the same name that must hold the same value
+CI_PINNED_VARIABLES = ("DOCKER_VERSION",)
+# A docker:<tag>-cli / -dind image or its mirrors/docker-<tag>-cli / -dind copy
+DOCKER_IMAGE_TAG = re.compile(r"\bdocker[:-]([^\s\"'/]+?)-(?:cli|dind)\b")
+DOCKER_TAG_PLACEHOLDERS = ("${DOCKER_VERSION}", "<DOCKER_VERSION>")
 TOOL_PACKAGES = (
     "pytest",
     "pytest-xdist",
@@ -79,6 +91,22 @@ def _dockerfiles() -> List[Path]:
 
 def _templates() -> List[Path]:
     return sorted((ROOT / "templates").glob("*.yml"))
+
+
+def _repo_files() -> List[Path]:
+    """Text files of the checkout outside hidden directories, plus .gitlab-ci.yml.
+
+    This file is left out: its examples spell versions out.
+    """
+    files = [
+        path
+        for path in ROOT.rglob("*")
+        if path.is_file()
+        and path != Path(__file__).resolve()
+        and not any(part.startswith(".") for part in path.relative_to(ROOT).parts)
+    ]
+    texts = [path for path in files if b"\0" not in path.read_bytes()]
+    return sorted([*texts, GITLAB_CI])
 
 
 def _load_template(path: Path) -> Dict[str, Any]:
@@ -199,6 +227,72 @@ def test_tool_version_appears_only_in_its_bake_variable(variable: str) -> None:
 
     assert elsewhere == {}
     assert in_bake == []
+
+
+@pytest.mark.parametrize("variable", REPO_WIDE_VARIABLES)
+def test_version_appears_nowhere_but_bake_and_ci_variable(variable: str) -> None:
+    value = _bake_defaults()[variable]
+    allowed = {
+        BAKE: lambda line: "default =" in line,
+        GITLAB_CI: lambda line: line.strip() == f'{variable}: "{value}"',
+    }
+
+    elsewhere = {
+        str(path.relative_to(ROOT)): uses
+        for path in _repo_files()
+        if (
+            uses := [
+                line
+                for line in _version_uses(value, path.read_text(errors="replace"))
+                if not allowed.get(path, lambda _: False)(line)
+            ]
+        )
+    }
+
+    assert elsewhere == {}
+
+
+@pytest.mark.parametrize("variable", CI_PINNED_VARIABLES)
+def test_ci_variable_equals_bake_variable(variable: str) -> None:
+    assert _load_template(GITLAB_CI)["variables"][variable] == _bake_defaults()[variable]
+
+
+def test_docker_images_take_their_tag_from_docker_version() -> None:
+    literal = {
+        str(path.relative_to(ROOT)): tags
+        for path in _repo_files()
+        if (
+            tags := [
+                tag
+                for tag in DOCKER_IMAGE_TAG.findall(path.read_text(errors="replace"))
+                if tag not in DOCKER_TAG_PLACEHOLDERS
+            ]
+        )
+    }
+
+    assert literal == {}
+
+
+def test_ci_docker_image_and_service_use_docker_version() -> None:
+    jobs = _load_template(GITLAB_CI)
+
+    assert jobs[".build_docker_image"]["image"] == "docker:${DOCKER_VERSION}-cli"
+    assert "docker:${DOCKER_VERSION}-dind" in jobs["build_docker_dind_image"]["services"]
+
+
+@pytest.mark.parametrize(
+    "text,tags",
+    [
+        ("image: docker:26.1.4-cli", ["26.1.4"]),
+        ("FROM registry/mirrors/docker-29.9.2-dind", ["29.9.2"]),
+        ("- docker:${DOCKER_VERSION}-dind", ["${DOCKER_VERSION}"]),
+        ("docker:29.9.2-cli-alpine3.24", ["29.9.2"]),
+        ("hive/common-ci-configuration/docker-dind:latest", []),
+        ("docker-builder:latest", []),
+    ],
+)
+def test_docker_image_tag_finds_cli_and_dind_tags(text: str, tags: List[str]) -> None:
+    assert DOCKER_IMAGE_TAG.findall(text) == tags
 
 
 def test_dockerfiles_declare_tool_args_without_defaults() -> None:

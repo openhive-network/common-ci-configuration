@@ -8,9 +8,13 @@
 # the base from this checkout. Use with docker-dind service for Docker-in-Docker testing.
 
 ARG PYTHON_TEST_TOOLS_TAG
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-26.1.4-cli AS docker-cli
+ARG DOCKER_VERSION
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/docker-${DOCKER_VERSION}-cli AS docker-cli
 
 FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${PYTHON_TEST_TOOLS_TAG}
+ARG DOCKER_VERSION
+ARG DOCKER_COMPOSE_VERSION
+ARG DOCKER_BUILDX_VERSION
 
 # Static docker CLI, buildx and compose (Ubuntu's docker-compose-v2 and
 # docker-buildx pull in the whole docker.io package)
@@ -41,6 +45,13 @@ RUN <<EOF
   # Create symlinks for JMeter and m2u
   ln -s /opt/tools/jmeter/bin/jmeter.sh /usr/bin/jmeter
   ln -s /opt/tools/m2u/m2u /usr/bin/m2u
+
+  docker --version
+  docker compose version
+  docker buildx version
+  docker --version | grep -qF "Docker version ${DOCKER_VERSION},"
+  test "$(docker compose version --short)" = "${DOCKER_COMPOSE_VERSION#v}"
+  test "$(docker buildx version | cut -d' ' -f2)" = "${DOCKER_BUILDX_VERSION}"
 EOF
 
 # hived (UID 1000) comes from python-test-tools and owns the tools venv;
