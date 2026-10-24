@@ -141,7 +141,9 @@ repos consume them and how to bump a tool.
 **Includes:** pytest, pytest-xdist, pytest-timeout, tavern, deepdiff, jsondiff,
 prettytable, ruff, mypy, pylint, yamllint, sqlfluff, tox (in `/python_venv`,
 first on PATH), shellcheck, postgrest, psql (PGDG client), poetry, git, jq,
-xmlstarlet
+xmlstarlet. The `hived` user (UID 1000, HAF container convention) owns the venv,
+so jobs in the images built on this one can `pip install` their own test
+packages next to the tools.
 
 **Used by:** `.haf_app_lint_bash`, `.haf_app_lint_sql`,
 `.lint_code_with_ruff_template`, `.type_check_with_mypy_template`, this
@@ -151,8 +153,11 @@ repository's lint jobs, and as the base of docker-builder (tavern jobs).
 
 **Base:** Ubuntu 26.04
 
-**Includes:** node, pnpm, TypeScript, Playwright with Chromium and its headless
-shell (`PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`)
+**Includes:** node, pnpm, TypeScript, Playwright with the Chromium headless
+shell (`PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`). The full Chromium build is
+not included: headless runs (Playwright's default) use the shell, and a job
+that runs headed or with `channel: 'chromium'` has to `playwright install
+chromium` itself.
 
 **Used by:** `.npm_test_template`.
 
@@ -166,9 +171,10 @@ the docker-bake.hcl versions
 
 Shared test runner for HAF applications' sync and tavern jobs. Adds JMeter + m2u
 (copied from benchmark-test-runner), openjdk 21 (with the `JAVA_TOOL_OPTIONS`
-m2u needs), docker-compose-v2 with the Docker CLI and buildx, and psycopg2 in
-the tools venv. `hived` (UID 1000) owns the venv, so jobs can `pip install`
-their own test packages next to the tools.
+m2u needs), the static Docker CLI with the compose and buildx plugins (from the
+official `docker:26.1.4-cli` image, like docker-builder) and psycopg2 in the
+tools venv. `hived` (UID 1000) owns the venv, so jobs can `pip install` their
+own test packages next to the tools.
 
 **Tags:** `develop` (moving; the default branch republishes it whenever the
 image or a tool version changes), `4.0` (`HAF_APP_TEST_RUNNER_VERSION`) and

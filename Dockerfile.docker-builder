@@ -44,15 +44,7 @@ RUN <<EOF
     ln -s /opt/tools/m2u/m2u /usr/bin/m2u
 EOF
 
-# hived at UID 1000 (HAF container convention); owns the tools venv so jobs can
-# `pip install` their own test packages next to the tools
-RUN <<EOF
-    set -e
-    userdel --remove ubuntu 2>/dev/null || true
-    useradd -ms /bin/bash -u 1000 -g users hived
-    echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-    chown -R hived:users "${VIRTUAL_ENV}"
-EOF
+# hived (UID 1000, owner of the tools venv) comes from python-test-tools
 USER hived
 WORKDIR /home/hived
 

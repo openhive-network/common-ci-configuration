@@ -9,7 +9,7 @@ ENV APT_CACHE_DIR=/var/cache/buildkit/apt
 
 RUN --mount=type=cache,mode=0777,sharing=locked,target=${APT_CACHE_DIR} \
     apt-get update && \
-    apt-get install -y wget git bash sudo python3.14 python3.14-venv python3-pip && \
+    apt-get install -y --no-install-recommends wget git bash sudo python3.14 python3.14-venv python3-pip && \
     python3 -m venv --system-site-packages /python_venv && \
     mkdir -vp /packages_to_install && cd /packages_to_install && \
     cp -v /usr/bin/dpkg* \
