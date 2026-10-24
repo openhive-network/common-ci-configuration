@@ -129,7 +129,7 @@ variable "DOCKER_VERSION" {
 }
 # The compose and buildx plugins docker:<DOCKER_VERSION>-cli ships; the builds
 # fail when the copied plugins report other versions. Not named like the
-# DOCKER_COMPOSE_VERSION / DOCKER_BUILDX_VERSION env of the docker:*-cli job
+# DOCKER_COMPOSE_VERSION / DOCKER_BUILDX_VERSION env of the official docker cli job
 # image, which bake would read in place of these defaults.
 variable "DOCKER_COMPOSE_PLUGIN_VERSION" {
   default = "v5.6.1"
