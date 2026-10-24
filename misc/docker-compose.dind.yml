@@ -1,7 +1,8 @@
 version: '3.9'
 services:
   docker:
-    image: docker:26.1.4-dind
+    # common-ci-configuration's dind (docker:<DOCKER_VERSION>-dind, see docker-bake.hcl)
+    image: registry.gitlab.syncad.com/hive/common-ci-configuration/docker-dind:latest
     privileged: true
     environment:
       - DOCKER_TLS_CERTDIR=/certs

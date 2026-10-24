@@ -40,6 +40,8 @@ my_tests:
 
 Don't pin tool versions in your repo. For a deliberate exception, override the tag (`PYTHON_TEST_TOOLS_TAG` / `NODE_TEST_TOOLS_TAG`, e.g. to a commit SHA).
 
+**Docker.** `DOCKER_VERSION` in `docker-bake.hcl` is the version of the docker CLI that docker-builder and haf-app-test-runner copy from the official `docker:<DOCKER_VERSION>-cli` image and of the `docker:<DOCKER_VERSION>-dind` image docker-dind is built on; `DOCKER_COMPOSE_PLUGIN_VERSION` and `DOCKER_BUILDX_PLUGIN_VERSION` are the plugin versions that cli image ships, and the builds fail if the copied plugins report anything else. `.gitlab-ci.yml` cannot read bake variables, so it sets a `DOCKER_VERSION` CI variable for its cli image and dind service; `tests/test_tool_versions_defined_once.py` fails if it differs from the bake value or if the version appears literally anywhere else. Bumping Docker = change the three bake variables and the CI variable together (and mirror the two new upstream images under `mirrors/docker-<DOCKER_VERSION>-cli` / `mirrors/docker-<DOCKER_VERSION>-dind`).
+
 **Bumping a tool.** Change its variable in `docker-bake.hcl` and merge to `develop`. The develop pipeline rebuilds the images that use it (python-test-tools, node-test-tools, docker-builder, emsdk, ...) and moves the `:develop` tag, so every repo picks up the new version on its next pipeline. Fix only the repos the new version actually breaks.
 
 **Staying in step with aidev.** The versions follow aidev's toolchain definition, which aidev publishes at https://gitlab.syncad.com/hive/aidev-toolchain/-/raw/main/toolchain.yaml (aidev never reads this repository). `tests/test_aidev_toolchain_drift.py`, run by the `test_repository` job on every branch pipeline, fetches that copy anonymously (`AIDEV_TOOLCHAIN_URL` overrides the URL) and fails listing every tool, and the Python/Ubuntu platform, where `docker-bake.hcl` differs; it skips when the copy can't be fetched or parsed. Its `TOOLS` table maps aidev entries to bake variables, and a deliberate difference goes in its `EXCEPTIONS` with the reason. On drift, bump whichever side is behind.
@@ -76,8 +78,10 @@ Currently available miscellaneous files are [checkstyle2junit.xslt](misc/checkst
 `docker-compose.dind.yml` is a Compose file for setting up a simple Docker-in-Docker container. To connect to that container with a Docker CLI one use command like:
 
 ```bash
-docker run -it --rm --network docker -e DOCKER_TLS_CERTDIR=/certs -v docker-certs-client:/certs/client:ro --name docker-cli docker:20.10.21
+docker run -it --rm --network docker -e DOCKER_TLS_CERTDIR=/certs -v docker-certs-client:/certs/client:ro --name docker-cli docker:<DOCKER_VERSION>-cli
 ```
+
+where `<DOCKER_VERSION>` is the `DOCKER_VERSION` of [docker-bake.hcl](docker-bake.hcl), the version of the DinD container.
 
 The iportant bit is connecting to the right network (`--network docker`) and mounting the TLS certificates (`-e DOCKER_TLS_CERTDIR=/certs -v docker-certs-client:/certs/client:ro`). Other parameters can be changed to suit your purposes.
 
