@@ -32,7 +32,7 @@ variable (`select-python` wrapper).
 - Boost (built from source, static, -fPIC), OpenSSL, snappy, zopfli
 - Prebuilt RocksDB (commit-hash-indexed) and the aarch64 buildroot cross
   toolchain (`/opt/hive/cross/aarch64`)
-- Poetry, Docker CLI + buildx, PostgreSQL 18 client libraries
+- Poetry, Docker CLI + buildx (`DOCKER_VERSION`, `DOCKER_BUILDX_PLUGIN_VERSION`), PostgreSQL 18 client libraries
 
 **Current version:** `pypa_2_28-pg18-4` (canonical tag; supersedes
 `pypa_2_28-4`, `pypa_2_28-pg18-3` and `pypa_2_28-pg18-arm-1`)
@@ -54,7 +54,7 @@ Ubuntu-built binaries).
 **Includes:**
 - Distro toolchain: gcc 15.2, clang/clang-tidy/lld 21, CMake 4.2, Boost 1.90
 - libpqxx 7.10 (built from source), PostgreSQL 18 dev packages (pgdg)
-- Poetry, Docker CLI + buildx, sccache, websocat, faketime
+- Poetry, Docker CLI + buildx (`DOCKER_VERSION`, `DOCKER_BUILDX_PLUGIN_VERSION`), sccache, websocat, faketime
 
 **Current version:** `ubuntu26.04-pg18-1`
 
@@ -204,7 +204,7 @@ change of its own.
 
 ### benchmark-test-runner
 
-**Base:** Alpine 3.17
+**Base:** Alpine at `ALPINE_VERSION` (docker-bake.hcl)
 
 **Python:** 3.x (Alpine system Python)
 
@@ -297,9 +297,10 @@ OpenResty (nginx + Lua) for reverse proxy and API gateway.
 
 ### alpine
 
-**Base:** Alpine 3.21.3
+**Base:** Alpine at `ALPINE_VERSION` (docker-bake.hcl)
 
-Minimal Alpine image mirrored to GitLab registry.
+Minimal Alpine image mirrored to GitLab registry. Templates select it through
+`ALPINE_IMAGE` (`templates/base.gitlab-ci.yml`).
 
 **Used by:** Simple utility jobs, base for other images.
 

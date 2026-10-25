@@ -9,14 +9,14 @@
 # distro toolchain, so no deadsnakes PPA or apt.llvm.org repo is needed.
 #
 # Build:
-#   docker build -f Dockerfile.ci-base-image-ubuntu -t ci-base-image-ubuntu:ubuntu26.04-pg18-1 .
+#   docker buildx bake ci-base-image-ubuntu   (passes the Docker CLI/buildx versions)
 
 ARG BASE_IMAGE=phusion/baseimage:resolute-1.0.11
 FROM ${BASE_IMAGE}
 
 ARG POETRY_VERSION=2.1.3
-ARG DOCKER_CLI_VERSION=28.0.1
-ARG BUILDX_VERSION=v0.24.0
+ARG DOCKER_VERSION
+ARG DOCKER_BUILDX_PLUGIN_VERSION
 ARG CLANG_VERSION=21
 ARG PG_MAJOR=18
 
@@ -140,11 +140,11 @@ RUN useradd -ms /bin/bash -u 1000 -g users -c "Hived daemon account" hived && \
     echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Install Docker CLI
-RUN curl -fsSLO "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" && \
-    tar xzvf "docker-${DOCKER_CLI_VERSION}.tgz" --strip 1 -C /usr/local/bin docker/docker && \
-    rm "docker-${DOCKER_CLI_VERSION}.tgz" && \
+RUN curl -fsSLO "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz" && \
+    tar xzvf "docker-${DOCKER_VERSION}.tgz" --strip 1 -C /usr/local/bin docker/docker && \
+    rm "docker-${DOCKER_VERSION}.tgz" && \
     mkdir -p /usr/libexec/docker/cli-plugins && \
-    curl -fsSL "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-amd64" \
+    curl -fsSL "https://github.com/docker/buildx/releases/download/${DOCKER_BUILDX_PLUGIN_VERSION}/buildx-${DOCKER_BUILDX_PLUGIN_VERSION}.linux-amd64" \
         -o /usr/libexec/docker/cli-plugins/docker-buildx && \
     chmod +x /usr/libexec/docker/cli-plugins/docker-buildx
 

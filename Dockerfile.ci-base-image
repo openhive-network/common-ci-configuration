@@ -213,8 +213,8 @@ RUN rm -rf /tmp/rocksdb-build
 FROM build-deps
 
 ARG POETRY_VERSION=2.1.3
-ARG DOCKER_CLI_VERSION=28.0.1
-ARG BUILDX_VERSION=v0.24.0
+ARG DOCKER_VERSION
+ARG DOCKER_BUILDX_PLUGIN_VERSION
 
 ENV DEFAULT_PYTHON_VERSION=3.14
 ENV PYTHON_VERSION=${DEFAULT_PYTHON_VERSION}
@@ -425,11 +425,11 @@ RUN useradd -ms /bin/bash -u 1000 -g users -c "Hived daemon account" hived && \
     echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Install Docker CLI
-RUN curl -fsSLO "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" && \
-    tar xzvf "docker-${DOCKER_CLI_VERSION}.tgz" --strip 1 -C /usr/local/bin docker/docker && \
-    rm "docker-${DOCKER_CLI_VERSION}.tgz" && \
+RUN curl -fsSLO "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz" && \
+    tar xzvf "docker-${DOCKER_VERSION}.tgz" --strip 1 -C /usr/local/bin docker/docker && \
+    rm "docker-${DOCKER_VERSION}.tgz" && \
     mkdir -p /usr/libexec/docker/cli-plugins && \
-    curl -fsSL "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-amd64" \
+    curl -fsSL "https://github.com/docker/buildx/releases/download/${DOCKER_BUILDX_PLUGIN_VERSION}/buildx-${DOCKER_BUILDX_PLUGIN_VERSION}.linux-amd64" \
         -o /usr/libexec/docker/cli-plugins/docker-buildx && \
     chmod +x /usr/libexec/docker/cli-plugins/docker-buildx
 

@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.4
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/alpine-3.17.0 as build
+ARG ALPINE_VERSION
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/alpine-${ALPINE_VERSION} as build
 
 COPY <<-EOF /opt/patch.sed
   s/jtl2junit/m2u/g
@@ -50,17 +51,20 @@ RUN <<EOF
   chmod +x m2u
 EOF
 
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/alpine-3.17.0
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/alpine-${ALPINE_VERSION}
+
+ARG PRETTYTABLE_VERSION
 
 COPY --from=build /opt/tools /opt/tools
 
 RUN <<EOF
   set -e
   # Install system dependencies
-  apk add --no-cache bash ca-certificates openjdk11-jre python3 py3-pip
+  apk add --no-cache bash ca-certificates openjdk11-jre python3 py3-pip py3-requests
 
-  # Install Python dependencies
-  pip3 install prettytable requests
+  # Alpine packages a far older prettytable than the scripts expect; Alpine's
+  # python is externally managed (PEP 668), hence --break-system-packages
+  pip3 install --no-cache-dir --break-system-packages "prettytable==${PRETTYTABLE_VERSION}"
 
   # Creater symlinks in bin directory
   ln -s /opt/tools/jmeter/bin/jmeter /usr/bin/jmeter

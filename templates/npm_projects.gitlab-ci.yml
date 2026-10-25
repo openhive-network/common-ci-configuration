@@ -2,8 +2,9 @@ include:
   - local: templates/base.gitlab-ci.yml
 
 variables:
-  # emsdk's node, pnpm, Playwright and TypeScript versions come from docker-bake.hcl
-  EMSCRIPTEN_IMAGE_TAG: "5.0.2-4@sha256:966dd9e9da494d184fcc7f622bb24d93c41b8d58c814156aa79cd1d70f31d9ab"
+  # The emsdk tag docker-bake.hcl builds (tests/test_tool_versions_defined_once.py
+  # checks it); emsdk's node, pnpm and Playwright versions come from docker-bake.hcl too
+  EMSCRIPTEN_IMAGE_TAG: "5.0.2-6"
   EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG"
 
 .node_based_job_base:
@@ -272,7 +273,7 @@ variables:
       NPM_VERSION="$(npm --version)"
       if [ "$(printf '%s\n%s\n' "${NPM_MIN_STAGE_VERSION}" "${NPM_VERSION}" | sort -V | head -n1)" != "${NPM_MIN_STAGE_VERSION}" ]; then
         echo "ERROR: npm ${NPM_VERSION} does not support staged publishing (npm >= ${NPM_MIN_STAGE_VERSION} required)."
-        echo "Use an emsdk image >= 5.0.2-4 (EMSCRIPTEN_IMAGE_TAG) or a NODEJS_VERSION shipping a newer npm."
+        echo "Use the template's default EMSCRIPTEN_IMAGE_TAG or a NODEJS_VERSION shipping a newer npm."
         exit 1
       fi
 

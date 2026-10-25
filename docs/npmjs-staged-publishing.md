@@ -10,8 +10,8 @@ The GitLab package registry deploy (`.npm_deploy_package_template`, `npm_publish
 
 ## Requirements
 
-- npm >= 11.15 in the job image. The emsdk image `5.0.2-4` (Node 24.21.0, npm 11.19) is the
-  template default. The job fails with a clear message on an older npm.
+- npm >= 11.15 in the job image. The template's default emsdk image (Node 24.21.0,
+  npm 11.19; its tag is the one `docker-bake.hcl` builds) qualifies. The job fails with a clear message on an older npm.
 - An npm **granular access token** with:
   - permission **Read and write (stage only)**;
   - package/scope access limited to the `@hiveio` packages (organization `hiveio`);

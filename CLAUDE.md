@@ -121,7 +121,7 @@ find-upstream-image.sh \
 - Python version: `docker-bake.hcl` (`PYTHON_VERSION`, `PYTHON_RUNTIME_VERSION`)
 - Emscripten version: `docker-bake.hcl` (`EMSCRIPTEN_VERSION`)
 - Docker CLI/dind version: `docker-bake.hcl` (`DOCKER_VERSION`, plus `DOCKER_COMPOSE_PLUGIN_VERSION` / `DOCKER_BUILDX_PLUGIN_VERSION`); `.gitlab-ci.yml` repeats `DOCKER_VERSION` as a CI variable, kept equal by `tests/test_tool_versions_defined_once.py`
-- emsdk image tag for consumers: `templates/npm_projects.gitlab-ci.yml` (`EMSCRIPTEN_IMAGE_TAG`)
+- emsdk image tag for consumers: `templates/npm_projects.gitlab-ci.yml` (`EMSCRIPTEN_IMAGE_TAG`) and alpine tag `templates/base.gitlab-ci.yml` (`ALPINE_IMAGE_TAG`); templates cannot read bake variables, so the test checks each equals the tag `docker-bake.hcl` builds
 - Test/lint tool versions (pytest, ruff, node, pnpm, ...): `docker-bake.hcl` only - passed as build args to python-test-tools, node-test-tools, docker-builder (built on python-test-tools) and emsdk; Dockerfiles have no defaults and templates never pin a tool (see README "CI/test tool versions")
 
 ## CI Builder Infrastructure
