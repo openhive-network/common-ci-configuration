@@ -9,6 +9,10 @@ variables:
   NPM_CONFIG_REGISTRY: "http://npm-cache.syncad.com:8080/"
   PIP_INDEX_URL: "http://pypi-cache.syncad.com:8080/root/pypi/+simple/"
   PIP_TRUSTED_HOST: "pypi-cache.syncad.com"
+  # pip's defaults (15 s read timeout, 5 retries) are shorter than a devpi
+  # cache miss can take, so a cold wheel would fail the job instead of delaying it.
+  PIP_DEFAULT_TIMEOUT: "120"
+  PIP_RETRIES: "10"
 
 include:
   - local: templates/base.gitlab-ci.yml
