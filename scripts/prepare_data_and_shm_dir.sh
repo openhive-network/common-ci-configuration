@@ -33,7 +33,18 @@ else
   mkdir -p $DATA_BASE_DIR/datadir
   mkdir -p $DATA_BASE_DIR/shm_dir
   # Ensure dirs are owned by the hived user so containers can write without UID remapping
-  chown -R ${HIVED_UID:-1000}:${HIVED_UID:-1000} $DATA_BASE_DIR/datadir $DATA_BASE_DIR/shm_dir
+  HIVED_UID="${HIVED_UID:-1000}"
+  OWNED_DIRS=("$DATA_BASE_DIR/datadir" "$DATA_BASE_DIR/shm_dir")
+  if [ "$(id -u)" -eq 0 ]; then
+    chown -R "$HIVED_UID:$HIVED_UID" "${OWNED_DIRS[@]}"
+  elif [ "$(id -u)" -eq "$HIVED_UID" ] && [ -z "$(find "${OWNED_DIRS[@]}" ! -user "$HIVED_UID" -print -quit 2>/dev/null || echo unreadable)" ]; then
+    # A non-root user can only chown to groups it belongs to; there is no group
+    # HIVED_UID in the non-root docker-builder image, so leave the group alone.
+    echo "datadir and shm_dir are already owned by HIVED_UID $HIVED_UID"
+  elif ! sudo -n chown -R "$HIVED_UID:$HIVED_UID" "${OWNED_DIRS[@]}"; then
+    echo "ERROR: running as uid $(id -u), not root and not HIVED_UID $HIVED_UID (or some files are owned by another uid), and 'sudo -n chown' failed; cannot make ${OWNED_DIRS[*]} owned by $HIVED_UID"
+    exit 1
+  fi
 fi
 
 function handle_single_file_of_block_log() {
