@@ -456,12 +456,14 @@ build_benchmark_test_runner_image:
       changes:
         paths:
           - Dockerfile.benchmark-test-runner
+          - docker-bake.hcl
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.benchmark-test-runner
       changes:
         paths:
           - Dockerfile.benchmark-test-runner
+          - docker-bake.hcl
         compare_to: 'refs/heads/develop'
 
 build_haf_app_test_runner_image:
@@ -625,12 +627,14 @@ build_alpine_image:
       changes:
         paths:
           - Dockerfile.alpine
+          - docker-bake.hcl
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.alpine
       changes:
         paths:
           - Dockerfile.alpine
+          - docker-bake.hcl
         compare_to: 'refs/heads/develop'
 
 build_python_image:

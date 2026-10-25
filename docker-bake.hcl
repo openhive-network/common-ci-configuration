@@ -202,6 +202,10 @@ function "generate-cache-to" {
 
 target "benchmark-test-runner" {
   dockerfile = "Dockerfile.benchmark-test-runner"
+  args = {
+    ALPINE_VERSION = ALPINE_VERSION,
+    PRETTYTABLE_VERSION = PRETTYTABLE_VERSION,
+  }
   tags = generate-tags("benchmark-test-runner", "${tag}")
   cache-from = generate-cache-from("benchmark-test-runner", "${tag}")
   cache-to = generate-cache-to("benchmark-test-runner", "${tag}")
@@ -300,6 +304,9 @@ target "postgrest" {
 
 target "alpine" {
   dockerfile = "Dockerfile.alpine"
+  args = {
+    ALPINE_VERSION = ALPINE_VERSION,
+  }
   tags = generate-tags("alpine", "${ALPINE_VERSION}")
   cache-from = generate-cache-from("alpine", "${ALPINE_VERSION}")
   cache-to = generate-cache-to("alpine", "${ALPINE_VERSION}")
@@ -329,6 +336,10 @@ target "python_development" {
 
 target "ci-base-image" {
   dockerfile = "Dockerfile.ci-base-image"
+  args = {
+    DOCKER_VERSION = DOCKER_VERSION,
+    DOCKER_BUILDX_PLUGIN_VERSION = DOCKER_BUILDX_PLUGIN_VERSION,
+  }
   tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
   cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
   cache-to = generate-cache-to("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
@@ -336,6 +347,10 @@ target "ci-base-image" {
 
 target "ci-base-image-ubuntu" {
   dockerfile = "Dockerfile.ci-base-image-ubuntu"
+  args = {
+    DOCKER_VERSION = DOCKER_VERSION,
+    DOCKER_BUILDX_PLUGIN_VERSION = DOCKER_BUILDX_PLUGIN_VERSION,
+  }
   tags = generate-tags("ci-base-image-ubuntu", "${CI_BASE_IMAGE_UBUNTU_VERSION}")
   cache-from = generate-cache-from("ci-base-image-ubuntu", "${CI_BASE_IMAGE_UBUNTU_VERSION}")
   cache-to = generate-cache-to("ci-base-image-ubuntu", "${CI_BASE_IMAGE_UBUNTU_VERSION}")

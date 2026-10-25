@@ -1344,7 +1344,7 @@ include:
 .haf_app_cache_cleanup:
   extends: .job-defaults
   stage: cleanup
-  image: alpine:latest
+  image: "${ALPINE_IMAGE}"
   variables:
     HAF_APP_CACHE_TYPE: ""    # Must be set
     CLEANUP_PATTERN: ""       # Optional glob pattern

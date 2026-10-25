@@ -41,6 +41,9 @@ TOOL_VARIABLES = (
     "DOCKER_COMPOSE_PLUGIN_VERSION",
     "DOCKER_BUILDX_PLUGIN_VERSION",
 )
+# Base image versions, passed to Dockerfiles like the tool versions
+BASE_IMAGE_VARIABLES = ("EMSCRIPTEN_VERSION", "ALPINE_VERSION")
+BUILD_ARG_VARIABLES = TOOL_VARIABLES + BASE_IMAGE_VARIABLES
 # Versions no file but docker-bake.hcl (and the CI variable below) may spell out
 REPO_WIDE_VARIABLES = (
     "DOCKER_VERSION",
@@ -53,6 +56,17 @@ CI_PINNED_VARIABLES = ("DOCKER_VERSION",)
 # A docker:<tag>-cli / -dind image or its mirrors/docker-<tag>-cli / -dind copy
 DOCKER_IMAGE_TAG = re.compile(r"\bdocker[:-]([^\s\"'/]+?)-(?:cli|dind)\b")
 DOCKER_TAG_PLACEHOLDERS = ("${DOCKER_VERSION}", "<DOCKER_VERSION>")
+# An emsdk, node or alpine image (or mirrors/<name>-<tag> copy), or a docker-<version>
+# download, named with a literal version instead of a variable (docker:<port> is a
+# DinD service address, not an image)
+LITERAL_IMAGE_TAG = re.compile(r"\b(?:(?:emsdk|node|alpine)[:-]|docker-)(v?\d[^\s\"'/@]*)")
+# Template variables pinning the tag of an image this project builds: templates
+# cannot read bake variables, so each must equal the tag the bake target builds.
+# template variable -> (template, bake target)
+TEMPLATE_PINNED_TAGS = {
+    "EMSCRIPTEN_IMAGE_TAG": ("templates/npm_projects.gitlab-ci.yml", "emsdk"),
+    "ALPINE_IMAGE_TAG": ("templates/base.gitlab-ci.yml", "alpine"),
+}
 # pnpm catalog (catalog, package) -> docker-bake.hcl variable it must equal:
 # consumers install these from the catalog and run them against the images'
 # copies (Playwright's browsers are per-version)
@@ -98,6 +112,27 @@ PYTHON_TEST_TOOLS = f"{REGISTRY}python-test-tools:"
 def _bake_defaults() -> Dict[str, str]:
     pattern = re.compile(r'variable "(\w+)" \{\s*default = "([^"]*)"')
     return dict(pattern.findall(BAKE.read_text()))
+
+
+def _bake_target_tag(target: str) -> str:
+    """Version tag bake target `target` is published under, its variables expanded."""
+    tag = re.search(
+        rf'target "{re.escape(target)}" \{{(?:(?!\ntarget ).)*?'
+        rf'tags = generate-tags\("{re.escape(target)}", "([^"]+)"\)',
+        BAKE.read_text(),
+        re.DOTALL,
+    )
+    assert tag, f"no generate-tags call in bake target {target}"
+    return _expand(tag.group(1), _bake_defaults())
+
+
+def _is_pinned_tag_line(path: Path, line: str) -> bool:
+    """`line` is a TEMPLATE_PINNED_TAGS variable definition in its template."""
+    relative = str(path.relative_to(ROOT))
+    return any(
+        template == relative and re.fullmatch(rf'{variable}: "[^"]*"', line.strip())
+        for variable, (template, _) in TEMPLATE_PINNED_TAGS.items()
+    )
 
 
 def _version_uses(value: str, text: str) -> List[str]:
@@ -250,10 +285,10 @@ def _commands(value: Any) -> List[str]:
 def test_every_tool_version_is_a_bake_variable() -> None:
     defaults = _bake_defaults()
 
-    assert set(TOOL_VARIABLES) <= set(defaults)
+    assert set(BUILD_ARG_VARIABLES) <= set(defaults)
 
 
-@pytest.mark.parametrize("variable", TOOL_VARIABLES)
+@pytest.mark.parametrize("variable", BUILD_ARG_VARIABLES)
 def test_tool_version_appears_only_in_its_bake_variable(variable: str) -> None:
     value = _bake_defaults()[variable]
     # A bare major ("18") also matches unrelated numbers; the ARG check covers it.
@@ -263,7 +298,13 @@ def test_tool_version_appears_only_in_its_bake_variable(variable: str) -> None:
     elsewhere = {
         str(path.relative_to(ROOT)): uses
         for path in _dockerfiles() + _templates()
-        if (uses := _version_uses(value, path.read_text()))
+        if (
+            uses := [
+                line
+                for line in _version_uses(value, path.read_text())
+                if not _is_pinned_tag_line(path, line)
+            ]
+        )
     }
     in_bake = [line for line in _version_uses(value, BAKE.read_text()) if "default =" not in line]
 
@@ -338,7 +379,7 @@ def test_docker_image_tag_finds_cli_and_dind_tags(text: str, tags: List[str]) ->
 
 
 def test_dockerfiles_declare_tool_args_without_defaults() -> None:
-    pattern = re.compile(rf"^ARG ({'|'.join(TOOL_VARIABLES)})=", re.MULTILINE)
+    pattern = re.compile(rf"^ARG ({'|'.join(BUILD_ARG_VARIABLES)})=", re.MULTILINE)
     defaults = {
         str(path.relative_to(ROOT)): pattern.findall(path.read_text())
         for path in _dockerfiles()
@@ -351,7 +392,54 @@ def test_tool_version_is_passed_to_a_build() -> None:
     bake = BAKE.read_text()
     passed = set(re.findall(r"^\s+(\w+) = (?:\"\$\{)?\1\b", bake, re.MULTILINE))
 
-    assert set(TOOL_VARIABLES) <= passed
+    assert set(BUILD_ARG_VARIABLES) <= passed
+
+
+def test_templates_and_dockerfiles_name_no_literal_image_tag() -> None:
+    literal = {
+        str(path.relative_to(ROOT)): tags
+        for path in _dockerfiles() + _templates()
+        if (tags := LITERAL_IMAGE_TAG.findall(path.read_text()))
+    }
+
+    assert literal == {}
+
+
+@pytest.mark.parametrize(
+    "text,tags",
+    [
+        ('EMSCRIPTEN_IMAGE: "registry/hive/common-ci-configuration/emsdk:5.0.2-4"', ["5.0.2-4"]),
+        ("  image: node:20", ["20"]),
+        ("FROM registry/mirrors/alpine-3.17.0 as build", ["3.17.0"]),
+        ("  image: alpine:3.17.0", ["3.17.0"]),
+        ('curl -fsSLO "https://download.docker.com/linux/static/stable/x86_64/docker-28.0.1.tgz"', ["28.0.1.tgz"]),
+        ("node-v24.21.0-linux-x64.tar.xz", ["v24.21.0-linux-x64.tar.xz"]),
+        ("emsdk:5.0.2-6@sha256:9aec", ["5.0.2-6"]),
+        ("FROM registry/mirrors/alpine-${ALPINE_VERSION}", []),
+        ('image: "${NODE_TEST_TOOLS_IMAGE}"', []),
+        ("registry/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG", []),
+        ("FROM registry/mirrors/docker-${DOCKER_VERSION}-cli AS docker-cli", []),
+        ("FROM registry/mirrors/openresty-openresty-alpine", []),
+        ("node-test-tools:develop", []),
+        ('DOCKER_HOST: "tcp://docker:2375"', []),
+    ],
+)
+def test_literal_image_tag_finds_versioned_image_names(text: str, tags: List[str]) -> None:
+    assert LITERAL_IMAGE_TAG.findall(text) == tags
+
+
+@pytest.mark.parametrize("variable", TEMPLATE_PINNED_TAGS)
+def test_template_pinned_tag_equals_bake_tag(variable: str) -> None:
+    template, target = TEMPLATE_PINNED_TAGS[variable]
+
+    assert _load_template(ROOT / template)["variables"][variable] == _bake_target_tag(target)
+
+
+def test_bake_target_tag_expands_bake_variables() -> None:
+    defaults = _bake_defaults()
+
+    assert _bake_target_tag("emsdk") == f"{defaults['EMSCRIPTEN_VERSION']}-6"
+    assert _bake_target_tag("alpine") == defaults["ALPINE_VERSION"]
 
 
 @pytest.mark.parametrize("job", TOOLS_IMAGE_JOBS)

@@ -1,1 +1,2 @@
-FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/alpine-3.21.3
+ARG ALPINE_VERSION
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/alpine-${ALPINE_VERSION}

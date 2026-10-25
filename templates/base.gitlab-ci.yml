@@ -6,6 +6,10 @@ variables:
   PYTHON_TEST_TOOLS_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${PYTHON_TEST_TOOLS_TAG}"
   NODE_TEST_TOOLS_TAG: "develop"
   NODE_TEST_TOOLS_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/node-test-tools:${NODE_TEST_TOOLS_TAG}"
+  # This project's alpine image; the tag is docker-bake.hcl's ALPINE_VERSION
+  # (tests/test_tool_versions_defined_once.py checks it)
+  ALPINE_IMAGE_TAG: "3.21.3"
+  ALPINE_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/alpine:${ALPINE_IMAGE_TAG}"
 
 default:
   interruptible: true

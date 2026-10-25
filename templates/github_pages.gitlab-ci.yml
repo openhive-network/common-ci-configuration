@@ -141,7 +141,7 @@ variables:
 
 .deploy_github_pages_base:
   stage: deploy
-  image: node:20
+  image: "${NODE_TEST_TOOLS_IMAGE}"
   variables:
     GITHUB_REPO: "${GITHUB_PAGES_REPO}"
     DOCS_SUBDIR: "wiki"
