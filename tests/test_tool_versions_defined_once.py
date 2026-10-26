@@ -438,7 +438,7 @@ def test_template_pinned_tag_equals_bake_tag(variable: str) -> None:
 def test_bake_target_tag_expands_bake_variables() -> None:
     defaults = _bake_defaults()
 
-    assert _bake_target_tag("emsdk") == f"{defaults['EMSCRIPTEN_VERSION']}-6"
+    assert _bake_target_tag("emsdk") == f"{defaults['EMSCRIPTEN_VERSION']}-7"
     assert _bake_target_tag("alpine") == defaults["ALPINE_VERSION"]
 
 

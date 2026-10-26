@@ -4,7 +4,7 @@ include:
 variables:
   # The emsdk tag docker-bake.hcl builds (tests/test_tool_versions_defined_once.py
   # checks it); emsdk's node, pnpm and Playwright versions come from docker-bake.hcl too
-  EMSCRIPTEN_IMAGE_TAG: "5.0.2-6"
+  EMSCRIPTEN_IMAGE_TAG: "5.0.2-7"
   EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG"
 
 .node_based_job_base:

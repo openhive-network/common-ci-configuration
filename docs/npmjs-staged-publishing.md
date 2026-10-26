@@ -10,7 +10,7 @@ The GitLab package registry deploy (`.npm_deploy_package_template`, `npm_publish
 
 ## Requirements
 
-- npm >= 11.15 in the job image. The template's default emsdk image (Node 24.21.0,
+- npm >= 11.15 in the job image. The template's default emsdk image (Node 24.22.1,
   npm 11.19; its tag is the one `docker-bake.hcl` builds) qualifies. The job fails with a clear message on an older npm.
 - An npm **granular access token** with:
   - permission **Read and write (stage only)**;
