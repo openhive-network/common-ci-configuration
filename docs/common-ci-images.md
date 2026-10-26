@@ -346,7 +346,7 @@ Image versions are defined in `docker-bake.hcl`:
 | Variable | Current Value | Description |
 |----------|---------------|-------------|
 | `CI_BASE_IMAGE_VERSION` | pypa_2_28-pg18-4 | manylinux CI base image |
-| `CI_BASE_IMAGE_UBUNTU_VERSION` | ubuntu26.04-pg18-1 | Ubuntu CI base image (HAF) |
+| `CI_BASE_IMAGE_UBUNTU_VERSION` | ubuntu26.04-pg18-3 | Ubuntu CI base image (HAF) |
 | `HAF_APP_TEST_RUNNER_VERSION` | 4.0 | HAF app test runner (also tagged `develop` and `HAF_APP_TEST_RUNNER_PINNED_TAG`) |
 | `PYTHON_RUNTIME_VERSION` | 3.14-u26.04-1 | python_runtime / python_development |
 | `PYTHON_VERSION` | 3.14.2-1 | python image (deprecated) |
