@@ -56,7 +56,11 @@ Ubuntu-built binaries).
 - libpqxx 7.10 (built from source), PostgreSQL 18 dev packages (pgdg)
 - Poetry, Docker CLI + buildx (`DOCKER_VERSION`, `DOCKER_BUILDX_PLUGIN_VERSION`), sccache, websocat, faketime
 
-**Current version:** `ubuntu26.04-pg18-1`
+Everything except the HAF-specific layers (PostgreSQL, libpqxx, sccache) is
+installed by `scripts/bash/setup_ubuntu.sh`, a copy of hive's
+`scripts/setup_ubuntu.sh`.
+
+**Current version:** `ubuntu26.04-pg18-3`
 
 **Used by:** haf and hafah pipelines (`HIVE_CI_BASE_IMAGE` / `PYTHON_IMAGE` /
 builder images) and hive's fc canary job.

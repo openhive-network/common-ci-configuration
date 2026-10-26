@@ -35,7 +35,7 @@ variable "CI_BASE_IMAGE_VERSION" {
 }
 
 variable "CI_BASE_IMAGE_UBUNTU_VERSION" {
-  default = "ubuntu26.04-pg18-2"
+  default = "ubuntu26.04-pg18-3"
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {

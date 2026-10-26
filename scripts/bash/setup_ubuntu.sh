@@ -5,10 +5,12 @@ set -euo pipefail
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
 # This script installs all packages required to build and run a hived instance.
-# The docker images built from this repo's Dockerfile use only the --runtime path.
-# CI build images (which cover the --dev toolchain) are defined separately in
-# https://gitlab.syncad.com/hive/common-ci-configuration - keep the package lists
-# in sync when changing dev dependencies here.
+#
+# It is a copy of hive's scripts/setup_ubuntu.sh (hive/hive#896).
+# Dockerfile.ci-base-image-ubuntu is built by running it and only adds the
+# HAF-specific layers itself. A change here changes that image: bump
+# CI_BASE_IMAGE_UBUNTU_VERSION in docker-bake.hcl and make the same change in
+# hive's copy.
 
 
 print_help () {
@@ -21,12 +23,14 @@ OPTIONS:
   --runtime                   Installs all packages required to run a pre-built hived binary.
   --dev                       Installs all packages required to build and test hived project (in addition to the required runtime packages).
   --user                      Installs all packages to the user's home directory).
-  --docker-cli=VERSION        Installs standalone Docker CLI.
+  --docker-cli=VERSION        Installs standalone Docker CLI and the buildx plugin.
+  --docker-buildx=VERSION     Buildx plugin version for --docker-cli (default: v0.24.0); give it before --docker-cli.
   --help                      Display this help screen and exit.
 EOF
 }
 
 hived_unix_account="hived"
+docker_buildx_version="v0.24.0"
 
 assert_is_root() {
   if [ "$EUID" -ne 0 ]
@@ -168,7 +172,7 @@ install_user_packages() {
 
 install_docker_cli() {
   DOCKER_VERSION=$1
-  BUILDX_VERSION="v0.24.0"
+  BUILDX_VERSION="${docker_buildx_version}"
 
   curl -fsSLO "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz"
   sudo tar xzvf "docker-${DOCKER_VERSION}.tgz" --strip 1 -C /usr/local/bin docker/docker
@@ -207,6 +211,9 @@ while [ $# -gt 0 ]; do
         ;;
     --user)
         install_user_packages "${HOME}/hive_base_config"
+        ;;
+    --docker-buildx=*)
+        docker_buildx_version="${1#*=}"
         ;;
     --docker-cli=*)
         install_docker_cli "${1#*=}"
