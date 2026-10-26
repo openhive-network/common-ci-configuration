@@ -118,7 +118,16 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 - Node.js, pnpm and Playwright at the docker-bake.hcl tool versions; the only
   global pnpm packages are `playwright` and `@playwright/test`. TypeScript,
   rollup, typedoc and the like come from each project's own `package.json` and
-  lockfile (`pnpm exec` / `pnpm run`), not from the image
+  lockfile (`pnpm exec` / `pnpm run`), not from the image's PATH
+- A preloaded pnpm store (`store-dir` is `~/.local/share/pnpm/preinstalled-store`)
+  holding every package of the `pnpm-config/pnpm-workspace.yaml` catalogs at its
+  catalog version, with its dependencies. A project's `pnpm install
+  --frozen-lockfile` takes the packages its lockfile shares with the catalog
+  from the store instead of downloading them, so it saves the most when the
+  project's `npm-common-config` submodule is on the same catalog as the image.
+  The manifest is generated at build time by
+  `scripts/python/pnpm-catalog-manifest.py`, so a catalog change needs no
+  Dockerfile change (it rebuilds the image)
 - Playwright's browsers belong to one Playwright version, so the
   `playwright-toolset` catalog in `pnpm-config/pnpm-workspace.yaml` (which
   consumers install their tests from) must equal `PLAYWRIGHT_VERSION`; a bump
