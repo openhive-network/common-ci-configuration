@@ -272,6 +272,10 @@ include:
 #   DOCKER_BUILD_CONTEXT: Build context directory (default: ".")
 #   DOCKER_BUILD_ARGS: Additional build args (space-separated, e.g., "ARG1=val1 ARG2=val2")
 #
+# Every build gets --build-arg NODE_VERSION=$NODE_IMAGE_VERSION (from base.gitlab-ci.yml),
+# so a Dockerfile can use `ARG NODE_VERSION` / `FROM node:${NODE_VERSION}-alpine` without
+# a version of its own. A NODE_VERSION in DOCKER_BUILD_ARGS overrides it.
+#
 # Example usage:
 #   build_main_image:
 #     extends: .docker_build_job_template
@@ -339,6 +343,9 @@ include:
       if [[ -n "$DOCKER_BUILD_TARGET" ]]; then
         BUILD_CMD="$BUILD_CMD --target=$DOCKER_BUILD_TARGET"
       fi
+
+      # Before DOCKER_BUILD_ARGS: the last --build-arg of a name wins
+      BUILD_CMD="$BUILD_CMD --build-arg NODE_VERSION=$NODE_IMAGE_VERSION"
 
       # Add custom build args if specified
       for ARG in $DOCKER_BUILD_ARGS; do

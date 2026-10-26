@@ -67,6 +67,13 @@ TEMPLATE_PINNED_TAGS = {
     "EMSCRIPTEN_IMAGE_TAG": ("templates/npm_projects.gitlab-ci.yml", "emsdk"),
     "ALPINE_IMAGE_TAG": ("templates/base.gitlab-ci.yml", "alpine"),
 }
+# Template variables restating a bake version for downstream projects, without
+# its "v" (official node: image tags have none):
+# template variable -> (template, bake variable)
+TEMPLATE_RESTATED_VERSIONS = {
+    "NODE_IMAGE_VERSION": ("templates/base.gitlab-ci.yml", "NODE_VERSION"),
+}
+DOCKER_BUILD_JOB = ".docker_build_job_template"
 # pnpm catalog (catalog, package) -> docker-bake.hcl variable it must equal:
 # consumers install these from the catalog and run them against the images'
 # copies (Playwright's browsers are per-version)
@@ -127,11 +134,15 @@ def _bake_target_tag(target: str) -> str:
 
 
 def _is_pinned_tag_line(path: Path, line: str) -> bool:
-    """`line` is a TEMPLATE_PINNED_TAGS variable definition in its template."""
+    """`line` is a TEMPLATE_PINNED_TAGS or TEMPLATE_RESTATED_VERSIONS variable
+    definition in its template."""
     relative = str(path.relative_to(ROOT))
     return any(
         template == relative and re.fullmatch(rf'{variable}: "[^"]*"', line.strip())
-        for variable, (template, _) in TEMPLATE_PINNED_TAGS.items()
+        for variable, (template, _) in [
+            *TEMPLATE_PINNED_TAGS.items(),
+            *TEMPLATE_RESTATED_VERSIONS.items(),
+        ]
     )
 
 
@@ -433,6 +444,60 @@ def test_template_pinned_tag_equals_bake_tag(variable: str) -> None:
     template, target = TEMPLATE_PINNED_TAGS[variable]
 
     assert _load_template(ROOT / template)["variables"][variable] == _bake_target_tag(target)
+
+
+@pytest.mark.parametrize("variable", TEMPLATE_RESTATED_VERSIONS)
+def test_template_restated_version_equals_bake_version(variable: str) -> None:
+    template, bake_variable = TEMPLATE_RESTATED_VERSIONS[variable]
+
+    assert (
+        _load_template(ROOT / template)["variables"][variable]
+        == _bake_defaults()[bake_variable].lstrip("v")
+    )
+
+
+def _docker_build_args(tmp_path: Path, job_variables: Dict[str, str]) -> Dict[str, str]:
+    """Build args the docker build job passes (the last of a name wins, as in
+    docker), running its script against a stub docker under the templates'
+    variables overridden by `job_variables`."""
+    jobs = _load_jobs()
+    stub = tmp_path / "bin" / "docker"
+    stub.parent.mkdir()
+    stub.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" >> "$DOCKER_ARGS_LOG"\n')
+    stub.chmod(0o755)
+    log = tmp_path / "docker-args"
+    variables = {
+        **_template_variables(),
+        **_resolved(jobs, DOCKER_BUILD_JOB, "variables"),
+        **job_variables,
+    }
+    env = {
+        "PATH": f"{stub.parent}:/usr/bin:/bin",
+        "DOCKER_ARGS_LOG": str(log),
+        "CI_REGISTRY": "registry.example",
+        "CI_REGISTRY_IMAGE": "registry.example/hive/app",
+        "CI_COMMIT_SHORT_SHA": "abcd1234",
+        **{name: _expand(str(value), variables) for name, value in variables.items()},
+    }
+    script = "\n".join(_commands(_resolved(jobs, DOCKER_BUILD_JOB, "script")))
+    subprocess.run(["bash", "-c", script], cwd=tmp_path, env=env, check=True, capture_output=True)
+
+    args = log.read_text().splitlines()
+    return dict(
+        value.split("=", 1) for flag, value in zip(args, args[1:]) if flag == "--build-arg"
+    )
+
+
+def test_docker_build_passes_ccc_node_version(tmp_path: Path) -> None:
+    node = _bake_defaults()["NODE_VERSION"].lstrip("v")
+
+    assert _docker_build_args(tmp_path, {})["NODE_VERSION"] == node
+
+
+def test_docker_build_args_override_ccc_node_version(tmp_path: Path) -> None:
+    args = _docker_build_args(tmp_path, {"DOCKER_BUILD_ARGS": "NODE_VERSION=22.1.0 OTHER=x"})
+
+    assert args == {"NODE_VERSION": "22.1.0", "OTHER": "x"}
 
 
 def test_bake_target_tag_expands_bake_variables() -> None:

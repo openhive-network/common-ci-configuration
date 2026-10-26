@@ -10,6 +10,12 @@ variables:
   # (tests/test_tool_versions_defined_once.py checks it)
   ALPINE_IMAGE_TAG: "3.21.3"
   ALPINE_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/alpine:${ALPINE_IMAGE_TAG}"
+  # Node version the images are built with, as official node: image tags spell it:
+  # docker-bake.hcl's NODE_VERSION without the "v" (tests/test_tool_versions_defined_once.py
+  # checks it). .docker_build_job_template passes it as the NODE_VERSION build arg.
+  # Not named NODE_VERSION: bake reads CI variables, so that name would override
+  # docker-bake.hcl's own (v-prefixed) NODE_VERSION in this project's image builds.
+  NODE_IMAGE_VERSION: "24.22.1"
 
 default:
   interruptible: true

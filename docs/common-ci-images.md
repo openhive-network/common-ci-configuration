@@ -147,6 +147,20 @@ These images are tagged `:<IMAGE_VERSION>` and `:develop` (moving) from the
 default branch, and `:<commit-sha>` on every build. See the README for how
 repos consume them and how to bump a tool.
 
+Production/runtime Dockerfiles take Node from the same `NODE_VERSION`:
+`templates/base.gitlab-ci.yml` exports it without the `v` as `NODE_IMAGE_VERSION`
+(checked against `docker-bake.hcl` by `tests/test_tool_versions_defined_once.py`),
+and `.docker_build_job_template` passes it to every build as the `NODE_VERSION`
+build arg, so a downstream Dockerfile needs no version of its own:
+
+```dockerfile
+ARG NODE_VERSION
+FROM node:${NODE_VERSION}-alpine
+```
+
+A `NODE_VERSION=...` in the job's `DOCKER_BUILD_ARGS` overrides it. Local-dev
+hints (`.nvmrc`, volta, `engines`) should name only the Node major.
+
 ### python-test-tools
 
 **Base:** python_development (Ubuntu 26.04, Python 3.14)
