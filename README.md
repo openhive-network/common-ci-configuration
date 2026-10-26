@@ -44,6 +44,15 @@ Don't pin tool versions in your repo. For a deliberate exception, override the t
 
 **Docker.** `DOCKER_VERSION` in `docker-bake.hcl` is the version of the docker CLI that docker-builder and haf-app-test-runner copy from the official `docker:<DOCKER_VERSION>-cli` image and of the `docker:<DOCKER_VERSION>-dind` image docker-dind is built on; `DOCKER_COMPOSE_PLUGIN_VERSION` and `DOCKER_BUILDX_PLUGIN_VERSION` are the plugin versions that cli image ships, and the builds fail if the copied plugins report anything else. `.gitlab-ci.yml` cannot read bake variables, so it sets a `DOCKER_VERSION` CI variable for its cli image and dind service; `tests/test_tool_versions_defined_once.py` fails if it differs from the bake value or if the version appears literally anywhere else. Bumping Docker = change the three bake variables and the CI variable together (and mirror the two new upstream images under `mirrors/docker-<DOCKER_VERSION>-cli` / `mirrors/docker-<DOCKER_VERSION>-dind`).
 
+**Node in your Dockerfiles.** `templates/base.gitlab-ci.yml` exports `NODE_IMAGE_VERSION`: `docker-bake.hcl`'s `NODE_VERSION` without the `v`, as official `node:` image tags spell it (`tests/test_tool_versions_defined_once.py` fails if the two differ). It is not called `NODE_VERSION` because `docker buildx bake` reads CI variables, so that name would override bake's own (v-prefixed) `NODE_VERSION` in jobs that build with bake. `.docker_build_job_template` passes it to every build as `--build-arg NODE_VERSION=$NODE_IMAGE_VERSION`, so a production/runtime Dockerfile takes Node from ccc with no version of its own:
+
+```dockerfile
+ARG NODE_VERSION
+FROM node:${NODE_VERSION}-alpine
+```
+
+A Dockerfile without the ARG ignores it. For a deliberate exception set `NODE_VERSION=<version>` in the job's `DOCKER_BUILD_ARGS`, which wins. Jobs that build images their own way can pass `--build-arg NODE_VERSION=$NODE_IMAGE_VERSION` themselves. Local-dev hints (`.nvmrc`, volta, `engines`) should name only the major (e.g. `24`), so they don't need a change on every patch bump.
+
 **Bumping a tool.** Change its variable in `docker-bake.hcl` and merge to `develop`. The develop pipeline rebuilds the images that use it (python-test-tools, node-test-tools, docker-builder, emsdk, ...) and moves the `:develop` tag, so every repo picks up the new version on its next pipeline. Fix only the repos the new version actually breaks.
 
 **Staying in step with aidev.** The versions follow aidev's toolchain definition, which aidev publishes at https://gitlab.syncad.com/hive/aidev-toolchain/-/raw/main/toolchain.yaml (aidev never reads this repository). `tests/test_aidev_toolchain_drift.py`, run by the `test_repository` job on every branch pipeline, fetches that copy anonymously (`AIDEV_TOOLCHAIN_URL` overrides the URL) and fails listing every tool, and the Python/Ubuntu platform, where `docker-bake.hcl` differs; it skips when the copy can't be fetched or parsed. Its `TOOLS` table maps aidev entries to bake variables, and a deliberate difference goes in its `EXCEPTIONS` with the reason. On drift, bump whichever side is behind.
