@@ -107,7 +107,7 @@ variable "PSQL_VERSION" {
   default = "18"
 }
 variable "NODE_VERSION" {
-  default = "v24.21.0"
+  default = "v24.22.1"
 }
 variable "PNPM_VERSION" {
   default = "10.33.0"
@@ -255,7 +255,7 @@ target "python-scripts" {
 
 target "emsdk" {
   dockerfile = "Dockerfile.emscripten"
-  tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}-6")
+  tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}-7")
   cache-from = generate-cache-from("emsdk", "${EMSCRIPTEN_VERSION}")
   cache-to = generate-cache-to("emsdk", "${EMSCRIPTEN_VERSION}")
   args = {

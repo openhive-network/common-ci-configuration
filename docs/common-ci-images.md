@@ -128,7 +128,7 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf
 
-**Current version:** `5.0.2-6` (`5.0.2-5` and older also install TypeScript,
+**Current version:** `5.0.2-7` (`5.0.2-6` has Node 24.21.0; `5.0.2-5` and older also install TypeScript,
 rollup, typedoc and protobuf tooling globally; `5.0.2-4`: Node 24, Playwright
 1.59; `5.0.2-3` has Node 22)
 
