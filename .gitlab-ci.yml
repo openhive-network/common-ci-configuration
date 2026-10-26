@@ -696,6 +696,24 @@ build_ci_base_image_ubuntu:
   needs:
     - job: build_docker_dind_image
       optional: true
+  # .effective_build_docker_image's rules, plus the script the image is built by
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        paths:
+          - Dockerfile.ci-base-image-ubuntu
+          - scripts/bash/setup_ubuntu.sh
+          - scripts/bash/openssl.conf
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      changes:
+        paths:
+          - Dockerfile.ci-base-image-ubuntu
+          - scripts/bash/setup_ubuntu.sh
+          - scripts/bash/openssl.conf
+        compare_to: 'refs/heads/develop'
 
 build_dockerfile_image:
   extends: .build_docker_image
