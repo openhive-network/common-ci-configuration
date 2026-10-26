@@ -62,5 +62,6 @@ include:
       - "${BINARIES_DIR}/*.d.ts"
       - "${BINARIES_DIR}/*.js"
       - "${BINARIES_DIR}/*.wasm"
+      - pnpm-lock.catalog-refreshed.yaml
     when: always
     expire_in: 1 week
