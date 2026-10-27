@@ -369,6 +369,32 @@ Image versions are defined in `docker-bake.hcl`:
 | `TEST_TOOLS_MOVING_TAG` | develop | tools images moving tag |
 | `PYTEST_VERSION` ... `TYPESCRIPT_VERSION` | see docker-bake.hcl | test/lint tool versions |
 
+### Moving templates to a new image tag
+
+Two templates pin the tag of an image built here: `EMSCRIPTEN_IMAGE_TAG`
+(`templates/npm_projects.gitlab-ci.yml`, emsdk) and `ALPINE_IMAGE_TAG`
+(`templates/base.gitlab-ci.yml`, alpine). Projects that include the templates
+from `develop` (beekeeper, hive) pull the pinned tag as soon as the change is
+merged, while the tag itself appears only when the develop pipeline's build job
+has published it. Moving the template in the same MR as the image leaves those
+projects without an image for the length of that build, or for good if the
+build fails. So a new tag goes in two MRs:
+
+1. **Image MR:** the image change and the new tag in `docker-bake.hcl`. New
+   content always gets a new tag; a published tag never gets new content. The
+   template keeps the published tag.
+2. **Template MR:** only the template variable, moved to the new tag. Open it
+   with the image MR, as a Draft branched from it and marked
+   `Depends on !<image MR>`. Merge it after the image MR is merged and the new
+   tag is in the registry
+   (`docker buildx imagetools inspect registry.gitlab.syncad.com/hive/common-ci-configuration/<image>:<tag>`),
+   rebased onto `develop`.
+
+AIDEV workflows follow the same rule: a change that bumps such a tag leaves the
+template variable alone, and moving it is a separate issue and MR.
+`tests/test_tool_versions_defined_once.py` accepts a template tag that trails
+the bake tag and fails one that is ahead of it.
+
 ## Building Images Locally
 
 ```bash

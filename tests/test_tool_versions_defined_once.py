@@ -61,7 +61,10 @@ DOCKER_TAG_PLACEHOLDERS = ("${DOCKER_VERSION}", "<DOCKER_VERSION>")
 # DinD service address, not an image)
 LITERAL_IMAGE_TAG = re.compile(r"\b(?:(?:emsdk|node|alpine)[:-]|docker-)(v?\d[^\s\"'/@]*)")
 # Template variables pinning the tag of an image this project builds: templates
-# cannot read bake variables, so each must equal the tag the bake target builds.
+# cannot read bake variables, so each names the tag the bake target builds, or an
+# earlier one while a new tag is not published yet. A new tag reaches a template
+# in a second MR, merged once the first MR's develop pipeline has published it
+# (CLAUDE.md, docs/common-ci-images.md "Moving templates to a new image tag").
 # template variable -> (template, bake target)
 TEMPLATE_PINNED_TAGS = {
     "EMSCRIPTEN_IMAGE_TAG": ("templates/npm_projects.gitlab-ci.yml", "emsdk"),
@@ -131,6 +134,12 @@ def _bake_target_tag(target: str) -> str:
     )
     assert tag, f"no generate-tags call in bake target {target}"
     return _expand(tag.group(1), _bake_defaults())
+
+
+def _tag_order(tag: str) -> Tuple[int, ...]:
+    """Numbers of an image tag, for comparing two tags of one image ("5.0.2-7" ->
+    (5, 0, 2, 7)); a digest after the tag is ignored."""
+    return tuple(int(number) for number in re.findall(r"\d+", tag.split("@", 1)[0]))
 
 
 def _is_pinned_tag_line(path: Path, line: str) -> bool:
@@ -440,10 +449,25 @@ def test_literal_image_tag_finds_versioned_image_names(text: str, tags: List[str
 
 
 @pytest.mark.parametrize("variable", TEMPLATE_PINNED_TAGS)
-def test_template_pinned_tag_equals_bake_tag(variable: str) -> None:
+def test_template_pinned_tag_is_not_ahead_of_bake_tag(variable: str) -> None:
     template, target = TEMPLATE_PINNED_TAGS[variable]
+    pinned = _load_template(ROOT / template)["variables"][variable]
 
-    assert _load_template(ROOT / template)["variables"][variable] == _bake_target_tag(target)
+    assert _tag_order(pinned) <= _tag_order(_bake_target_tag(target))
+
+
+@pytest.mark.parametrize(
+    ("earlier", "later"),
+    [
+        ("5.0.2-7", "5.0.2-8"),
+        ("5.0.2-9", "5.0.2-10"),
+        ("5.0.2-8", "5.0.3-1"),
+        ("3.21.3", "3.22"),
+        ("5.0.2-7@sha256:9aec", "5.0.2-8"),
+    ],
+)
+def test_tag_order_orders_tags_of_one_image(earlier: str, later: str) -> None:
+    assert _tag_order(earlier) < _tag_order(later)
 
 
 @pytest.mark.parametrize("variable", TEMPLATE_RESTATED_VERSIONS)
