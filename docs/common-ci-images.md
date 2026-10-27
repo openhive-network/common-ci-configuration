@@ -393,7 +393,11 @@ build fails. So a new tag goes in two MRs:
 AIDEV workflows follow the same rule: a change that bumps such a tag leaves the
 template variable alone, and moving it is a separate issue and MR.
 `tests/test_tool_versions_defined_once.py` accepts a template tag that trails
-the bake tag and fails one that is ahead of it.
+the bake tag and fails one that is ahead of it. The `check_template_image_tags`
+job asks the registry for every tag the templates pin
+(`scripts/python/check-template-image-tags.py`) and fails the pipeline when one
+is missing, so a template MR's pipeline passes only once its tag is
+published; retry the job after the image MR's develop pipeline.
 
 ## Building Images Locally
 

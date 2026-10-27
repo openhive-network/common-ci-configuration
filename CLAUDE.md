@@ -131,7 +131,7 @@ Templates pin tags of images this repo builds (`EMSCRIPTEN_IMAGE_TAG`, `ALPINE_I
 1. **Image MR**: changes the image and moves its tag in `docker-bake.hcl` (new content always gets a new tag, never replaces what a published tag points to). The template variable keeps the published tag.
 2. **Template MR**: only moves the template variable to the new tag. Open it together with the image MR, as a Draft branched from it, with `Depends on !<image MR>` in the description. Merge it only after the image MR is merged and its develop pipeline has published the tag (`docker buildx imagetools inspect registry.gitlab.syncad.com/hive/common-ci-configuration/<image>:<tag>` finds it), rebased onto `develop`.
 
-This applies to AIDEV workflows too: a change that bumps such a tag leaves the template variable alone, and the template move is a separate issue and MR. `tests/test_tool_versions_defined_once.py` lets a template trail the bake tag but fails when it is ahead of it. Details: "Moving templates to a new image tag" in `docs/common-ci-images.md`.
+This applies to AIDEV workflows too: a change that bumps such a tag leaves the template variable alone, and the template move is a separate issue and MR. `tests/test_tool_versions_defined_once.py` lets a template trail the bake tag but fails when it is ahead of it, and the `check_template_image_tags` job (`scripts/python/check-template-image-tags.py`) fails every branch pipeline whose templates name a tag the registry does not have: on a template MR it passes once the tag is published (retry the job then). Details: "Moving templates to a new image tag" in `docs/common-ci-images.md`.
 
 ## CI Builder Infrastructure
 
