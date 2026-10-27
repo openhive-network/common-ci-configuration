@@ -137,9 +137,11 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf
 
-**Current version:** `5.0.2-7` (`5.0.2-6` has Node 24.21.0; `5.0.2-5` and older also install TypeScript,
-rollup, typedoc and protobuf tooling globally; `5.0.2-4`: Node 24, Playwright
-1.59; `5.0.2-3` has Node 22)
+**Current version:** `5.0.2-8` (preloads the store from the catalogs; `5.0.2-7`
+(Node 24.22.1) and `5.0.2-6` (Node 24.21.0) have only Playwright in their store;
+`5.0.2-5` and older also install TypeScript, rollup, typedoc and protobuf tooling
+globally, at versions of their own rather than the catalog's; `5.0.2-4`: Node 24,
+Playwright 1.59; `5.0.2-3` has Node 22)
 
 **Ubuntu release:** the image's Ubuntu (24.04 for emsdk 5.0.2) is chosen by the
 upstream emscripten/emsdk image. The twiggy/bloaty builder stage builds on that
