@@ -20,7 +20,7 @@ COPY <<-EOF /opt/patch.sed
 EOF
 
 RUN <<EOF
-  set -e
+  set -ex
 
   # Install system dependencies
   apk add --no-cache ca-certificates wget unzip openjdk11-jdk maven git
@@ -30,15 +30,15 @@ RUN <<EOF
   cd /opt/tools
 
   # Install Apache JMeter
-  wget --quiet https://dlcdn.apache.org/jmeter/binaries/apache-jmeter-5.6.3.zip -O jmeter.zip
+  wget -nv --tries=5 --waitretry=10 --retry-connrefused https://dlcdn.apache.org/jmeter/binaries/apache-jmeter-5.6.3.zip -O jmeter.zip
   unzip -qq jmeter.zip
   rm jmeter.zip
   mv apache-jmeter-5.6.3 jmeter
-  wget --quiet https://jdbc.postgresql.org/download/postgresql-42.3.1.jar -O /opt/tools/jmeter/lib/postgresql-42.3.1.jar
+  wget -nv --tries=5 --waitretry=10 --retry-connrefused https://jdbc.postgresql.org/download/postgresql-42.3.1.jar -O /opt/tools/jmeter/lib/postgresql-42.3.1.jar
 
   # Build m2u from source
   mkdir -p m2u
-  git clone --single-branch --branch master https://github.com/tguzik/m2u.git m2u-source
+  git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 clone --single-branch --branch master https://github.com/tguzik/m2u.git m2u-source
   cd m2u-source
   find -name CommandLineParser.java -exec sed -i -f /opt/patch.sed {} \;
   mvn
