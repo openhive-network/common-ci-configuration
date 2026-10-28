@@ -760,6 +760,7 @@ build_emsdk_image:
         paths:
           - Dockerfile.emscripten
           - docker-bake.hcl
+          - pnpm-config/.npmrc
           - pnpm-config/pnpm-workspace.yaml
           - scripts/python/pnpm-catalog-manifest.py
           - scripts/bash/npm-helpers/*
@@ -773,6 +774,7 @@ build_emsdk_image:
         paths:
           - Dockerfile.emscripten
           - docker-bake.hcl
+          - pnpm-config/.npmrc
           - pnpm-config/pnpm-workspace.yaml
           - scripts/python/pnpm-catalog-manifest.py
           - scripts/bash/npm-helpers/*

@@ -524,10 +524,64 @@ def test_docker_build_args_override_ccc_node_version(tmp_path: Path) -> None:
     assert args == {"NODE_VERSION": "22.1.0", "OTHER": "x"}
 
 
+@pytest.mark.parametrize("variable", TEMPLATE_RESTATED_VERSIONS)
+def test_template_restated_version_equals_bake_version(variable: str) -> None:
+    template, bake_variable = TEMPLATE_RESTATED_VERSIONS[variable]
+
+    assert (
+        _load_template(ROOT / template)["variables"][variable]
+        == _bake_defaults()[bake_variable].lstrip("v")
+    )
+
+
+def _docker_build_args(tmp_path: Path, job_variables: Dict[str, str]) -> Dict[str, str]:
+    """Build args the docker build job passes (the last of a name wins, as in
+    docker), running its script against a stub docker under the templates'
+    variables overridden by `job_variables`."""
+    jobs = _load_jobs()
+    stub = tmp_path / "bin" / "docker"
+    stub.parent.mkdir()
+    stub.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" >> "$DOCKER_ARGS_LOG"\n')
+    stub.chmod(0o755)
+    log = tmp_path / "docker-args"
+    variables = {
+        **_template_variables(),
+        **_resolved(jobs, DOCKER_BUILD_JOB, "variables"),
+        **job_variables,
+    }
+    env = {
+        "PATH": f"{stub.parent}:/usr/bin:/bin",
+        "DOCKER_ARGS_LOG": str(log),
+        "CI_REGISTRY": "registry.example",
+        "CI_REGISTRY_IMAGE": "registry.example/hive/app",
+        "CI_COMMIT_SHORT_SHA": "abcd1234",
+        **{name: _expand(str(value), variables) for name, value in variables.items()},
+    }
+    script = "\n".join(_commands(_resolved(jobs, DOCKER_BUILD_JOB, "script")))
+    subprocess.run(["bash", "-c", script], cwd=tmp_path, env=env, check=True, capture_output=True)
+
+    args = log.read_text().splitlines()
+    return dict(
+        value.split("=", 1) for flag, value in zip(args, args[1:]) if flag == "--build-arg"
+    )
+
+
+def test_docker_build_passes_ccc_node_version(tmp_path: Path) -> None:
+    node = _bake_defaults()["NODE_VERSION"].lstrip("v")
+
+    assert _docker_build_args(tmp_path, {})["NODE_VERSION"] == node
+
+
+def test_docker_build_args_override_ccc_node_version(tmp_path: Path) -> None:
+    args = _docker_build_args(tmp_path, {"DOCKER_BUILD_ARGS": "NODE_VERSION=22.1.0 OTHER=x"})
+
+    assert args == {"NODE_VERSION": "22.1.0", "OTHER": "x"}
+
+
 def test_bake_target_tag_expands_bake_variables() -> None:
     defaults = _bake_defaults()
 
-    assert _bake_target_tag("emsdk") == f"{defaults['EMSCRIPTEN_VERSION']}-8"
+    assert _bake_target_tag("emsdk") == f"{defaults['EMSCRIPTEN_VERSION']}-9"
     assert _bake_target_tag("alpine") == defaults["ALPINE_VERSION"]
 
 

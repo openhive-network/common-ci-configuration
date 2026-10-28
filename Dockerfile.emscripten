@@ -124,19 +124,23 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
 # instead of downloading it in every job. Nothing is linked onto PATH; the
 # temporary project is removed and only the store keeps the packages.
 COPY --chown=emscripten pnpm-config/pnpm-workspace.yaml /tmp/pnpm-catalog/
+COPY --chown=emscripten pnpm-config/.npmrc /tmp/pnpm-catalog.npmrc
 COPY --chown=emscripten scripts/python/pnpm-catalog-manifest.py /tmp/
 # The catalogs go through a file: redirecting straight into package.json would
-# create it empty before pnpm reads the directory. Registry metadata goes to a
-# temporary cache-dir (frozen-lockfile installs never read it), and nothing is
-# chmod-ed: the new store files are already world-readable, and touching the
-# ones from the layer above would copy them into this layer.
+# create it empty before pnpm reads the directory. The @hiveio packages exist
+# only in the hive GitLab registry, so the project takes the @hiveio registry
+# line of pnpm-config/.npmrc (and none of its workspace settings). Registry
+# metadata goes to a temporary cache-dir (frozen-lockfile installs never read
+# it), and nothing is chmod-ed: the new store files are already world-readable,
+# and touching the ones from the layer above would copy them into this layer.
 RUN [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
     nvm use "${NODEJS_VERSION}" && \
     cd /tmp/pnpm-catalog && \
+    grep "^@hiveio:registry=" /tmp/pnpm-catalog.npmrc > .npmrc && \
     pnpm config get catalogs --json > /tmp/pnpm-catalogs.json && \
     python3 /tmp/pnpm-catalog-manifest.py < /tmp/pnpm-catalogs.json > package.json && \
     pnpm install --ignore-scripts --config.cache-dir=/tmp/pnpm-catalog-cache && \
-    cd / && rm -rf /tmp/pnpm-catalog /tmp/pnpm-catalog-cache /tmp/pnpm-catalogs.json /tmp/pnpm-catalog-manifest.py
+    cd / && rm -rf /tmp/pnpm-catalog /tmp/pnpm-catalog-cache /tmp/pnpm-catalogs.json /tmp/pnpm-catalog.npmrc /tmp/pnpm-catalog-manifest.py
 
 USER root
 WORKDIR /home/emscripten

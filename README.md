@@ -29,7 +29,44 @@ The tools are published in two images:
 
 Tags: `:develop` is the moving tag the default branch republishes; `:<PYTHON|NODE>_TEST_TOOLS_IMAGE_VERSION` is also published from the default branch, and `:<commit-sha>` from every build. `docker-builder` is built on `python-test-tools`, so jobs that drive a DinD service get the same tools; `emsdk` gets node, pnpm and Playwright from the same variables (TypeScript and other build tools come from each project's own lockfile; emsdk preloads its pnpm store with the `pnpm-config` catalogs so those installs mostly avoid the network).
 
-**The pnpm catalog.** Consumers install Playwright and TypeScript from the catalogs in [pnpm-config/pnpm-workspace.yaml](pnpm-config/pnpm-workspace.yaml). `playwright-toolset`'s `playwright` and `@playwright/test` must equal `PLAYWRIGHT_VERSION` (the images ship only that version's browsers), so a Playwright bump changes both; `tests/test_tool_versions_defined_once.py` fails naming both values otherwise. `typescript-toolset` is compared with `TYPESCRIPT_VERSION` the same way, but is a recorded exception (`CATALOG_EXCEPTIONS`): it stays on TypeScript 5.x because consumers' typedoc (0.27/0.28 supports TypeScript up to 6.0) and rollup TypeScript plugins need the compiler JS API, which TypeScript 7 does not ship.
+**The pnpm catalog.** Consumers install Playwright and TypeScript from the catalogs in [pnpm-config/pnpm-workspace.yaml](pnpm-config/pnpm-workspace.yaml). `playwright-toolset`'s `playwright` and `@playwright/test` must equal `PLAYWRIGHT_VERSION` (the images ship only that version's browsers), so a Playwright bump changes both; `tests/test_tool_versions_defined_once.py` fails naming both values otherwise. `typescript-toolset` is compared with `TYPESCRIPT_VERSION` the same way, but is a recorded exception (`CATALOG_EXCEPTIONS`): it stays on TypeScript 5.x (5.9, which Next.js's type check and typescript-eslint 8 need) because consumers' typedoc (0.27/0.28 supports TypeScript up to 6.0) and rollup TypeScript plugins need the compiler JS API, which TypeScript 7 does not ship.
+
+[pnpm-config/pnpm-workspace.yaml](pnpm-config/pnpm-workspace.yaml) is the single source of version pins for Hive libraries, UI frameworks and build tooling. Consumers reference them only as `catalog:<name>`; they do not write a version of their own or keep a private copy of a catalog:
+
+| Catalog | Packages |
+|---------|----------|
+| `hiveio-toolset` | `@hiveio/wax` and its `wax-signers-*` packages (one build), `@hiveio/beekeeper` (the CSP-safe build the signers depend on), `@hiveio/workerbee`, `@hiveio/hb-auth`, `@hiveio/healthchecker-component` |
+| `react-toolset` | `react`, `react-dom`, `@types/react`, `@types/react-dom` (19.x), `next` (16.x), `eslint-config-next` (next's version), `@tanstack/react-query` (5.x) |
+| `vue-toolset` | `vue` (3.5.x), `nuxt` (4.x), `pinia`, `vuetify`, `vue-tsc` |
+| `tailwind-toolset` | `tailwindcss`, `@tailwindcss/postcss`, `@tailwindcss/vite`, `@tailwindcss/cli` (4.x, one version) |
+| `typescript-toolset` | `typescript` (5.x), `tslib`, `tsx` |
+| `rollup-toolset`, `typedoc-toolset`, `proto-toolset`, `playwright-toolset`, `husky`, `terser`, `size-limit-toolset` | build and test tooling |
+
+Each package is in one catalog only (`tests/test_pnpm_catalog_manifest.py`). The emsdk image preloads all of them into its pnpm store by installing the package.json `scripts/python/pnpm-catalog-manifest.py` writes from `pnpm config get catalogs --json`, and that script fails on a package listed at two versions. Third-party pins are the newest stable release that was at least two weeks old when it was picked.
+
+The `@hiveio` packages are versioned by Hive release line, not semver. `hiveio-toolset` pins the newest `-stable.<timestamp>` builds of the current line (1.28.8), not the older 2.0.x line that npmjs tags `latest`. A Hive-library bump moves these pins to newer `-stable` builds of the current release line; the signers move with wax, and beekeeper moves to the build they depend on. The `-stable` builds are published only in the hive group's GitLab registry, so consumers need `@hiveio:registry=https://gitlab.syncad.com/api/v4/groups/136/-/packages/npm/` in their `.npmrc` (as in [pnpm-config/.npmrc](pnpm-config/.npmrc)). The catalog's comment lists the known peer mismatches, currently workerbee and hb-auth declaring a wax 2.0.x peer.
+
+**Responding to a security advisory.** Bump the package's version in ccc's catalog and merge to `develop`. Consumers track ccc's `develop` through their `npm-common-config` / `common-ci-configuration` submodule, which CI updates (`GIT_SUBMODULE_UPDATE_FLAGS: --remote`), so their next pipeline resolves the new version. The frozen install fails with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, `.pnpm_install_with_catalog_fallback` reinstalls unfrozen, and the job keeps the refreshed lockfile as the `pnpm-lock.catalog-refreshed.yaml` artifact. Each consumer then commits its submodule bump and the refreshed `pnpm-lock.yaml` (a monorepo also commits its re-merged `pnpm-workspace.yaml`). No consumer edits a version string.
+
+**Simple repos** whose layout fits the file's `packages:` globs symlink it: `pnpm-workspace.yaml -> npm-common-config/pnpm-config/pnpm-workspace.yaml`.
+
+**Monorepos** with their own `packages:`, `overrides:`, settings or local catalogs keep their own `pnpm-workspace.yaml` and merge ccc's catalogs into it with the script their submodule ships:
+
+```bash
+python3 npm-common-config/scripts/python/pnpm-catalog-sync.py            # merge into ./pnpm-workspace.yaml
+python3 npm-common-config/scripts/python/pnpm-catalog-sync.py --check    # print the diff and exit 1 when out of date
+```
+
+The script writes ccc's catalogs between `# BEGIN common-ci-configuration catalogs` and `# END common-ci-configuration catalogs` at the top of the file's `catalogs:` mapping and rewrites that region on every run. It keeps every line outside the region as written. A local catalog must not reuse a ccc catalog's name; the script refuses one that does. In CI, set `CCC_SUBMODULE_DIR` to the submodule's path relative to `SOURCE_DIR`. The npm job templates then merge before they install, so a ccc bump reaches the monorepo's jobs the same way it reaches a symlinking repo. A job extending `.pnpm_catalog_check` fails when the committed file is behind. It is allowed to fail by default because the install jobs already use the merged catalogs; set `allow_failure: false` to enforce it:
+
+```yaml
+variables:
+  CCC_SUBMODULE_DIR: "npm-common-config"
+
+pnpm_catalog_check:
+  extends: .pnpm_catalog_check
+  stage: build
+```
 
 **Consuming them.** The templates already run their test and lint jobs in these images (`.haf_app_lint_bash`, `.haf_app_lint_sql`, the tavern templates via docker-builder, `.lint_code_with_ruff_template`, `.type_check_with_mypy_template`, `.npm_test_template`). Other jobs use the variables from `templates/base.gitlab-ci.yml`:
 

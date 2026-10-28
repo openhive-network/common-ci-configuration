@@ -1,6 +1,7 @@
-"""scripts/python/pnpm-catalog-manifest.py: the manifest the emsdk image installs to preload its pnpm store."""
+"""ccc's pnpm catalogs and scripts/python/pnpm-catalog-manifest.py, the manifest the emsdk image installs to preload its pnpm store."""
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "python" / "pnpm-catalog-manifest.py"
 PNPM_CATALOG = ROOT / "pnpm-config" / "pnpm-workspace.yaml"
 CI = ROOT / ".gitlab-ci.yml"
+DOCKERFILE = ROOT / "Dockerfile.emscripten"
+HIVE_REGISTRY_LINE = "@hiveio:registry=https://gitlab.syncad.com/api/v4/groups/136/-/packages/npm/"
 
 _Loader: Any = type("_Loader", (yaml.SafeLoader,), {})
 _Loader.add_constructor("!reference", lambda loader, node: loader.construct_sequence(node))
@@ -72,9 +75,78 @@ def _emsdk_change_lists() -> List[List[str]]:
     return [rule["changes"]["paths"] for rule in job["rules"] if isinstance(rule, dict) and "changes" in rule]
 
 
-@pytest.mark.parametrize("path", ["pnpm-config/pnpm-workspace.yaml", "scripts/python/pnpm-catalog-manifest.py"])
+@pytest.mark.parametrize(
+    "path", ["pnpm-config/pnpm-workspace.yaml", "pnpm-config/.npmrc", "scripts/python/pnpm-catalog-manifest.py"]
+)
 def test_emsdk_is_rebuilt_when_its_store_inputs_change(path: str) -> None:
     lists = _emsdk_change_lists()
     assert lists
     for paths in lists:
         assert path in paths
+
+
+def test_preload_takes_the_hive_registry_from_npmrc() -> None:
+    """The @hiveio -stable builds exist only in the hive GitLab registry: without its line the preload fails."""
+    assert HIVE_REGISTRY_LINE in (ROOT / "pnpm-config" / ".npmrc").read_text().splitlines()
+    dockerfile = DOCKERFILE.read_text()
+    assert "COPY --chown=emscripten pnpm-config/.npmrc /tmp/pnpm-catalog.npmrc" in dockerfile
+    assert 'grep "^@hiveio:registry=" /tmp/pnpm-catalog.npmrc > .npmrc' in dockerfile
+
+
+def _str_catalogs() -> Dict[str, Dict[str, str]]:
+    return {
+        catalog: {package: str(version) for package, version in packages.items()}
+        for catalog, packages in yaml.safe_load(PNPM_CATALOG.read_text())["catalogs"].items()
+    }
+
+
+def _major_minor(version: str) -> List[int]:
+    return [int(part) for part in version.split(".")[:2]]
+
+
+def test_each_package_is_in_one_ccc_catalog() -> None:
+    owners: Dict[str, List[str]] = {}
+    for catalog, packages in _str_catalogs().items():
+        for package in packages:
+            owners.setdefault(package, []).append(catalog)
+
+    assert not {package: catalogs for package, catalogs in owners.items() if len(catalogs) > 1}
+
+
+@pytest.mark.parametrize(
+    "catalog,packages",
+    [
+        ("hiveio-toolset", [
+            "@hiveio/wax", "@hiveio/wax-signers-external", "@hiveio/wax-signers-keychain",
+            "@hiveio/wax-signers-metamask", "@hiveio/wax-signers-peakvault", "@hiveio/wax-signers-beekeeper",
+            "@hiveio/beekeeper", "@hiveio/workerbee", "@hiveio/hb-auth", "@hiveio/healthchecker-component",
+        ]),
+        ("react-toolset", ["react", "react-dom", "@types/react", "@types/react-dom", "next", "eslint-config-next", "@tanstack/react-query"]),
+        ("vue-toolset", ["vue", "nuxt", "pinia", "vuetify", "vue-tsc"]),
+        ("tailwind-toolset", ["tailwindcss", "@tailwindcss/postcss", "@tailwindcss/vite", "@tailwindcss/cli"]),
+    ],
+)
+def test_framework_catalogs_hold_their_packages(catalog: str, packages: List[str]) -> None:
+    assert sorted(_str_catalogs()[catalog]) == sorted(packages)
+
+
+def test_framework_catalogs_are_on_their_majors_and_consistent() -> None:
+    catalogs = _str_catalogs()
+    react, vue, tailwind = catalogs["react-toolset"], catalogs["vue-toolset"], catalogs["tailwind-toolset"]
+
+    assert react["react"] == react["react-dom"] and _major_minor(react["react"])[0] == 19
+    assert _major_minor(react["@types/react"])[0] == _major_minor(react["@types/react-dom"])[0] == 19
+    assert react["next"] == react["eslint-config-next"] and _major_minor(react["next"])[0] == 16
+    assert _major_minor(react["@tanstack/react-query"])[0] == 5
+    assert _major_minor(vue["vue"]) == [3, 5] and _major_minor(vue["nuxt"])[0] == 4
+    assert len(set(tailwind.values())) == 1 and _major_minor(tailwind["tailwindcss"])[0] == 4
+    assert _major_minor(catalogs["typescript-toolset"]["typescript"]) == [5, 9]
+
+
+def test_hive_catalog_pins_stable_builds_of_the_current_line() -> None:
+    hive = _str_catalogs()["hiveio-toolset"]
+    wax = hive["@hiveio/wax"]
+
+    assert re.fullmatch(r"1\.28\.8-stable\.\d{12}", wax), wax
+    assert {hive[p] for p in hive if p.startswith("@hiveio/wax-signers-")} == {wax}
+    assert all(re.search(r"-stable\.\d{12}$", version) for version in hive.values()), hive

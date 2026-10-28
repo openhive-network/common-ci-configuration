@@ -5,14 +5,16 @@ fake `pnpm` that fails the frozen install the way pnpm does.
 """
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 import yaml
 
-TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
+ROOT = Path(__file__).resolve().parent.parent
+TEMPLATES = ROOT / "templates"
 REFRESHED_LOCKFILE = "pnpm-lock.catalog-refreshed.yaml"
 
 FAKE_PNPM = """#!/bin/sh
@@ -84,7 +86,9 @@ def _extends_npm_base(jobs: Dict[str, Any], name: str) -> bool:
     return False
 
 
-def _run_install(tmp_path: Path, frozen_result: str, shell_opts: str) -> "subprocess.CompletedProcess[str]":
+def _run_install(
+    tmp_path: Path, frozen_result: str, shell_opts: str, extra_env: Optional[Dict[str, str]] = None
+) -> "subprocess.CompletedProcess[str]":
     jobs = _jobs()
     script = "\n".join(_commands(jobs, _Reference([".pnpm_install_with_catalog_fallback", "script"])))
     bin_dir = tmp_path / "bin"
@@ -93,7 +97,7 @@ def _run_install(tmp_path: Path, frozen_result: str, shell_opts: str) -> "subpro
     pnpm.write_text(FAKE_PNPM)
     pnpm.chmod(0o755)
     project = tmp_path / "project"
-    project.mkdir()
+    project.mkdir(exist_ok=True)
     (project / "pnpm-lock.yaml").write_text("committed\n")
     env = {
         **os.environ,
@@ -102,6 +106,7 @@ def _run_install(tmp_path: Path, frozen_result: str, shell_opts: str) -> "subpro
         "FROZEN_RESULT": frozen_result,
         "CI_PROJECT_DIR": str(project),
         "TMPDIR": str(tmp_path),
+        **(extra_env or {}),
     }
     return subprocess.run(
         ["bash", "-c", f"{shell_opts}\n{script}"],
@@ -157,3 +162,43 @@ def test_npm_jobs_log_submodules_and_keep_the_refreshed_lockfile() -> None:
         assert any("--frozen-lockfile" in cmd for cmd in before_script), name
         artifacts = _resolve(jobs, name, "artifacts") or {}
         assert REFRESHED_LOCKFILE in artifacts.get("paths", []), name
+
+
+def _monorepo(tmp_path: Path, react: str, workspace: str) -> Dict[str, str]:
+    """A monorepo with its own workspace file and a ccc submodule pinning `react`; its job env."""
+    ccc = tmp_path / "project" / "ccc"
+    (ccc / "scripts" / "python").mkdir(parents=True)
+    (ccc / "pnpm-config").mkdir()
+    for script in ("pnpm-catalog-sync.py", "pnpm_catalogs.py"):
+        shutil.copy(ROOT / "scripts" / "python" / script, ccc / "scripts" / "python" / script)
+    (ccc / "pnpm-config" / "pnpm-workspace.yaml").write_text(f"catalogs:\n  react-toolset:\n    react: {react}\n")
+    (tmp_path / "project" / "pnpm-workspace.yaml").write_text(workspace)
+    return {"CCC_SUBMODULE_DIR": "ccc"}
+
+
+@SHELL_OPTS
+def test_monorepo_merges_bumped_ccc_catalog_then_falls_back(tmp_path: Path, shell_opts: str) -> None:
+    env = _monorepo(tmp_path, "19.3.1", "packages:\n  - apps/*\ncatalogs:\n  local:\n    lodash: 4.17.21\n")
+
+    proc = _run_install(tmp_path, "mismatch", shell_opts, env)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    workspace = yaml.safe_load((tmp_path / "project" / "pnpm-workspace.yaml").read_text())
+    assert workspace["catalogs"] == {"react-toolset": {"react": "19.3.1"}, "local": {"lodash": "4.17.21"}}
+    assert workspace["packages"] == ["apps/*"]
+    assert _calls(tmp_path) == [
+        "--recursive install --frozen-lockfile",
+        "--recursive install --no-frozen-lockfile",
+    ]
+    assert (tmp_path / "project" / REFRESHED_LOCKFILE).read_text() == "refreshed\n"
+
+
+@SHELL_OPTS
+def test_monorepo_with_unmergeable_workspace_fails_before_installing(tmp_path: Path, shell_opts: str) -> None:
+    env = _monorepo(tmp_path, "19.3.1", "catalogs:\n  react-toolset:\n    react: 18.3.1\n")
+
+    proc = _run_install(tmp_path, "ok", shell_opts, env)
+
+    assert proc.returncode == 2
+    assert "named like ccc catalogs" in proc.stderr
+    assert not (tmp_path / "pnpm.calls").exists()

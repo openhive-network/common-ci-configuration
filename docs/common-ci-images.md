@@ -127,7 +127,11 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
   project's `npm-common-config` submodule is on the same catalog as the image.
   The manifest is generated at build time by
   `scripts/python/pnpm-catalog-manifest.py`, so a catalog change needs no
-  Dockerfile change (it rebuilds the image)
+  Dockerfile change (it rebuilds the image). The `@hiveio` packages come from
+  the hive GitLab npm registry, through the `@hiveio:registry` line of
+  `pnpm-config/.npmrc`. With the Hive, React/Next, Vue/Nuxt and Tailwind
+  catalogs (`5.0.2-9`) the catalog packages take about 330 MB (about 215 MB
+  gzipped), up from about 100 MB (35 MB)
 - Playwright's browsers belong to one Playwright version, so the
   `playwright-toolset` catalog in `pnpm-config/pnpm-workspace.yaml` (which
   consumers install their tests from) must equal `PLAYWRIGHT_VERSION`; a bump
@@ -137,11 +141,12 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf
 
-**Current version:** `5.0.2-8` (preloads the store from the catalogs; `5.0.2-7`
-(Node 24.22.1) and `5.0.2-6` (Node 24.21.0) have only Playwright in their store;
-`5.0.2-5` and older also install TypeScript, rollup, typedoc and protobuf tooling
-globally, at versions of their own rather than the catalog's; `5.0.2-4`: Node 24,
-Playwright 1.59; `5.0.2-3` has Node 22)
+**Current version:** `5.0.2-9` (adds the Hive, React/Next, Vue/Nuxt and
+Tailwind catalogs to the store; `5.0.2-8` preloads the store from the catalogs
+of that time; `5.0.2-7` (Node 24.22.1) and `5.0.2-6` (Node 24.21.0) have only
+Playwright in their store; `5.0.2-5` and older also install TypeScript, rollup,
+typedoc and protobuf tooling globally, at versions of their own rather than the
+catalog's; `5.0.2-4`: Node 24, Playwright 1.59; `5.0.2-3` has Node 22)
 
 **Ubuntu release:** the image's Ubuntu (24.04 for emsdk 5.0.2) is chosen by the
 upstream emscripten/emsdk image. The twiggy/bloaty builder stage builds on that
