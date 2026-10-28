@@ -2,8 +2,10 @@ include:
   - local: templates/base.gitlab-ci.yml
 
 variables:
-  # The emsdk tag docker-bake.hcl builds (tests/test_tool_versions_defined_once.py
-  # checks it); emsdk's node, pnpm and Playwright versions come from docker-bake.hcl too
+  # A published emsdk tag: the one docker-bake.hcl builds, or the previous one until
+  # a separate MR moves it there (CLAUDE.md, "Moving Templates to a New Image Tag";
+  # tests/test_tool_versions_defined_once.py checks it is not ahead of bake's).
+  # emsdk's node, pnpm and Playwright versions come from docker-bake.hcl too
   EMSCRIPTEN_IMAGE_TAG: "5.0.2-8"
   EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG"
   # A monorepo merging ccc's catalogs into its own pnpm-workspace.yaml (with

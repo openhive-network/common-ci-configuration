@@ -118,25 +118,35 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 - Node.js, pnpm and Playwright at the docker-bake.hcl tool versions; the only
   global pnpm packages are `playwright` and `@playwright/test`. TypeScript,
   rollup, typedoc and the like come from each project's own `package.json` and
-  lockfile (`pnpm exec` / `pnpm run`), not from the image
+  lockfile (`pnpm exec` / `pnpm run`), not from the image's PATH
+- A preloaded pnpm store (`store-dir` is `~/.local/share/pnpm/preinstalled-store`)
+  holding every package of the `pnpm-config/pnpm-workspace.yaml` catalogs at its
+  catalog version, with its dependencies. A project's `pnpm install
+  --frozen-lockfile` takes the packages its lockfile shares with the catalog
+  from the store instead of downloading them, so it saves the most when the
+  project's `npm-common-config` submodule is on the same catalog as the image.
+  The manifest is generated at build time by
+  `scripts/python/pnpm-catalog-manifest.py`, so a catalog change needs no
+  Dockerfile change (it rebuilds the image). The `@hiveio` packages come from
+  the hive GitLab npm registry, through the `@hiveio:registry` line of
+  `pnpm-config/.npmrc`. With the Hive, React/Next, Vue/Nuxt and Tailwind
+  catalogs (`5.0.2-9`) the catalog packages take about 330 MB (about 215 MB
+  gzipped), up from about 100 MB (35 MB)
 - Playwright's browsers belong to one Playwright version, so the
   `playwright-toolset` catalog in `pnpm-config/pnpm-workspace.yaml` (which
   consumers install their tests from) must equal `PLAYWRIGHT_VERSION`; a bump
   changes both, enforced by `tests/test_tool_versions_defined_once.py`.
   Consumers pick up the catalog by bumping their `npm-common-config`
   submodule; one still on an older catalog cannot launch the image's browsers
-- A pnpm store preloaded with every package of every catalog in
-  `pnpm-config/pnpm-workspace.yaml` and its dependencies (the list comes from
-  `scripts/python/pnpm-catalog-manifest.py`), so installs of catalog versions
-  need no download. Since `5.0.2-8`'s Hive, React/Next, Vue/Nuxt and Tailwind
-  catalogs the store is about 330 MB (about 215 MB gzipped), up from about
-  100 MB (35 MB)
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf
 
-**Current version:** `5.0.2-8` (`5.0.2-7` has no catalog packages in its pnpm store; `5.0.2-6` has Node 24.21.0; `5.0.2-5` and older also install TypeScript,
-rollup, typedoc and protobuf tooling globally; `5.0.2-4`: Node 24, Playwright
-1.59; `5.0.2-3` has Node 22)
+**Current version:** `5.0.2-9` (adds the Hive, React/Next, Vue/Nuxt and
+Tailwind catalogs to the store; `5.0.2-8` preloads the store from the catalogs
+of that time; `5.0.2-7` (Node 24.22.1) and `5.0.2-6` (Node 24.21.0) have only
+Playwright in their store; `5.0.2-5` and older also install TypeScript, rollup,
+typedoc and protobuf tooling globally, at versions of their own rather than the
+catalog's; `5.0.2-4`: Node 24, Playwright 1.59; `5.0.2-3` has Node 22)
 
 **Ubuntu release:** the image's Ubuntu (24.04 for emsdk 5.0.2) is chosen by the
 upstream emscripten/emsdk image. The twiggy/bloaty builder stage builds on that
@@ -374,6 +384,36 @@ Image versions are defined in `docker-bake.hcl`:
 | `PYTHON_TEST_TOOLS_IMAGE_VERSION`, `NODE_TEST_TOOLS_IMAGE_VERSION` | 1 | tools images version tags |
 | `TEST_TOOLS_MOVING_TAG` | develop | tools images moving tag |
 | `PYTEST_VERSION` ... `TYPESCRIPT_VERSION` | see docker-bake.hcl | test/lint tool versions |
+
+### Moving templates to a new image tag
+
+Two templates pin the tag of an image built here: `EMSCRIPTEN_IMAGE_TAG`
+(`templates/npm_projects.gitlab-ci.yml`, emsdk) and `ALPINE_IMAGE_TAG`
+(`templates/base.gitlab-ci.yml`, alpine). Projects that include the templates
+from `develop` (beekeeper, hive) pull the pinned tag as soon as the change is
+merged, while the tag itself appears only when the develop pipeline's build job
+has published it. Moving the template in the same MR as the image leaves those
+projects without an image for the length of that build, or for good if the
+build fails. So a new tag goes in two MRs:
+
+1. **Image MR:** the image change and the new tag in `docker-bake.hcl`. New
+   content always gets a new tag; a published tag never gets new content. The
+   template keeps the published tag.
+2. **Template MR:** only the template variable, moved to the new tag. Open it
+   with the image MR, as a Draft branched from it and marked
+   `Depends on !<image MR>`. Merge it after the image MR is merged and the new
+   tag is in the registry
+   (`docker buildx imagetools inspect registry.gitlab.syncad.com/hive/common-ci-configuration/<image>:<tag>`),
+   rebased onto `develop`.
+
+AIDEV workflows follow the same rule: a change that bumps such a tag leaves the
+template variable alone, and moving it is a separate issue and MR.
+`tests/test_tool_versions_defined_once.py` accepts a template tag that trails
+the bake tag and fails one that is ahead of it. The `check_template_image_tags`
+job asks the registry for every tag the templates pin
+(`scripts/python/check-template-image-tags.py`) and fails the pipeline when one
+is missing, so a template MR's pipeline passes only once its tag is
+published; retry the job after the image MR's develop pipeline.
 
 ## Building Images Locally
 

@@ -1,45 +1,51 @@
 #!/usr/bin/env python3
 '''
-Prints every package of a pnpm-workspace.yaml's catalogs as `name@version`, one
-per line in file order, for preloading them into a pnpm store (the emsdk image
-runs `pnpm add $(pnpm-catalog-manifest.py)`).
+Writes a package.json that depends on every package of the pnpm catalogs.
 
-A package in two catalogs at different versions is an error (exit 1, the
-conflicts on stderr): a preload holds one version of it. Exit 2: the file can't
-be read or its `catalogs:` block is not in the style pnpm_catalogs.py reads.
+Reads the catalogs as `pnpm config get catalogs --json` prints them (run in a
+directory holding pnpm-config/pnpm-workspace.yaml) and writes to stdout a
+package.json referencing each entry as `catalog:<catalog name>`. Installing that
+project fills the pnpm store with every catalog package at its catalog version,
+with its dependencies; the emsdk image does this to preload its store.
 
-Usage: pnpm-catalog-manifest.py [WORKSPACE]   (default: ccc's pnpm-config/pnpm-workspace.yaml)
+A package listed in two catalogs is written once when both give the same
+version; different versions cannot share one package.json key and are an error.
 '''
+import json
 import sys
-from pathlib import Path
-from typing import Dict, List, Tuple
-
-from pnpm_catalogs import CCC_WORKSPACE, CatalogError, Catalogs, read_catalogs
 
 
-def _manifest(catalogs: Catalogs) -> Tuple[List[str], List[str]]:
-    first: Dict[str, Tuple[str, str]] = {}
-    conflicts = []
-    for catalog, packages in catalogs.items():
-        for package, version in packages.items():
-            seen = first.setdefault(package, (catalog, version))
-            if seen[1] != version:
-                conflicts.append(f"{package}: {seen[1]} in {seen[0]}, {version} in {catalog}")
-    return [f"{package}@{version}" for package, (_, version) in first.items()], conflicts
+def manifest(catalogs):
+    """Returns the package.json (as a dict) depending on every catalog entry"""
+    dependencies = {}
+    versions = {}
+    for catalog, packages in sorted(catalogs.items()):
+        for package, version in sorted((packages or {}).items()):
+            if package in versions and versions[package] != version:
+                raise ValueError(
+                    f"{package} is {versions[package]} in catalog "
+                    f"{dependencies[package][len('catalog:'):]} but {version} in catalog {catalog}")
+            if package not in versions:
+                versions[package] = version
+                dependencies[package] = f"catalog:{catalog}"
+    if not dependencies:
+        raise ValueError("no catalog entries (is pnpm-workspace.yaml in the current directory?)")
+    return {
+        "name": "pnpm-catalog-store-preload",
+        "private": True,
+        "dependencies": dependencies,
+    }
 
 
-def main() -> int:
-    """Print the manifest of argv[1] (default ccc's catalogs) and return the exit status."""
-    path = Path(sys.argv[1]) if len(sys.argv) > 1 else CCC_WORKSPACE
+def main():
+    """Reads catalogs JSON from stdin, writes package.json to stdout"""
     try:
-        packages, conflicts = _manifest(read_catalogs(path.read_text(encoding="utf-8")))
-    except (OSError, CatalogError) as error:
-        print(f"{path}: {error}", file=sys.stderr)
-        return 2
-    if conflicts:
-        print(f"{path}: packages pinned at different versions by two catalogs:", *conflicts, sep="\n  ", file=sys.stderr)
+        result = manifest(json.load(sys.stdin))
+    except ValueError as error:
+        print(f"pnpm-catalog-manifest: {error}", file=sys.stderr)
         return 1
-    print(*packages, sep="\n")
+    json.dump(result, sys.stdout, indent=2)
+    sys.stdout.write("\n")
     return 0
 
 

@@ -90,7 +90,8 @@ SHELL ["/bin/bash", "-c"]
 ENV SHELL=/bin/bash
 ENV HOME=/home/emscripten
 
-# Preinstall large deps (rare changed) to eliminate pulling them from web each time
+# pnpm's store-dir is preinstalled-store, preloaded below so that consumers'
+# `pnpm install` takes the shared toolchain from the image instead of the network
 ENV PNPM_HOME="/home/emscripten/.local/share/pnpm"
 ENV NVM_DIR="${HOME}/.nvm"
 ENV PATH="${PNPM_HOME}:${NVM_DIR}:${PATH}"
@@ -116,19 +117,30 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
     chmod -Rc o+r "${HOME}" && \
     chmod -c o+r "${HOME}/.bashrc"
 
-# Preload every package of ccc's pnpm catalogs, with its dependencies, into the
-# store, so consumers' `catalog:` installs are served from the image. The
-# @hiveio registry line of .npmrc reaches the GitLab registry, the only one with
-# the -stable builds.
-COPY --chown=emscripten:emscripten pnpm-config/pnpm-workspace.yaml pnpm-config/.npmrc scripts/python/pnpm_catalogs.py scripts/python/pnpm-catalog-manifest.py /tmp/ccc-catalog/
+# Preload the store with every package of the shared pnpm catalogs
+# (pnpm-config/pnpm-workspace.yaml) at its catalog version, with its dependencies:
+# a consumer's `pnpm install --frozen-lockfile` takes from here whatever its
+# lockfile shares with the catalog (TypeScript, typedoc, rollup, ts-proto, ...)
+# instead of downloading it in every job. Nothing is linked onto PATH; the
+# temporary project is removed and only the store keeps the packages.
+COPY --chown=emscripten pnpm-config/pnpm-workspace.yaml /tmp/pnpm-catalog/
+COPY --chown=emscripten pnpm-config/.npmrc /tmp/pnpm-catalog.npmrc
+COPY --chown=emscripten scripts/python/pnpm-catalog-manifest.py /tmp/
+# The catalogs go through a file: redirecting straight into package.json would
+# create it empty before pnpm reads the directory. The @hiveio packages exist
+# only in the hive GitLab registry, so the project takes the @hiveio registry
+# line of pnpm-config/.npmrc (and none of its workspace settings). Registry
+# metadata goes to a temporary cache-dir (frozen-lockfile installs never read
+# it), and nothing is chmod-ed: the new store files are already world-readable,
+# and touching the ones from the layer above would copy them into this layer.
 RUN [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
     nvm use "${NODEJS_VERSION}" && \
-    packages="$(python3 /tmp/ccc-catalog/pnpm-catalog-manifest.py /tmp/ccc-catalog/pnpm-workspace.yaml)" && \
-    mkdir /tmp/ccc-catalog/preload && cd /tmp/ccc-catalog/preload && \
-    grep "^@hiveio:registry=" ../.npmrc > .npmrc && echo '{"private": true}' > package.json && \
-    pnpm add --ignore-scripts ${packages} && \
-    cd "${HOME}" && rm -rf /tmp/ccc-catalog && \
-    chmod -R o+rX "${PNPM_HOME}/preinstalled-store"
+    cd /tmp/pnpm-catalog && \
+    grep "^@hiveio:registry=" /tmp/pnpm-catalog.npmrc > .npmrc && \
+    pnpm config get catalogs --json > /tmp/pnpm-catalogs.json && \
+    python3 /tmp/pnpm-catalog-manifest.py < /tmp/pnpm-catalogs.json > package.json && \
+    pnpm install --ignore-scripts --config.cache-dir=/tmp/pnpm-catalog-cache && \
+    cd / && rm -rf /tmp/pnpm-catalog /tmp/pnpm-catalog-cache /tmp/pnpm-catalogs.json /tmp/pnpm-catalog.npmrc /tmp/pnpm-catalog-manifest.py
 
 USER root
 WORKDIR /home/emscripten

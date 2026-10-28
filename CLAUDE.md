@@ -121,9 +121,18 @@ find-upstream-image.sh \
 - Python version: `docker-bake.hcl` (`PYTHON_VERSION`, `PYTHON_RUNTIME_VERSION`)
 - Emscripten version: `docker-bake.hcl` (`EMSCRIPTEN_VERSION`)
 - Docker CLI/dind version: `docker-bake.hcl` (`DOCKER_VERSION`, plus `DOCKER_COMPOSE_PLUGIN_VERSION` / `DOCKER_BUILDX_PLUGIN_VERSION`); `.gitlab-ci.yml` repeats `DOCKER_VERSION` as a CI variable, kept equal by `tests/test_tool_versions_defined_once.py`
-- emsdk image tag for consumers: `templates/npm_projects.gitlab-ci.yml` (`EMSCRIPTEN_IMAGE_TAG`) and alpine tag `templates/base.gitlab-ci.yml` (`ALPINE_IMAGE_TAG`); templates cannot read bake variables, so the test checks each equals the tag `docker-bake.hcl` builds
+- emsdk image tag for consumers: `templates/npm_projects.gitlab-ci.yml` (`EMSCRIPTEN_IMAGE_TAG`) and alpine tag `templates/base.gitlab-ci.yml` (`ALPINE_IMAGE_TAG`); templates cannot read bake variables, so the test checks each names the tag `docker-bake.hcl` builds or an earlier one, never a later one (see below)
 - npm package pins (Hive libraries, React/Next, Vue/Nuxt, Tailwind, build tooling): the catalogs in `pnpm-config/pnpm-workspace.yaml`, referenced only as `catalog:<name>`, consumed by symlinking the file or, in monorepos, merging it with `scripts/python/pnpm-catalog-sync.py`; the emsdk image preloads them (`scripts/python/pnpm-catalog-manifest.py`)
 - Test/lint tool versions (pytest, ruff, node, pnpm, ...): `docker-bake.hcl` only - passed as build args to python-test-tools, node-test-tools, docker-builder (built on python-test-tools) and emsdk; Dockerfiles have no defaults and templates never pin a tool (see README "CI/test tool versions")
+
+## Moving Templates to a New Image Tag (two MRs)
+
+Templates pin tags of images this repo builds (`EMSCRIPTEN_IMAGE_TAG`, `ALPINE_IMAGE_TAG`). Projects that include the templates from `develop` pull the pinned tag as soon as it is merged, but a new tag exists only after the develop pipeline's build job has published it. A new image tag therefore always reaches the templates in two MRs:
+
+1. **Image MR**: changes the image and moves its tag in `docker-bake.hcl` (new content always gets a new tag, never replaces what a published tag points to). The template variable keeps the published tag.
+2. **Template MR**: only moves the template variable to the new tag. Open it together with the image MR, as a Draft branched from it, with `Depends on !<image MR>` in the description. Merge it only after the image MR is merged and its develop pipeline has published the tag (`docker buildx imagetools inspect registry.gitlab.syncad.com/hive/common-ci-configuration/<image>:<tag>` finds it), rebased onto `develop`.
+
+This applies to AIDEV workflows too: a change that bumps such a tag leaves the template variable alone, and the template move is a separate issue and MR. `tests/test_tool_versions_defined_once.py` lets a template trail the bake tag but fails when it is ahead of it, and the `check_template_image_tags` job (`scripts/python/check-template-image-tags.py`) fails every branch pipeline whose templates name a tag the registry does not have: on a template MR it passes once the tag is published (retry the job then). Details: "Moving templates to a new image tag" in `docs/common-ci-images.md`.
 
 ## CI Builder Infrastructure
 
