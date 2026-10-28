@@ -18,8 +18,11 @@ catalogs:
     "typedoc-gitlab-wiki-theme": 2.1.0
     "typedoc-plugin-markdown": 4.3.1
 
+  # TypeScript 5.x: 5.9 for Next.js's type check and typescript-eslint 8; not 7.x,
+  # which lacks the compiler JS API typedoc and the rollup TypeScript plugins use.
+  # typedoc 0.27.3 declares a typescript <=5.7 peer, so pnpm warns until it moves to 0.28
   typescript-toolset:
-    typescript: 5.7.3
+    typescript: 5.9.3
     tslib: 2.8.1
     tsx: 4.19.3
 
@@ -42,3 +45,44 @@ catalogs:
     size-limit: 11.1.6
     "@size-limit/file": 11.1.6
 
+  # Hive libraries: the newest -stable builds of the current release line (1.28.8),
+  # published only in the hive group's GitLab registry (pnpm-config/.npmrc's @hiveio
+  # line). Not the 2.0.x line npmjs tags `latest`, which is older. The signers are
+  # wax's build and depend on exactly this beekeeper, whose embind glue has no
+  # `new Function` (older builds' does, which a nonce CSP blocks).
+  # Known peer mismatches: no workerbee or hb-auth build peers on wax 1.28.x (the
+  # newest declare `>= 2.0.0 < 2.1.0`), so pnpm warns about that peer;
+  # healthchecker-component still peers tailwindcss ^3.4.12.
+  hiveio-toolset:
+    "@hiveio/wax": 1.28.8-stable.261028191145
+    "@hiveio/wax-signers-external": 1.28.8-stable.261028191145
+    "@hiveio/wax-signers-keychain": 1.28.8-stable.261028191145
+    "@hiveio/wax-signers-metamask": 1.28.8-stable.261028191145
+    "@hiveio/wax-signers-peakvault": 1.28.8-stable.261028191145
+    "@hiveio/wax-signers-beekeeper": 1.28.8-stable.261028191145
+    "@hiveio/beekeeper": 1.28.8-stable.261010174216
+    "@hiveio/workerbee": 1.28.4-rc1-stable.261026001315
+    "@hiveio/hb-auth": 1.28.4-rc0-stable.261027002715
+    "@hiveio/healthchecker-component": 2.0.2-stable.261027010535
+
+  react-toolset:
+    react: 19.3.1
+    react-dom: 19.3.1
+    "@types/react": 19.3.0
+    "@types/react-dom": 19.3.0
+    next: 16.4.1
+    eslint-config-next: 16.4.1
+    "@tanstack/react-query": 5.104.2
+
+  vue-toolset:
+    vue: 3.5.44
+    nuxt: 4.6.1
+    pinia: 4.1.0
+    vuetify: 4.2.5
+    vue-tsc: 3.3.13
+
+  tailwind-toolset:
+    tailwindcss: 4.3.3
+    "@tailwindcss/postcss": 4.3.3
+    "@tailwindcss/vite": 4.3.3
+    "@tailwindcss/cli": 4.3.3

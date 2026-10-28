@@ -4,8 +4,12 @@ include:
 variables:
   # The emsdk tag docker-bake.hcl builds (tests/test_tool_versions_defined_once.py
   # checks it); emsdk's node, pnpm and Playwright versions come from docker-bake.hcl too
-  EMSCRIPTEN_IMAGE_TAG: "5.0.2-7"
+  EMSCRIPTEN_IMAGE_TAG: "5.0.2-8"
   EMSCRIPTEN_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/emsdk:$EMSCRIPTEN_IMAGE_TAG"
+  # A monorepo merging ccc's catalogs into its own pnpm-workspace.yaml (with
+  # scripts/python/pnpm-catalog-sync.py) sets this to its ccc submodule's path,
+  # relative to SOURCE_DIR; a repo symlinking ccc's file leaves it empty
+  CCC_SUBMODULE_DIR: ""
 
 .node_based_job_base:
   extends: .job-defaults
@@ -30,9 +34,14 @@ variables:
 # from develop) fails it with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH; only then the
 # install is redone unfrozen, which re-resolves just the changed catalog entries,
 # and the refreshed lockfile is kept as an artifact. Any other failure stays fatal.
+# With CCC_SUBMODULE_DIR set, ccc's catalogs are merged into the job's copy of
+# pnpm-workspace.yaml first, so a monorepo takes a catalog bump the same way.
 .pnpm_install_with_catalog_fallback:
   script:
     - |
+      if [ -n "${CCC_SUBMODULE_DIR:-}" ]; then
+        python3 "${CCC_SUBMODULE_DIR}/scripts/python/pnpm-catalog-sync.py" pnpm-workspace.yaml || exit $?
+      fi
       pnpm_install_log="$(mktemp)"
       # pnpm's status goes through a file: without pipefail the pipeline reports tee's
       { pnpm_install_rc=0; pnpm --recursive install --frozen-lockfile || pnpm_install_rc=$?; echo "${pnpm_install_rc}" > "${pnpm_install_log}.rc"; } 2>&1 | tee "${pnpm_install_log}"
@@ -61,6 +70,20 @@ variables:
       - pnpm-lock.catalog-refreshed.yaml
     when: always
     expire_in: 1 week
+
+# Fails, printing the diff, when a monorepo's committed pnpm-workspace.yaml lacks
+# its ccc submodule's current catalogs (CCC_SUBMODULE_DIR must be set). Allowed
+# to fail: the npm jobs already install against the merged catalogs, so it only
+# reports that the merge and the refreshed lockfile are still to be committed.
+.pnpm_catalog_check:
+  extends: .job-defaults
+  image: "${NODE_TEST_TOOLS_IMAGE}"
+  variables:
+    SOURCE_DIR: "${CI_PROJECT_DIR}"
+  script:
+    - cd "${SOURCE_DIR}"
+    - python3 "${CCC_SUBMODULE_DIR:?set CCC_SUBMODULE_DIR to the ccc submodule path}/scripts/python/pnpm-catalog-sync.py" --check pnpm-workspace.yaml
+  allow_failure: true
 
 .filter_out_swagger_json:
   extends: .node_based_job_base

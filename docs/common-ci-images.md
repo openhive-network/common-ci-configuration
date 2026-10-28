@@ -125,10 +125,16 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
   changes both, enforced by `tests/test_tool_versions_defined_once.py`.
   Consumers pick up the catalog by bumping their `npm-common-config`
   submodule; one still on an older catalog cannot launch the image's browsers
+- A pnpm store preloaded with every package of every catalog in
+  `pnpm-config/pnpm-workspace.yaml` and its dependencies (the list comes from
+  `scripts/python/pnpm-catalog-manifest.py`), so installs of catalog versions
+  need no download. Since `5.0.2-8`'s Hive, React/Next, Vue/Nuxt and Tailwind
+  catalogs the store is about 330 MB (about 215 MB gzipped), up from about
+  100 MB (35 MB)
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf
 
-**Current version:** `5.0.2-7` (`5.0.2-6` has Node 24.21.0; `5.0.2-5` and older also install TypeScript,
+**Current version:** `5.0.2-8` (`5.0.2-7` has no catalog packages in its pnpm store; `5.0.2-6` has Node 24.21.0; `5.0.2-5` and older also install TypeScript,
 rollup, typedoc and protobuf tooling globally; `5.0.2-4`: Node 24, Playwright
 1.59; `5.0.2-3` has Node 22)
 
