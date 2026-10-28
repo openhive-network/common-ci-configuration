@@ -1,12 +1,12 @@
 '''
-Reads the `catalogs:` mapping of a pnpm-workspace.yaml with the standard
-library only: the images that run the catalog scripts (emsdk, node-test-tools)
-ship python3 without PyYAML.
+Reads the `catalogs:` and `overrides:` mappings of a pnpm-workspace.yaml with
+the standard library only: the images that run the catalog scripts (emsdk,
+node-test-tools) ship python3 without PyYAML.
 
-Only the block style pnpm-workspace.yaml files use is read: `catalogs:` at
-column 0, one block mapping per catalog, one `package: version` per line, plain
-or quoted scalars, comments. Anything else in the block is a CatalogError
-naming the line.
+Only the block style pnpm-workspace.yaml files use is read: the key at column 0,
+for `catalogs:` one block mapping per catalog, one `package: version` per line,
+for `overrides:` one `selector: version` per line, plain or quoted scalars,
+comments. Anything else in the block is a CatalogError naming the line.
 '''
 import json
 import re
@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 CCC_WORKSPACE = Path(__file__).resolve().parents[2] / "pnpm-config" / "pnpm-workspace.yaml"
 
 Catalogs = Dict[str, Dict[str, str]]
+Overrides = Dict[str, str]
 
 _SCALAR = r"\"(?:[^\"\\]|\\.)*\"|'(?:[^']|'')*'"
 _ENTRY = re.compile(
@@ -63,19 +64,19 @@ def _entry(line: str, number: int) -> Tuple[int, str, Optional[str]]:
     return len(match.group("indent")), _unquote(match.group("key")), None if value is None else _unquote(value)
 
 
-def find_block(lines: List[str]) -> Optional[Tuple[int, int]]:
-    """(index of the `catalogs:` line, index past its block's last indented line), None without one.
+def find_block(lines: List[str], key: str = "catalogs") -> Optional[Tuple[int, int]]:
+    """(index of the `key:` line, index past its block's last indented line), None without one.
 
-    Raises CatalogError for a second `catalogs:` key or an inline value.
+    Raises CatalogError for a second `key:` or an inline value.
     """
-    starts = [i for i, line in enumerate(lines) if re.match(r"catalogs[ \t]*:", line)]
+    starts = [i for i, line in enumerate(lines) if re.match(rf"{re.escape(key)}[ \t]*:", line)]
     if not starts:
         return None
     if len(starts) > 1:
-        raise CatalogError(f"lines {', '.join(str(i + 1) for i in starts)}: `catalogs:` is defined more than once")
+        raise CatalogError(f"lines {', '.join(str(i + 1) for i in starts)}: `{key}:` is defined more than once")
     start = starts[0]
     if _entry(lines[start], start + 1)[2] is not None:
-        raise CatalogError(f"line {start + 1}: `catalogs:` must be a block mapping")
+        raise CatalogError(f"line {start + 1}: `{key}:` must be a block mapping")
     end = start + 1
     for i in range(start + 1, len(lines)):
         if is_content(lines[i]) and indent_of(lines[i]) == 0:
@@ -119,6 +120,38 @@ def parse_block(numbered_lines: List[Tuple[int, str]]) -> Catalogs:
             raise CatalogError(f"line {number}: package {key!r} is listed twice in its catalog")
         current[key] = value
     return catalogs
+
+
+def parse_overrides(numbered_lines: List[Tuple[int, str]]) -> Overrides:
+    """Overrides of the (1-based line number, line) content of an `overrides:` block.
+
+    Raises CatalogError naming the line for anything but `selector: version` lines at
+    one indentation, or for a selector listed twice.
+    """
+    overrides: Overrides = {}
+    entry_indent: Optional[int] = None
+    for number, line in numbered_lines:
+        if not is_content(line):
+            continue
+        indent, key, value = _entry(line, number)
+        if entry_indent is None:
+            entry_indent = indent
+        if indent != entry_indent or value is None:
+            raise CatalogError(f"line {number}: expected `selector: version` at the block's indentation")
+        if key in overrides:
+            raise CatalogError(f"line {number}: override {key!r} is listed twice")
+        overrides[key] = value
+    return overrides
+
+
+def read_overrides(text: str) -> Overrides:
+    """Overrides of pnpm-workspace.yaml content `text` in file order ({} without `overrides:`)."""
+    lines = text.splitlines(keepends=True)
+    block = find_block(lines, "overrides")
+    if block is None:
+        return {}
+    start, end = block
+    return parse_overrides([(i + 1, lines[i]) for i in range(start + 1, end)])
 
 
 def read_catalogs(text: str) -> Catalogs:

@@ -1,4 +1,4 @@
-"""scripts/python/pnpm-catalog-sync.py: ccc's catalogs merged into a monorepo's pnpm-workspace.yaml.
+"""scripts/python/pnpm-catalog-sync.py: ccc's catalogs and overrides merged into a monorepo's pnpm-workspace.yaml.
 
 The script is run as a consumer runs it, from its directory through the path
 of the ccc submodule, with `--source` standing in for the submodule's catalog.
@@ -24,6 +24,12 @@ catalogs:
     "@tanstack/react-query": 5.104.2
   hiveio-toolset:
     "@hiveio/wax": 1.28.8-stable.261028191145
+"""
+
+CCC_WITH_OVERRIDES = CCC + """
+overrides:
+  "@hiveio/beekeeper": "catalog:hiveio-toolset"
+  lodash: 4.17.21
 """
 
 CONSUMER = """# denser-style monorepo
@@ -166,6 +172,61 @@ def test_region_follows_the_consumers_indentation(tmp_path: Path) -> None:
     assert sorted(_load(workspace)["catalogs"]) == ["hiveio-toolset", "local", "react-toolset"]
 
 
+CONSUMER_OVERRIDES = """packages:
+  - apps/*
+
+overrides:
+  # own pins
+  "@hiveio/beekeeper": 1.28.8-stable.261010174216
+  "nanoid@<3.3.8": 3.3.8
+
+onlyBuiltDependencies:
+  - esbuild
+"""
+
+
+def test_merge_carries_ccc_overrides_over_the_consumers_own(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path, CONSUMER_OVERRIDES)
+
+    proc = _sync(tmp_path, ccc=CCC_WITH_OVERRIDES)
+
+    assert proc.returncode == 0, proc.stderr
+    merged = _load(workspace)
+    assert merged["overrides"] == {
+        "@hiveio/beekeeper": "catalog:hiveio-toolset", "lodash": "4.17.21", "nanoid@<3.3.8": "3.3.8",
+    }
+    assert merged["packages"] == ["apps/*"] and merged["onlyBuiltDependencies"] == ["esbuild"]
+    text = workspace.read_text()
+    assert "1.28.8-stable.261010174216" not in text
+    assert "  # own pins\n" in text and '  "nanoid@<3.3.8": 3.3.8\n' in text
+    assert _sync(tmp_path, "--check", ccc=CCC_WITH_OVERRIDES).returncode == 0
+    assert _sync(tmp_path, ccc=CCC_WITH_OVERRIDES).returncode == 0
+    assert workspace.read_text() == text
+
+
+def test_override_dropped_by_ccc_is_removed_and_local_ones_stay(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path, CONSUMER_OVERRIDES)
+    assert _sync(tmp_path, ccc=CCC_WITH_OVERRIDES).returncode == 0
+
+    assert _sync(tmp_path, ccc=CCC_WITH_OVERRIDES.replace("  lodash: 4.17.21\n", "")).returncode == 0
+    assert _load(workspace)["overrides"] == {"@hiveio/beekeeper": "catalog:hiveio-toolset", "nanoid@<3.3.8": "3.3.8"}
+
+    assert _sync(tmp_path).returncode == 0
+    assert _load(workspace)["overrides"] == {"nanoid@<3.3.8": "3.3.8"}
+    assert "common-ci-configuration overrides" not in workspace.read_text()
+
+
+def test_workspace_without_overrides_gets_ccc_overrides(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path, "packages:\n  - apps/*\n")
+
+    assert _sync(tmp_path, ccc=CCC_WITH_OVERRIDES).returncode == 0
+
+    merged = _load(workspace)
+    assert merged["overrides"] == {"@hiveio/beekeeper": "catalog:hiveio-toolset", "lodash": "4.17.21"}
+    assert sorted(merged["catalogs"]) == ["hiveio-toolset", "react-toolset"]
+    assert _sync(tmp_path, "--check", ccc=CCC_WITH_OVERRIDES).returncode == 0
+
+
 @pytest.mark.parametrize(
     "text,message",
     [
@@ -173,6 +234,8 @@ def test_region_follows_the_consumers_indentation(tmp_path: Path) -> None:
         ("# BEGIN common-ci-configuration catalogs\ncatalogs:\n  a:\n    b: 1.0.0\n", "inside the block"),
         ("catalogs:\n  # BEGIN common-ci-configuration catalogs\n  a:\n    b: 1.0.0\n", "followed by one"),
         ("catalogs: {a: {b: 1.0.0}}\n", "must be a block mapping"),
+        ("overrides:\n  a:\n    b: 1.0.0\n", "expected `selector: version`"),
+        ("overrides:\n  # BEGIN common-ci-configuration overrides\n  a: 1.0.0\n", "followed by one"),
     ],
 )
 def test_unmergeable_workspace_fails_and_is_left_alone(tmp_path: Path, text: str, message: str) -> None:
@@ -196,3 +259,5 @@ def test_default_source_is_the_scripts_own_ccc_catalog(tmp_path: Path) -> None:
     assert {name: merged[name] for name in ccc} == {
         name: {package: str(version) for package, version in packages.items()} for name, packages in ccc.items()
     }
+    ccc_overrides = yaml.safe_load((ROOT / "pnpm-config" / "pnpm-workspace.yaml").read_text())["overrides"]
+    assert _load(workspace)["overrides"] == {**ccc_overrides, "nanoid@<3.3.8": "3.3.8"}

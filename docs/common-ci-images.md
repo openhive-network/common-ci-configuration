@@ -141,8 +141,10 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf
 
-**Current version:** `5.0.2-9` (adds the Hive, React/Next, Vue/Nuxt and
-Tailwind catalogs to the store; `5.0.2-8` preloads the store from the catalogs
+**Current version:** `5.0.2-10` (preloads beekeeper 1.28.9-rc0, which the
+catalog's pnpm `overrides` force over the wax signers' own beekeeper pin;
+`5.0.2-9` adds the Hive, React/Next, Vue/Nuxt and
+Tailwind catalogs to the store, with beekeeper 1.28.8; `5.0.2-8` preloads the store from the catalogs
 of that time; `5.0.2-7` (Node 24.22.1) and `5.0.2-6` (Node 24.21.0) have only
 Playwright in their store; `5.0.2-5` and older also install TypeScript, rollup,
 typedoc and protobuf tooling globally, at versions of their own rather than the
