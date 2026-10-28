@@ -116,6 +116,20 @@ RUN source "${EMSDK}/emsdk_env.sh" && \
     chmod -Rc o+r "${HOME}" && \
     chmod -c o+r "${HOME}/.bashrc"
 
+# Preload every package of ccc's pnpm catalogs, with its dependencies, into the
+# store, so consumers' `catalog:` installs are served from the image. The
+# -stable.* @hiveio builds are published only in the hive group's GitLab registry.
+COPY --chown=emscripten:emscripten pnpm-config/pnpm-workspace.yaml scripts/python/pnpm_catalogs.py scripts/python/pnpm-catalog-manifest.py /tmp/ccc-catalog/
+RUN [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && \
+    nvm use "${NODEJS_VERSION}" && \
+    packages="$(python3 /tmp/ccc-catalog/pnpm-catalog-manifest.py /tmp/ccc-catalog/pnpm-workspace.yaml)" && \
+    mkdir /tmp/ccc-catalog/preload && cd /tmp/ccc-catalog/preload && \
+    echo '{"private": true}' > package.json && \
+    echo "@hiveio:registry=https://gitlab.syncad.com/api/v4/groups/136/-/packages/npm/" > .npmrc && \
+    pnpm add --ignore-scripts ${packages} && \
+    cd "${HOME}" && rm -rf /tmp/ccc-catalog && \
+    chmod -R o+rX "${PNPM_HOME}/preinstalled-store"
+
 USER root
 WORKDIR /home/emscripten
 ENV PNPM_HOME="/home/emscripten/.local/share/pnpm"

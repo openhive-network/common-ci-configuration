@@ -5,21 +5,28 @@ fake `pnpm` that fails the frozen install the way pnpm does.
 """
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 import yaml
 
-TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
+ROOT = Path(__file__).resolve().parent.parent
+TEMPLATES = ROOT / "templates"
 REFRESHED_LOCKFILE = "pnpm-lock.catalog-refreshed.yaml"
 
 FAKE_PNPM = """#!/bin/sh
 echo "$*" >> "$PNPM_CALLS"
 case "$*" in
   *--frozen-lockfile*)
-    case "$FROZEN_RESULT" in
+    result="$FROZEN_RESULT"
+    # "workspace": the lockfile was written against pnpm-workspace.locked.yaml
+    if [ "$result" = workspace ]; then
+      if cmp -s pnpm-workspace.yaml pnpm-workspace.locked.yaml; then result=ok; else result=mismatch; fi
+    fi
+    case "$result" in
       ok) echo "Lockfile is up to date" ;;
       mismatch)
         echo ' ERR_PNPM_LOCKFILE_CONFIG_MISMATCH  Cannot proceed with the frozen installation. The current "catalogs" configuration doesn'"'"'t match the value found in the lockfile' >&2
@@ -84,7 +91,9 @@ def _extends_npm_base(jobs: Dict[str, Any], name: str) -> bool:
     return False
 
 
-def _run_install(tmp_path: Path, frozen_result: str, shell_opts: str) -> "subprocess.CompletedProcess[str]":
+def _run_install(
+    tmp_path: Path, frozen_result: str, shell_opts: str, env_extra: Optional[Dict[str, str]] = None
+) -> "subprocess.CompletedProcess[str]":
     jobs = _jobs()
     script = "\n".join(_commands(jobs, _Reference([".pnpm_install_with_catalog_fallback", "script"])))
     bin_dir = tmp_path / "bin"
@@ -93,7 +102,7 @@ def _run_install(tmp_path: Path, frozen_result: str, shell_opts: str) -> "subpro
     pnpm.write_text(FAKE_PNPM)
     pnpm.chmod(0o755)
     project = tmp_path / "project"
-    project.mkdir()
+    project.mkdir(exist_ok=True)
     (project / "pnpm-lock.yaml").write_text("committed\n")
     env = {
         **os.environ,
@@ -102,6 +111,7 @@ def _run_install(tmp_path: Path, frozen_result: str, shell_opts: str) -> "subpro
         "FROZEN_RESULT": frozen_result,
         "CI_PROJECT_DIR": str(project),
         "TMPDIR": str(tmp_path),
+        **(env_extra or {}),
     }
     return subprocess.run(
         ["bash", "-c", f"{shell_opts}\n{script}"],
@@ -145,6 +155,46 @@ def test_outdated_lockfile_still_fails(tmp_path: Path, shell_opts: str) -> None:
     assert "ERR_PNPM_OUTDATED_LOCKFILE" in proc.stdout
     assert _calls(tmp_path) == ["--recursive install --frozen-lockfile"]
     assert not (tmp_path / "project" / REFRESHED_LOCKFILE).exists()
+
+
+def _monorepo_with_ccc_submodule(tmp_path: Path, ccc_catalog: str) -> Path:
+    """A project whose lockfile matches its pnpm-workspace.yaml merged with `ccc_catalog`,
+    with a `ccc` submodule holding ccc's sync script and `ccc_catalog`."""
+    project = tmp_path / "project"
+    shutil.copytree(ROOT / "scripts" / "python", project / "ccc" / "scripts" / "python")
+    (project / "ccc" / "pnpm-config").mkdir()
+    (project / "ccc" / "pnpm-config" / "pnpm-workspace.yaml").write_text(ccc_catalog)
+    (project / "pnpm-workspace.yaml").write_text("packages:\n  - 'apps/*'\ncatalogs:\n  local:\n    x: 1.0.0\n")
+    sync = project / "ccc" / "scripts" / "python" / "pnpm-catalog-sync.py"
+    subprocess.run(["python3", str(sync)], cwd=project, check=True, capture_output=True)
+    shutil.copy(project / "pnpm-workspace.yaml", project / "pnpm-workspace.locked.yaml")
+    return project
+
+
+@SHELL_OPTS
+def test_monorepo_catalog_bump_is_merged_then_falls_back(tmp_path: Path, shell_opts: str) -> None:
+    project = _monorepo_with_ccc_submodule(tmp_path, "catalogs:\n  react-toolset:\n    react: 19.3.1\n")
+    (project / "ccc" / "pnpm-config" / "pnpm-workspace.yaml").write_text("catalogs:\n  react-toolset:\n    react: 19.3.2\n")
+
+    proc = _run_install(tmp_path, "workspace", shell_opts, {"CCC_SUBMODULE_DIR": "ccc"})
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "react: '19.3.2'" in (project / "pnpm-workspace.yaml").read_text()
+    assert _calls(tmp_path) == [
+        "--recursive install --frozen-lockfile",
+        "--recursive install --no-frozen-lockfile",
+    ]
+    assert (project / REFRESHED_LOCKFILE).read_text() == "refreshed\n"
+
+
+@SHELL_OPTS
+def test_monorepo_in_step_with_ccc_installs_once_frozen(tmp_path: Path, shell_opts: str) -> None:
+    _monorepo_with_ccc_submodule(tmp_path, "catalogs:\n  react-toolset:\n    react: 19.3.1\n")
+
+    proc = _run_install(tmp_path, "workspace", shell_opts, {"CCC_SUBMODULE_DIR": "ccc"})
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _calls(tmp_path) == ["--recursive install --frozen-lockfile"]
 
 
 def test_npm_jobs_log_submodules_and_keep_the_refreshed_lockfile() -> None:

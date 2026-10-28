@@ -18,8 +18,10 @@ catalogs:
     "typedoc-gitlab-wiki-theme": 2.1.0
     "typedoc-plugin-markdown": 4.3.1
 
+  # TypeScript 5.x: Next.js's type check and typescript-eslint 8 need 5.9, and
+  # TypeScript 7 lacks the compiler JS API typedoc and the rollup plugins use
   typescript-toolset:
-    typescript: 5.7.3
+    typescript: 5.9.3
     tslib: 2.8.1
     tsx: 4.19.3
 
@@ -42,3 +44,46 @@ catalogs:
     size-limit: 11.1.6
     "@size-limit/file": 11.1.6
 
+
+  # Hive libraries. wax 2.0.2 is the newest 2.x release; the signers ship with it.
+  # @hiveio/beekeeper is the CSP-safe build: the one the signers pin uses embind glue
+  # with `new Function`, which a nonce CSP (no 'unsafe-eval') blocks, so consumers
+  # override it with `overrides: {"@hiveio/beekeeper": "catalog:hiveio-toolset"}`.
+  # workerbee and hb-auth have no non-rc release for wax 2.x; these are the newest
+  # stable-branch builds that peer-depend on wax 2.0.x.
+  # The -stable.* builds are published only in the GitLab registry
+  # (@hiveio:registry=https://gitlab.syncad.com/api/v4/groups/136/-/packages/npm/).
+  # healthchecker-component still declares a tailwindcss ^3.4.12 peer.
+  hiveio-toolset:
+    "@hiveio/wax": 2.0.2
+    "@hiveio/wax-signers-external": 2.0.2
+    "@hiveio/wax-signers-keychain": 2.0.2
+    "@hiveio/wax-signers-metamask": 2.0.2
+    "@hiveio/wax-signers-peakvault": 2.0.2
+    "@hiveio/wax-signers-beekeeper": 2.0.2
+    "@hiveio/beekeeper": 1.28.8-stable.261010174216
+    "@hiveio/workerbee": 1.28.4-rc1-stable.260703141800
+    "@hiveio/hb-auth": 1.28.4-rc0-stable.261005050436
+    "@hiveio/healthchecker-component": 2.0.2
+
+  react-toolset:
+    react: 19.3.1
+    react-dom: 19.3.1
+    "@types/react": 19.3.0
+    "@types/react-dom": 19.3.0
+    next: 16.4.1
+    eslint-config-next: 16.4.1
+    "@tanstack/react-query": 5.104.2
+
+  vue-toolset:
+    vue: 3.5.44
+    nuxt: 4.6.1
+    pinia: 4.1.0
+    vuetify: 4.2.5
+    vue-tsc: 3.3.13
+
+  tailwind-toolset:
+    tailwindcss: 4.3.3
+    "@tailwindcss/postcss": 4.3.3
+    "@tailwindcss/vite": 4.3.3
+    "@tailwindcss/cli": 4.3.3
