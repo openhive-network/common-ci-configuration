@@ -150,3 +150,11 @@ def test_hive_catalog_pins_stable_builds_of_the_current_line() -> None:
     assert re.fullmatch(r"1\.28\.8-stable\.\d{12}", wax), wax
     assert {hive[p] for p in hive if p.startswith("@hiveio/wax-signers-")} == {wax}
     assert all(re.search(r"-stable\.\d{12}$", version) for version in hive.values()), hive
+
+
+def test_hive_catalog_beekeeper_is_the_large_buffer_fixed_line_and_overrides_the_signers_pin() -> None:
+    """The signers depend on exactly a 1.28.8 beekeeper; without the override consumers get both builds."""
+    workspace = yaml.safe_load(PNPM_CATALOG.read_text())
+
+    assert re.fullmatch(r"1\.28\.9-rc0-stable\.\d{12}", str(workspace["catalogs"]["hiveio-toolset"]["@hiveio/beekeeper"]))
+    assert workspace["overrides"] == {"@hiveio/beekeeper": "catalog:hiveio-toolset"}
