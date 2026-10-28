@@ -48,8 +48,11 @@ catalogs:
   # Hive libraries: the newest -stable builds of the current release line (1.28.8),
   # published only in the hive group's GitLab registry (pnpm-config/.npmrc's @hiveio
   # line). Not the 2.0.x line npmjs tags `latest`, which is older. The signers are
-  # wax's build and depend on exactly this beekeeper, whose embind glue has no
-  # `new Function` (older builds' does, which a nonce CSP blocks).
+  # wax's build. Beekeeper is 1.28.9-rc0, ahead of the 1.28.8 build the signers
+  # depend on exactly, for its large-buffer encrypt/decrypt fix (beekeeper#48);
+  # `overrides:` below forces it over the signers' pin so consumers get one
+  # beekeeper. Its embind glue has no `new Function` (older builds' does, which a
+  # nonce CSP blocks).
   # Known peer mismatches: no workerbee or hb-auth build peers on wax 1.28.x (the
   # newest declare `>= 2.0.0 < 2.1.0`), so pnpm warns about that peer;
   # healthchecker-component still peers tailwindcss ^3.4.12.
@@ -60,7 +63,7 @@ catalogs:
     "@hiveio/wax-signers-metamask": 1.28.8-stable.261028191145
     "@hiveio/wax-signers-peakvault": 1.28.8-stable.261028191145
     "@hiveio/wax-signers-beekeeper": 1.28.8-stable.261028191145
-    "@hiveio/beekeeper": 1.28.8-stable.261010174216
+    "@hiveio/beekeeper": 1.28.9-rc0-stable.261028200530
     "@hiveio/workerbee": 1.28.4-rc1-stable.261026001315
     "@hiveio/hb-auth": 1.28.4-rc0-stable.261027002715
     "@hiveio/healthchecker-component": 2.0.2-stable.261027010535
@@ -86,3 +89,9 @@ catalogs:
     "@tailwindcss/postcss": 4.3.3
     "@tailwindcss/vite": 4.3.3
     "@tailwindcss/cli": 4.3.3
+
+# Until wax publishes signers built on the catalog's beekeeper, this forces their
+# exact beekeeper dependency to it. pnpm-catalog-sync.py merges these entries into
+# a monorepo's own `overrides:`.
+overrides:
+  "@hiveio/beekeeper": "catalog:hiveio-toolset"
