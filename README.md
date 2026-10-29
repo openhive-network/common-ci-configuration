@@ -29,7 +29,7 @@ The tools are published in two images:
 
 Tags: `:develop` is the moving tag the default branch republishes; `:<PYTHON|NODE>_TEST_TOOLS_IMAGE_VERSION` is also published from the default branch, and `:<commit-sha>` from every build. `docker-builder` is built on `python-test-tools`, so jobs that drive a DinD service get the same tools; `emsdk` gets node, pnpm and Playwright from the same variables (TypeScript and other build tools come from each project's own lockfile; emsdk preloads its pnpm store with the `pnpm-config` catalogs so those installs mostly avoid the network).
 
-**The pnpm catalog.** Consumers install Playwright and TypeScript from the catalogs in [pnpm-config/pnpm-workspace.yaml](pnpm-config/pnpm-workspace.yaml). `playwright-toolset`'s `playwright` and `@playwright/test` must equal `PLAYWRIGHT_VERSION` (the images ship only that version's browsers), so a Playwright bump changes both; `tests/test_tool_versions_defined_once.py` fails naming both values otherwise. `typescript-toolset` is compared with `TYPESCRIPT_VERSION` the same way, but is a recorded exception (`CATALOG_EXCEPTIONS`): it stays on TypeScript 5.x (5.9, which Next.js's type check and typescript-eslint 8 need) because consumers' typedoc (0.27/0.28 supports TypeScript up to 6.0) and rollup TypeScript plugins need the compiler JS API, which TypeScript 7 does not ship.
+**The pnpm catalog.** Consumers install Playwright and TypeScript from the catalogs in [pnpm-config/pnpm-workspace.yaml](pnpm-config/pnpm-workspace.yaml). `playwright-toolset`'s `playwright` and `@playwright/test` must equal `PLAYWRIGHT_VERSION` (the images ship only that version's browsers), so a Playwright bump changes both; `tests/test_tool_versions_defined_once.py` fails naming both values otherwise. `typescript-toolset` is compared with `TYPESCRIPT_VERSION` the same way, but is a recorded exception (`CATALOG_EXCEPTIONS`): it stays on TypeScript 6.0 because consumers' typedoc and rollup TypeScript plugins need the compiler JS API, which TypeScript 7 does not ship.
 
 [pnpm-config/pnpm-workspace.yaml](pnpm-config/pnpm-workspace.yaml) is the single source of version pins for Hive libraries, UI frameworks and build tooling. Consumers reference them only as `catalog:<name>`; they do not write a version of their own or keep a private copy of a catalog:
 
@@ -39,7 +39,7 @@ Tags: `:develop` is the moving tag the default branch republishes; `:<PYTHON|NOD
 | `react-toolset` | `react`, `react-dom`, `@types/react`, `@types/react-dom` (19.x), `next` (16.x), `eslint-config-next` (next's version), `@tanstack/react-query` (5.x) |
 | `vue-toolset` | `vue` (3.5.x), `nuxt` (4.x), `pinia`, `vuetify`, `vue-tsc` |
 | `tailwind-toolset` | `tailwindcss`, `@tailwindcss/postcss`, `@tailwindcss/vite`, `@tailwindcss/cli` (4.x, one version) |
-| `typescript-toolset` | `typescript` (5.x), `tslib`, `tsx` |
+| `typescript-toolset` | `typescript` (6.0.x), `tslib`, `tsx` |
 | `rollup-toolset`, `typedoc-toolset`, `proto-toolset`, `playwright-toolset`, `husky`, `terser`, `size-limit-toolset` | build and test tooling |
 
 Each package is in one catalog only (`tests/test_pnpm_catalog_manifest.py`). The emsdk image preloads all of them into its pnpm store by installing the package.json `scripts/python/pnpm-catalog-manifest.py` writes from `pnpm config get catalogs --json`, and that script fails on a package listed at two versions. Third-party pins are the newest stable release that was at least two weeks old when it was picked.

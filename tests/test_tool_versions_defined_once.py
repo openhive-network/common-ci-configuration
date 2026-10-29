@@ -89,8 +89,8 @@ CATALOG_PACKAGES = {
 # each with the reason
 CATALOG_EXCEPTIONS = {
     ("typescript-toolset", "typescript"): (
-        "consumers' typedoc (0.27/0.28 supports TypeScript up to 6.0) and rollup"
-        " TypeScript plugins need the compiler JS API, which TypeScript 7 does not ship"
+        "consumers' typedoc and rollup TypeScript plugins need the compiler JS API,"
+        " which TypeScript 7 does not ship, so the catalog stays on TypeScript 6.0"
     ),
 }
 TOOL_PACKAGES = (
@@ -581,7 +581,7 @@ def test_docker_build_args_override_ccc_node_version(tmp_path: Path) -> None:
 def test_bake_target_tag_expands_bake_variables() -> None:
     defaults = _bake_defaults()
 
-    assert _bake_target_tag("emsdk") == f"{defaults['EMSCRIPTEN_VERSION']}-11"
+    assert _bake_target_tag("emsdk") == f"{defaults['EMSCRIPTEN_VERSION']}-12"
     assert _bake_target_tag("alpine") == defaults["ALPINE_VERSION"]
 
 
