@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, Mapping, NamedTuple, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[2]
 CONSUMERS = ROOT / "pnpm-config" / "catalog-consumers.txt"
@@ -105,10 +105,13 @@ def point_at(repo: Path, consumer: Consumer, ccc: Path, ccc_commit: str) -> List
     return directories
 
 
-def clone(server_url: str, project: str, destination: Path, branch: Optional[str] = None) -> None:
-    """Shallow-clone `project` from `server_url` (its default branch unless `branch`), without submodules."""
+def clone(server_url: str, project: str, destination: Path, branch: Optional[str] = None,
+          environment: Optional[Mapping[str, str]] = None) -> None:
+    """Shallow-clone `project` from `server_url` (its default branch unless `branch`), without submodules,
+    git running in `environment` (default: this process's)."""
     selected = ["--branch", branch] if branch else []
-    subprocess.run(["git", "clone", "--quiet", "--depth", "1", *selected, f"{server_url}/{project}.git", str(destination)], check=True)
+    subprocess.run(["git", "clone", "--quiet", "--depth", "1", *selected, f"{server_url}/{project}.git", str(destination)],
+                   check=True, env=environment)
 
 
 def _check_pnpm() -> None:
