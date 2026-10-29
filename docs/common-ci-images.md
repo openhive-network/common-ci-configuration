@@ -150,6 +150,10 @@ Playwright in their store; `5.0.2-5` and older also install TypeScript, rollup,
 typedoc and protobuf tooling globally, at versions of their own rather than the
 catalog's; `5.0.2-4`: Node 24, Playwright 1.59; `5.0.2-3` has Node 22)
 
+**Used by the templates:** `5.0.2-10` (`EMSCRIPTEN_IMAGE_TAG` in
+`templates/npm_projects.gitlab-ci.yml`; it moves only after the tag is
+published, see "Moving templates to a new image tag")
+
 **Ubuntu release:** the image's Ubuntu (24.04 for emsdk 5.0.2) is chosen by the
 upstream emscripten/emsdk image. The twiggy/bloaty builder stage builds on that
 image itself instead of a separate Ubuntu tag, because binaries built on a
