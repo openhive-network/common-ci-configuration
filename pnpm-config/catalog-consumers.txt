@@ -5,8 +5,7 @@
 #
 # <GitLab project path> <path of its ccc submodule, from the repository root>
 #
-# hive/denser joins once its default branch (develop) runs pnpm_catalog_check,
-# with the npm-common-config submodule (denser !1178).
+hive/denser npm-common-config
 hive/hive-io npm-common-config
 hive/lite_gateway npm-common-config
 hive/healthchecker-component npm-common-config
