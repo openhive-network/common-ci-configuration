@@ -1,11 +1,13 @@
 """scripts/python/pnpm-catalog-resync.py: the per-consumer re-sync commit, against local fixture repositories.
 
 A fixture ccc repository carries the real sync script and a fixture catalog; a
-fixture consumer has a ccc submodule, a merged pnpm-workspace.yaml and a
-lockfile. A stand-in for `pnpm install --lockfile-only` derives the lockfile
+fixture consumer has a ccc submodule, a lockfile and either a merged
+pnpm-workspace.yaml (a monorepo) or pnpm-workspace.yaml symlinks into the
+submodule. A stand-in for `pnpm install --lockfile-only` derives the lockfile
 from pnpm-workspace.yaml, so nothing touches the network.
 """
 
+import hashlib
 import importlib.util
 import os
 import shutil
@@ -13,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 
@@ -29,7 +31,11 @@ def _load(name: str, path: Path) -> ModuleType:
     return module
 
 
+sys.path.insert(0, str(SCRIPTS))
 resync_module = _load("pnpm_catalog_resync", SCRIPTS / "pnpm-catalog-resync.py")
+consumers_module = importlib.import_module("pnpm_catalog_consumers")
+MONOREPO = consumers_module.Consumer("hive/monorepo", "npm-common-config", "merge")
+SYMLINKING = consumers_module.Consumer("hive/app", "npm-common-config", "symlink")
 
 OLD_CATALOG = """packages:
   - './src/**/*'
@@ -119,9 +125,37 @@ def _consumer(tmp_path: Path, ccc_commit: str, workspace: str, submodule: bool =
     return repo
 
 
-def _resync(tmp_path: Path, repo: Path, ccc_commit: str) -> "str | None":
-    result: "str | None" = resync_module.resync(repo, "npm-common-config", tmp_path / "ccc", ccc_commit, LOCKFILE_COMMAND)
+def _resync(tmp_path: Path, repo: Path, ccc_commit: str, consumer: Any = MONOREPO) -> "str | None":
+    result: "str | None" = resync_module.resync(repo, consumer, tmp_path / "ccc", ccc_commit, LOCKFILE_COMMAND)
     return result
+
+
+def _lockfile(workspace: str) -> str:
+    """What LOCKFILE_COMMAND writes for `workspace`."""
+    return "workspace: " + hashlib.sha256(workspace.encode()).hexdigest() + "\n"
+
+
+def _symlinking_consumer(tmp_path: Path, ccc_commit: str, catalog: str, symlinks: Dict[str, Optional[str]]) -> Path:
+    """A clone of a project with ccc at `ccc_commit` whose `symlinks` (directory -> pnpm-workspace.yaml
+    symlink target) were locked against `catalog`; a None target is a regular file holding CONSUMER."""
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "--quiet", "--initial-branch", "main")
+    for directory, target in symlinks.items():
+        (origin / directory).mkdir(parents=True, exist_ok=True)
+        if target is None:
+            (origin / directory / "pnpm-workspace.yaml").write_text(CONSUMER)
+        else:
+            (origin / directory / "pnpm-workspace.yaml").symlink_to(target)
+        (origin / directory / "pnpm-lock.yaml").write_text(_lockfile(catalog))
+    (origin / "unlocked").mkdir()
+    (origin / "unlocked" / "pnpm-workspace.yaml").symlink_to("../npm-common-config/pnpm-config/pnpm-workspace.yaml")
+    _git(origin, "add", "-A")
+    _git(origin, "update-index", "--add", "--cacheinfo", f"160000,{ccc_commit},npm-common-config")
+    _git(origin, "commit", "--quiet", "-m", "consumer")
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "clone", "--quiet", str(origin), str(repo)], check=True)
+    return repo
 
 
 def _changed(repo: Path, commit: str) -> List[str]:
@@ -159,7 +193,7 @@ def test_consumer_without_the_submodule_is_refused(tmp_path: Path) -> None:
     ccc = _ccc(tmp_path)
     repo = _consumer(tmp_path, ccc["old"], _merged(tmp_path, OLD_CATALOG), submodule=False)
 
-    with pytest.raises(resync_module.ResyncError, match="no ccc submodule at npm-common-config"):
+    with pytest.raises(consumers_module.ConsumerError, match="no ccc submodule at npm-common-config"):
         _resync(tmp_path, repo, ccc["new"])
 
 
@@ -175,17 +209,97 @@ def test_unmergeable_workspace_fails_without_a_commit(tmp_path: Path) -> None:
     assert _git(repo, "rev-parse", "HEAD") == before
 
 
-def test_consumer_list_is_project_and_submodule_per_line(tmp_path: Path) -> None:
-    consumers = resync_module.read_consumers()
-    assert consumers
-    assert all(c.project.startswith("hive/") and c.submodule for c in consumers)
+SYMLINKS: Dict[str, Optional[str]] = {".": "npm-common-config/pnpm-config/pnpm-workspace.yaml",
+                                     "examples/app": "../../npm-common-config/pnpm-config/pnpm-workspace.yaml"}
+
+
+def test_symlinking_consumer_gets_every_symlinked_lockfile_refreshed(tmp_path: Path) -> None:
+    ccc = _ccc(tmp_path)
+    repo = _symlinking_consumer(tmp_path, ccc["old"], OLD_CATALOG, {**SYMLINKS, "own": None})
+
+    sha = _resync(tmp_path, repo, ccc["new"], SYMLINKING)
+
+    assert sha == _git(repo, "rev-parse", "HEAD")
+    assert _changed(repo, "HEAD") == ["examples/app/pnpm-lock.yaml", "npm-common-config", "pnpm-lock.yaml"]
+    for directory in SYMLINKS:
+        assert _git(repo, "show", f"HEAD:{directory}/pnpm-lock.yaml") + "\n" == _lockfile(NEW_CATALOG)
+    assert _git(repo, "ls-tree", "HEAD", "npm-common-config").split()[:3] == ["160000", "commit", ccc["new"]]
+    assert _git(repo, "ls-files", "--stage", "pnpm-workspace.yaml").startswith("120000 ")
+    message = _git(repo, "log", "-1", "--format=%B")
+    assert "common-ci-configuration@" + ccc["new"][:8] in message
+    assert "refreshed examples/app/pnpm-lock.yaml, pnpm-lock.yaml with" in message
+    assert not (repo / "unlocked" / "pnpm-lock.yaml").exists()
+
+
+def test_symlinking_consumer_in_sync_gets_no_commit(tmp_path: Path) -> None:
+    ccc = _ccc(tmp_path)
+    repo = _symlinking_consumer(tmp_path, ccc["new"], NEW_CATALOG, SYMLINKS)
+    before = _git(repo, "rev-parse", "HEAD")
+
+    assert _resync(tmp_path, repo, ccc["new-again"], SYMLINKING) is None
+
+    assert _git(repo, "rev-parse", "HEAD") == before
+    assert _git(repo, "status", "--porcelain", "--", "pnpm-lock.yaml", "examples/app/pnpm-lock.yaml") == ""
+
+
+def test_symlinking_consumer_without_a_symlink_into_the_submodule_is_refused(tmp_path: Path) -> None:
+    ccc = _ccc(tmp_path)
+    repo = _symlinking_consumer(tmp_path, ccc["old"], OLD_CATALOG, {".": None, "other": "../elsewhere/pnpm-workspace.yaml"})
+    before = _git(repo, "rev-parse", "HEAD")
+
+    with pytest.raises(consumers_module.ConsumerError, match="no pnpm-workspace.yaml symlink to npm-common-config/"):
+        _resync(tmp_path, repo, ccc["new"], SYMLINKING)
+
+    assert _git(repo, "rev-parse", "HEAD") == before
+
+
+def test_consumer_list_is_project_submodule_mode_and_flag_per_line(tmp_path: Path) -> None:
+    consumers = {c.project: c for c in consumers_module.read_consumers()}
+    assert all(p.startswith("hive/") and c.submodule and c.mode in ("merge", "symlink") for p, c in consumers.items())
+    assert consumers["hive/denser"].mode == "merge" and consumers["hive/denser"].auto_merge
+    assert consumers["hive/block_explorer_ui"] == consumers_module.Consumer("hive/block_explorer_ui", "npm-common-config", "symlink")
+    assert consumers["hive/vessel"].mode == "merge" and not consumers["hive/vessel"].auto_merge
 
     listed = tmp_path / "consumers.txt"
-    listed.write_text("# comment\n\nhive/a npm-common-config  # trailing\n")
-    assert resync_module.read_consumers(listed) == [resync_module.Consumer("hive/a", "npm-common-config")]
-    listed.write_text("hive/a\n")
-    with pytest.raises(resync_module.ResyncError, match=":1: expected"):
-        resync_module.read_consumers(listed)
+    listed.write_text("# comment\n\nhive/a npm-common-config merge  # trailing\nhive/b ts/ccc symlink no-auto-merge\n")
+    assert consumers_module.read_consumers(listed) == [
+        consumers_module.Consumer("hive/a", "npm-common-config", "merge", auto_merge=True),
+        consumers_module.Consumer("hive/b", "ts/ccc", "symlink", auto_merge=False)]
+    for line in ("hive/a npm-common-config", "hive/a npm-common-config copy", "hive/a ccc symlink auto-merge",
+                 "hive/a ccc symlink no-auto-merge extra"):
+        listed.write_text(line + "\n")
+        with pytest.raises(consumers_module.ConsumerError, match=":1: expected"):
+            consumers_module.read_consumers(listed)
+
+
+class _FakeGitLab:
+    """Records the API calls of one merge request's publication; the MR's pipeline is already at `sha`."""
+
+    def __init__(self, sha: str) -> None:
+        self.sha = sha
+        self.calls: List[Any] = []
+
+    def call(self, method: str, path: str, data: Optional[Dict[str, Any]] = None) -> Any:
+        self.calls.append((method, path, data))
+        if method == "GET" and "?" in path:
+            return []
+        return {"iid": 7, "web_url": "https://gitlab.example/hive/app/-/merge_requests/7", "head_pipeline": {"sha": self.sha}}
+
+
+@pytest.mark.parametrize("auto_merge", [True, False])
+def test_merge_request_is_set_to_merge_unless_the_consumer_is_no_auto_merge(auto_merge: bool) -> None:
+    gitlab = _FakeGitLab("c0ffee")
+    consumer = SYMLINKING._replace(auto_merge=auto_merge)
+
+    url = resync_module._publish(gitlab, {"id": 3, "default_branch": "main"}, consumer, "c0ffee", "ab" * 20)
+
+    assert url.endswith("/merge_requests/7")
+    created = [data for method, path, data in gitlab.calls if method == "POST"]
+    assert len(created) == 1 and created[0]["source_branch"] == "ccc-catalog-resync" and created[0]["target_branch"] == "main"
+    merges = [data for method, path, data in gitlab.calls if path.endswith("/merge_requests/7/merge")]
+    assert merges == ([{"merge_when_pipeline_succeeds": True, "should_remove_source_branch": True, "sha": "c0ffee"}]
+                      if auto_merge else [])
+    assert ("no-auto-merge" in created[0]["description"]) is not auto_merge
 
 
 def test_without_token_the_job_skips_and_passes() -> None:

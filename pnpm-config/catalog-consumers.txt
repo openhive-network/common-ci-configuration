@@ -1,12 +1,38 @@
-# Monorepos merging ccc's catalogs into their own pnpm-workspace.yaml (projects
-# whose default branch's .gitlab-ci.yml extends .pnpm_catalog_check). The
-# pnpm_catalog_resync job opens a re-sync merge request in each one after a
-# catalog change (README, "Re-syncing monorepos").
+# Projects consuming ccc's catalogs. After a catalog change the
+# pnpm_catalog_resync job opens a re-sync merge request in each one, and
+# pnpm_catalog_consumer_check type-checks each one against a catalog MR
+# (README, "Re-syncing consumers").
 #
-# <GitLab project path> <path of its ccc submodule, from the repository root>
+# <GitLab project path> <path of its ccc submodule, from the repository root> <mode> [no-auto-merge]
 #
-hive/denser npm-common-config
-hive/hive-io npm-common-config
-hive/lite_gateway npm-common-config
-hive/healthchecker-component npm-common-config
-hive/vessel npm-common-config
+# mode `merge`: a monorepo merging ccc's catalogs into its own pnpm-workspace.yaml
+# (its default branch's .gitlab-ci.yml extends .pnpm_catalog_check).
+# mode `symlink`: a project whose pnpm-workspace.yaml is a symlink to the
+# submodule's pnpm-config/pnpm-workspace.yaml; every directory with such a
+# symlink and a pnpm-lock.yaml is re-synced.
+# no-auto-merge: the re-sync merge request waits for a person to merge it.
+#
+hive/denser npm-common-config merge
+hive/hive-io npm-common-config merge
+hive/lite_gateway npm-common-config merge
+hive/healthchecker-component npm-common-config merge
+hive/vessel npm-common-config merge no-auto-merge
+
+hive/beekeeper programs/beekeeper/beekeeper_wasm/npm-common-config symlink
+hive/block_explorer_ui npm-common-config symlink
+hive/hb-auth common-ci-configuration symlink
+hive/imagehoster npm-common-config symlink
+hive/metamask-snap npm-common-config symlink
+hive/transaction-inspector npm-common-config symlink
+hive/tx-inspector common-ci-configuration symlink
+hive/velocity-bridge-ui npm-common-config symlink
+hive/velocity-chain-schemas npm-common-config symlink
+hive/velocity-explorer npm-common-config symlink
+hive/velocity-identity npm-common-config symlink
+hive/velocity-js-sdk npm-common-config symlink
+hive/velocity-wallet npm-common-config symlink
+hive/wallet-dapp npm-common-config symlink
+hive/wax ts/npm-common-config symlink
+hive/wax-doc-snippets npm-common-config symlink
+hive/wax-spec-generator npm-common-config symlink
+hive/workerbee npm-common-config symlink
