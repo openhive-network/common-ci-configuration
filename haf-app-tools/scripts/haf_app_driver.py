@@ -29,7 +29,7 @@ application's tables, has not reached the range - raises SQLSTATE 55R23
 (RETRY_LATER_SQLSTATE), e.g. RAISE EXCEPTION '...' USING ERRCODE = '55R23'.
 The driver rolls the iteration back and calls hive.app_next_iteration again on
 the same connection, after --poll-interval seconds, doubling up to
---retry-delay. It logs when the wait starts, every 10 minutes while it lasts,
+--retry-delay (or up to --poll-interval, if that is longer). It logs when the wait starts, every 10 minutes while it lasts,
 and when a range next goes through.
 
 55R23 is in class 55 ("object not in prerequisite state"), which psycopg2
@@ -390,10 +390,12 @@ class Driver:
         elif now - self.waiting_logged >= STILL_WAITING_LOG_INTERVAL:
             log(f"blocks {e.blocks[0]}..{e.blocks[1]} still not ready after {now - self.waiting_since:.0f}s: {e.message}")
             self.waiting_logged = now
-        # the NOTIFYs that arrive meanwhile are not needed: the next try asks anyway
-        del self.conn.notifies[:]
         self.sleep(self.retry_wait)
         self.retry_wait = min(self.retry_wait * 2, max(self.args.retry_delay, self.args.poll_interval))
+        # the NOTIFYs received while waiting are not needed: the next try asks anyway
+        del self.conn.notifies[:]
+        # a rolled-back try is not an iteration for the batch and live-summary lines
+        self.iterations = 0
 
     def sleep(self, seconds):
         select.select([self.wake_r], [], [], seconds)

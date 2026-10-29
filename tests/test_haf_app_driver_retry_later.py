@@ -261,6 +261,27 @@ def test_retries_back_off_to_retry_delay(logged):
     assert d.sleeps == [0.5, 1.0, 2.0, 3.0, 3.0, 3.0, 0.5], "doubling, capped, and reset by the next wait"
 
 
+def test_backoff_never_below_poll_interval():
+    d = ScriptedDriver([retry()] * 3 + [(101, 110)], poll_interval=8.0, retry_delay=5.0)
+    d.run()
+    assert d.sleeps == [8.0, 8.0, 8.0]
+
+
+def test_retries_are_not_counted_as_iterations(logged):
+    d = ScriptedDriver([retry()] * 5 + [(101, 110)])
+    inner, seen = d.iterate, []
+
+    def iterate():
+        d.iterations += 1  # as the real iterate() does once app_next_iteration returns
+        if d.script and isinstance(d.script[0], tuple):
+            seen.append(d.iterations)
+        return inner()
+
+    d.iterate = iterate
+    d.run()
+    assert seen == [1], f"the range's batch line would report {seen} iteration(s)"
+
+
 def test_each_wait_logs_its_start_and_end(logged):
     d = ScriptedDriver([retry(), retry(), (101, 110), retry(111, 120), retry(111, 120), (111, 120)])
     d.run()
@@ -280,10 +301,10 @@ def test_no_range_does_not_end_the_wait(logged):
 def test_a_long_wait_logs_now_and_then(logged, clock):
     d = ScriptedDriver([retry()] * 400 + [(101, 110)], clock=clock, poll_interval=1.0, retry_delay=5.0)
     d.run()
-    waited = sum(d.sleeps)
-    still = lines(logged, "still not ready after")
-    assert len(still) == int(waited // driver.STILL_WAITING_LOG_INTERVAL), (waited, still)
-    assert still and still[0].startswith("blocks 101..110 still not ready after 60")
+    # tries at 0, 1, 3, 7, then every 5 s: the first try at or past each 600 s since the last line
+    assert lines(logged, "still not ready after") == [
+        f"blocks 101..110 still not ready after {s}s: not there yet" for s in (602, 1202, 1802)
+    ], sum(d.sleeps)
 
 
 def test_the_live_summary_is_flushed_before_the_wait(logged):
