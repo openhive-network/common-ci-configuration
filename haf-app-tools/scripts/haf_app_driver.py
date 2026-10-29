@@ -23,15 +23,21 @@ hive.app_register); a paused application (hive.app_pause) simply gets no ranges.
 Requires the application to be registered with a process procedure taking
 ( hive.blocks_range ). Uses only psycopg2 (as shipped in the psql image).
 
-A process procedure that cannot handle its range yet - because something it
-reads, such as another application's tables, has not reached the range - raises
-SQLSTATE 55R23 (RETRY_LATER_SQLSTATE). The driver rolls the range back, logs
-once that it is waiting, and asks for the range again every --poll-interval
-seconds on the same connection; it logs once more when a range goes through.
+A range processor (the process procedure, or --process-python) that cannot
+handle its range yet - because something it reads, such as another
+application's tables, has not reached the range - raises SQLSTATE 55R23
+(RETRY_LATER_SQLSTATE), e.g. RAISE EXCEPTION '...' USING ERRCODE = '55R23'.
+The driver rolls the iteration back and calls hive.app_next_iteration again on
+the same connection, after --poll-interval seconds, doubling up to
+--retry-delay. It logs when the wait starts, every 10 minutes while it lasts,
+and when a range next goes through.
+
 55R23 is in class 55 ("object not in prerequisite state"), which psycopg2
-raises as OperationalError, so a driver without this rule still retries it, as
-a reconnect every --retry-delay seconds. Any other error from the procedure
-ends the driver, and a connection error reconnects.
+raises as OperationalError, so a driver without this rule still retries it, by
+reconnecting. Every other error keeps its handling: what psycopg2 raises as
+OperationalError or InterfaceError (a lost connection, but also other codes
+such as statement_timeout, deadlocks or other class-55 codes) reconnects, and
+anything else ends the driver.
 """
 
 import argparse
@@ -49,6 +55,7 @@ NOTIFY_CHANNELS = ("haf_new_block", "haf_new_irreversible")
 SERVER_LEVELS = {"DEBUG": 0, "LOG": 1, "INFO": 2, "NOTICE": 3, "WARNING": 4}
 # raised by a process procedure whose range is not ready yet (see the module docstring)
 RETRY_LATER_SQLSTATE = "55R23"
+STILL_WAITING_LOG_INTERVAL = 600.0  # seconds between "still waiting" lines during a retry-later wait
 
 
 LOG_FILE = None  # opened by main() when --log-file is given
@@ -120,6 +127,8 @@ class Driver:
         self.was_paused = False
         self.was_gated = False
         self.waiting_since = None    # monotonic time of the first RetryLater of the current wait
+        self.waiting_logged = None   # monotonic time of the last line logged about that wait
+        self.retry_wait = None       # seconds before the next retry of that wait
 
     # -- signals -----------------------------------------------------------
     def request_stop(self, signum, frame):
@@ -236,7 +245,8 @@ class Driver:
             except Exception:
                 pass
             if getattr(e, "pgcode", None) == RETRY_LATER_SQLSTATE and blocks is not None:
-                raise RetryLater(blocks, getattr(e.diag, "message_primary", None) or str(e).strip()) from e
+                message = getattr(getattr(e, "diag", None), "message_primary", None)
+                raise RetryLater(blocks, message or str(e).strip()) from e
             raise
         finally:
             self.drain_notices()
@@ -349,10 +359,10 @@ class Driver:
             except RetryLater as e:
                 self.retry_later(e)
                 continue
-            if self.waiting_since is not None:
-                log(f"resumed after {time.monotonic() - self.waiting_since:.0f}s")
-                self.waiting_since = None
             if blocks is not None:
+                if self.waiting_since is not None:
+                    log(f"range ready after {time.monotonic() - self.waiting_since:.0f}s")
+                    self.waiting_since = None
                 continue
             # nothing to do: explain why (rate limited), check the limit, then idle
             now = time.monotonic()
@@ -368,13 +378,22 @@ class Driver:
         log("stopped")
 
     def retry_later(self, e):
-        """The range was rolled back (RETRY_LATER_SQLSTATE): log the first time in a row, then
-        ask again after --poll-interval, on the same connection."""
+        """The iteration was rolled back (RETRY_LATER_SQLSTATE). Log when a wait starts and every
+        STILL_WAITING_LOG_INTERVAL while it lasts, then sleep before asking again on the same
+        connection: --poll-interval at first, doubling up to --retry-delay."""
+        now = time.monotonic()
         if self.waiting_since is None:
             self.flush_live_summary()
-            log(f"blocks {e.blocks[0]}..{e.blocks[1]} not ready, retrying every {self.args.poll_interval}s: {e.message}")
-            self.waiting_since = time.monotonic()
-        self.sleep(self.args.poll_interval)
+            log(f"blocks {e.blocks[0]}..{e.blocks[1]} not ready, retrying: {e.message}")
+            self.waiting_since = self.waiting_logged = now
+            self.retry_wait = self.args.poll_interval
+        elif now - self.waiting_logged >= STILL_WAITING_LOG_INTERVAL:
+            log(f"blocks {e.blocks[0]}..{e.blocks[1]} still not ready after {now - self.waiting_since:.0f}s: {e.message}")
+            self.waiting_logged = now
+        # the NOTIFYs that arrive meanwhile are not needed: the next try asks anyway
+        del self.conn.notifies[:]
+        self.sleep(self.retry_wait)
+        self.retry_wait = min(self.retry_wait * 2, max(self.args.retry_delay, self.args.poll_interval))
 
     def sleep(self, seconds):
         select.select([self.wake_r], [], [], seconds)
@@ -401,8 +420,9 @@ def main():
                    help="block-processor advisory lock to hold (hive.acquire_app_block_processor_locks); repeatable")
     p.add_argument("--override-max-batch", type=int, default=None, help="cap the blocks per iteration")
     p.add_argument("--poll-interval", type=float, default=1.0,
-                   help="seconds between polls while paused, waiting for a dependency (their progress does not "
-                        "notify), or retrying a range the process procedure was not ready for (SQLSTATE 55R23)")
+                   help="seconds between polls while paused or waiting for a dependency (their progress does not "
+                        "notify); also the first wait before retrying a range the processor was not ready for "
+                        "(SQLSTATE 55R23), doubling up to --retry-delay")
     p.add_argument("--safety-interval", type=float, default=15.0,
                    help="seconds to idle without any notification before asking again anyway")
     p.add_argument("--live-log-interval", type=float, default=60.0, help="seconds between live-sync summary lines")
