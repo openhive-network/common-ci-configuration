@@ -15,7 +15,15 @@ pushd "${SOURCE_DIR}" # move to the project directory (where package.json file i
 
 "${SCRIPTPATH}/npm_generate_version.sh" "${SOURCE_DIR}" "${REGISTRY_URL}" "${SCOPE}" "${PROJECT_NAME}" "${COMMIT_REF_PROTECTED}" "${COMMIT_TAG}"
 
-pnpm --recursive --workspace-concurrency=1 run build
+# --recursive leaves the workspace root out. A single package whose workspace has
+# no other project (ccc's symlinked pnpm-workspace.yaml globs match none) is then
+# built only with --include-workspace-root; a root next to workspace packages
+# stays out, as its build script usually builds them itself.
+build_flags=(--recursive --workspace-concurrency=1)
+if [ "$(pnpm pkg get scripts.build)" != "{}" ] && [ "$(pnpm list --recursive --depth -1 --parseable | wc -l)" -le 1 ]; then
+  build_flags+=(--include-workspace-root)
+fi
+pnpm "${build_flags[@]}" run build
 
 "${SCRIPTPATH}/npm_pack_package.sh" "${SOURCE_DIR}" "${REGISTRY_URL}" "${SCOPE}" "${PROJECT_NAME}" "${OUTPUT_DIR}" "${COMMIT_REF_PROTECTED}" "${COMMIT_TAG}"
 

@@ -581,7 +581,7 @@ def test_docker_build_args_override_ccc_node_version(tmp_path: Path) -> None:
 def test_bake_target_tag_expands_bake_variables() -> None:
     defaults = _bake_defaults()
 
-    assert _bake_target_tag("emsdk") == f"{defaults['EMSCRIPTEN_VERSION']}-12"
+    assert _bake_target_tag("emsdk") == f"{defaults['EMSCRIPTEN_VERSION']}-13"
     assert _bake_target_tag("alpine") == defaults["ALPINE_VERSION"]
 
 
