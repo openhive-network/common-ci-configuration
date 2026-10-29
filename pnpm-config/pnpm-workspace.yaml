@@ -8,23 +8,24 @@ catalogs:
   rollup-toolset:
     rollup: 4.24.0
     rollup-plugin-copy: 3.5.0
-    rollup-plugin-dts: 6.1.1
+    rollup-plugin-dts: 6.5.1
     "@rollup/plugin-commonjs": 27.0.0
     "@rollup/plugin-node-resolve": 15.3.1
     "@rollup/plugin-replace": 6.0.2
 
   typedoc-toolset:
-    "typedoc": 0.27.3
-    "typedoc-gitlab-wiki-theme": 2.1.0
-    "typedoc-plugin-markdown": 4.3.1
+    "typedoc": 0.28.20
+    "typedoc-gitlab-wiki-theme": 2.1.1
+    "typedoc-plugin-markdown": 4.14.0
 
-  # TypeScript 5.x: 5.9 for Next.js's type check and typescript-eslint 8; not 7.x,
-  # which lacks the compiler JS API typedoc and the rollup TypeScript plugins use.
-  # typedoc 0.27.3 declares a typescript <=5.7 peer, so pnpm warns until it moves to 0.28
+  # TypeScript 6.0, not 7.x: TypeScript 7 does not ship the compiler JS API that
+  # typedoc and the rollup TypeScript plugins use. Every catalog package with a
+  # typescript peer accepts 6.0.3 (typedoc 0.28 up to 6.0.x, rollup-plugin-dts
+  # from 6.4, vue-tsc, pinia, vuetify, eslint-config-next).
   typescript-toolset:
-    typescript: 5.9.3
+    typescript: 6.0.3
     tslib: 2.8.1
-    tsx: 4.19.3
+    tsx: 4.23.15
 
   proto-toolset:
     protobufjs: 7.2.5

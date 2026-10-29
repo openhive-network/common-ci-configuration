@@ -140,7 +140,8 @@ def test_framework_catalogs_are_on_their_majors_and_consistent() -> None:
     assert _major_minor(react["@tanstack/react-query"])[0] == 5
     assert _major_minor(vue["vue"]) == [3, 5] and _major_minor(vue["nuxt"])[0] == 4
     assert len(set(tailwind.values())) == 1 and _major_minor(tailwind["tailwindcss"])[0] == 4
-    assert _major_minor(catalogs["typescript-toolset"]["typescript"]) == [5, 9]
+    assert _major_minor(catalogs["typescript-toolset"]["typescript"]) == [6, 0]
+    assert _major_minor(catalogs["typedoc-toolset"]["typedoc"]) == [0, 28]
 
 
 def test_hive_catalog_pins_stable_builds_of_the_current_line() -> None:
