@@ -53,9 +53,9 @@ catalogs:
   # `overrides:` below forces it over the signers' pin so consumers get one
   # beekeeper. Its embind glue has no `new Function` (older builds' does, which a
   # nonce CSP blocks).
-  # Known peer mismatches: no workerbee or hb-auth build peers on wax 1.28.x (the
-  # newest declare `>= 2.0.0 < 2.1.0`), so pnpm warns about that peer;
-  # healthchecker-component still peers tailwindcss ^3.4.12.
+  # workerbee and hb-auth peer on wax `>= 1.28.8-0 < 1.29.0` and declare no other
+  # @hiveio package. Known peer mismatch: healthchecker-component still peers
+  # tailwindcss ^3.4.12.
   hiveio-toolset:
     "@hiveio/wax": 1.28.8-stable.261028191145
     "@hiveio/wax-signers-external": 1.28.8-stable.261028191145
@@ -64,8 +64,8 @@ catalogs:
     "@hiveio/wax-signers-peakvault": 1.28.8-stable.261028191145
     "@hiveio/wax-signers-beekeeper": 1.28.8-stable.261028191145
     "@hiveio/beekeeper": 1.28.9-rc0-stable.261028200530
-    "@hiveio/workerbee": 1.28.4-rc1-stable.261026001315
-    "@hiveio/hb-auth": 1.28.4-rc0-stable.261027002715
+    "@hiveio/workerbee": 1.28.4-rc1-stable.261029021233
+    "@hiveio/hb-auth": 1.28.4-rc0-stable.261028220752
     "@hiveio/healthchecker-component": 2.0.2-stable.261027010535
 
   react-toolset:
