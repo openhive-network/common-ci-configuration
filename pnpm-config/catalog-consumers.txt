@@ -1,0 +1,12 @@
+# Monorepos merging ccc's catalogs into their own pnpm-workspace.yaml (projects
+# whose default branch's .gitlab-ci.yml extends .pnpm_catalog_check). The
+# pnpm_catalog_resync job opens a re-sync merge request in each one after a
+# catalog change (README, "Re-syncing monorepos").
+#
+# <GitLab project path> <path of its ccc submodule, from the repository root>
+#
+hive/denser npm-common-config
+hive/hive-io npm-common-config
+hive/lite_gateway npm-common-config
+hive/healthchecker-component npm-common-config
+hive/vessel npm-common-config
