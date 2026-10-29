@@ -1,10 +1,12 @@
 """scripts/python/pnpm-catalog-consumer-check.py: which type check a consumer gets, and how its result is reported.
 
-A stand-in pnpm logs every command, lists the fixture's workspace projects and
-fails the commands named in PNPM_FAIL, so nothing touches the network.
+A stand-in pnpm logs every command (and, with PNPM_ENV_LOG, its environment),
+lists the fixture's workspace projects and fails the commands named in
+PNPM_FAIL, so nothing touches the network.
 """
 
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -17,11 +19,14 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts" / "python"
 
 STUB_PNPM = """#!/usr/bin/env python3
-import os, sys
+import json, os, sys
 from pathlib import Path
 command = " ".join(sys.argv[1:])
 with open(os.environ["PNPM_LOG"], "a", encoding="utf-8") as log:
     log.write(f"{Path.cwd().name}: {command}\\n")
+if os.environ.get("PNPM_ENV_LOG"):
+    with open(os.environ["PNPM_ENV_LOG"], "a", encoding="utf-8") as log:
+        log.write(json.dumps(dict(os.environ)) + "\\n")
 if sys.argv[1:3] == ["list", "--recursive"]:
     print(Path.cwd())
     for package in sorted(Path("packages").glob("*/package.json")):
@@ -117,3 +122,35 @@ def test_project_without_a_type_check_passes_on_its_install(tmp_path: Path, pnpm
     assert check_module._check_directory("hive/app", repo, ".") == check_module.Result(
         "hive/app", ".", "installed; no type check found", True)
     assert pnpm_log.read_text().splitlines() == ["repo: install --no-frozen-lockfile", "repo: list --recursive --depth -1 --parseable"]
+
+
+def test_install_and_type_check_never_see_the_token_or_ci_credentials(
+        tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    _package(repo, '{"build": "pnpm -r build"}')
+    _package(repo / "packages" / "lib", '{"typecheck": "tsc"}')
+    environments = tmp_path / "environments.jsonl"
+    monkeypatch.setenv("PNPM_ENV_LOG", str(environments))
+    credentials = {
+        "CATALOG_RESYNC_TOKEN": "glpat-secret",
+        "CI_JOB_TOKEN": "job-token",
+        "CI_REGISTRY_PASSWORD": "registry-password",
+        "CI_REPOSITORY_URL": "https://gitlab-ci-token:job-token@gitlab.example/hive/ccc.git",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.https://gitlab.example/.extraHeader",
+        "GIT_CONFIG_VALUE_0": "Authorization: Basic b2F1dGgyOmdscGF0LXNlY3JldA==",
+        "COPIED_TOKEN": "prefix-glpat-secret",
+    }
+    for name, value in credentials.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("CI_PROJECT_PATH", "hive/common-ci-configuration")
+
+    assert check_module._check_directory("hive/app", repo, ".").passed
+
+    seen = [json.loads(line) for line in environments.read_text().splitlines()]
+    assert len(seen) == 3  # install, workspace listing, the package's type check
+    for environment in seen:
+        assert not set(credentials) & set(environment)
+        assert not any("glpat-secret" in value or "job-token" in value for value in environment.values())
+        assert environment["CI_PROJECT_PATH"] == "hive/common-ci-configuration"
+        assert environment["PATH"] == os.environ["PATH"]
