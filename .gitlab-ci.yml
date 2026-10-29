@@ -276,8 +276,9 @@ check_template_image_tags:
     - !reference [.python_test_tools_from_this_pipeline, rules]
     - if: $CI_COMMIT_BRANCH
 
-# Opens a re-sync merge request in every monorepo of pnpm-config/catalog-consumers.txt
-# that is behind this develop commit's catalogs (scripts/python/pnpm-catalog-resync.py):
+# Opens a re-sync merge request in every project of pnpm-config/catalog-consumers.txt
+# (monorepos and symlinking projects alike) whose lockfile is behind this develop
+# commit's catalogs (scripts/python/pnpm-catalog-resync.py):
 # on a push changing pnpm-config/, from a schedule setting PNPM_CATALOG_RESYNC=true, or
 # by hand. node-test-tools ships the pnpm the lockfiles are written with. Skips (passes)
 # while the CATALOG_RESYNC_TOKEN variable is unset. Not interruptible: a newer develop
@@ -289,6 +290,7 @@ pnpm_catalog_resync:
   image: "${NODE_TEST_TOOLS_IMAGE}"
   needs: []
   interruptible: false
+  timeout: 2 hours
   script:
     - python3 scripts/python/pnpm-catalog-resync.py
   allow_failure: true
@@ -302,6 +304,39 @@ pnpm_catalog_resync:
           - pnpm-config/**/*
     - if: $CI_PIPELINE_SOURCE == "schedule" && $PNPM_CATALOG_RESYNC == "true"
     - when: manual
+
+# Type-checks every project of pnpm-config/catalog-consumers.txt against this
+# branch's catalogs (scripts/python/pnpm-catalog-consumer-check.py), on a branch
+# changing pnpm-config/: a catalog MR shows which consumers it breaks before it
+# lands. It only warns, unless the pipeline is run with
+# PNPM_CATALOG_CHECK_BLOCKING=true. Reads the consumers with CATALOG_RESYNC_TOKEN
+# when this pipeline has it, anonymously otherwise.
+pnpm_catalog_consumer_check:
+  extends: .job-defaults
+  stage: test
+  image: "${NODE_TEST_TOOLS_IMAGE}"
+  needs: []
+  timeout: 2 hours
+  script:
+    - python3 scripts/python/pnpm-catalog-consumer-check.py --summary pnpm-catalog-consumer-check.txt
+  artifacts:
+    paths:
+      - pnpm-catalog-consumer-check.txt
+    when: always
+    expire_in: 4 weeks
+  rules:
+    - *skip_on_renovate_rule
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_COMMIT_BRANCH && $PNPM_CATALOG_CHECK_BLOCKING == "true"
+      changes: &pnpm_catalog_changes
+        paths:
+          - pnpm-config/**/*
+        compare_to: 'refs/heads/develop'
+      allow_failure: false
+    - if: $CI_COMMIT_BRANCH
+      changes: *pnpm_catalog_changes
+      allow_failure: true
 
 # =============================================================================
 # Skip Rules for Script/Doc-Only Changes

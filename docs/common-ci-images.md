@@ -141,8 +141,9 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf
 
-**Current version:** `5.0.2-12` (preloads TypeScript 6.0.3, typedoc 0.28 and
-rollup-plugin-dts 6.5; `5.0.2-11` preloads the workerbee and hb-auth builds
+**Current version:** `5.0.2-13` (its `npm_build_package.sh` also builds the
+workspace root of a single-package project; `5.0.2-12` preloads TypeScript
+6.0.3, typedoc 0.28 and rollup-plugin-dts 6.5; `5.0.2-11` preloads the workerbee and hb-auth builds
 that peer on wax 1.28.8; `5.0.2-10` preloads beekeeper 1.28.9-rc0, which the
 catalog's pnpm `overrides` force over the wax signers' own beekeeper pin;
 `5.0.2-9` adds the Hive, React/Next, Vue/Nuxt and
