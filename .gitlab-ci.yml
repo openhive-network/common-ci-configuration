@@ -291,6 +291,8 @@ pnpm_catalog_resync:
   needs: []
   interruptible: false
   timeout: 2 hours
+  # Two develop pipelines must not force-push a consumer's ccc-catalog-resync branch at once.
+  resource_group: pnpm_catalog_resync
   script:
     - python3 scripts/python/pnpm-catalog-resync.py
   allow_failure: true
@@ -306,11 +308,14 @@ pnpm_catalog_resync:
     - when: manual
 
 # Type-checks every project of pnpm-config/catalog-consumers.txt against this
-# branch's catalogs (scripts/python/pnpm-catalog-consumer-check.py), on a branch
-# changing pnpm-config/: a catalog MR shows which consumers it breaks before it
-# lands. It only warns, unless the pipeline is run with
-# PNPM_CATALOG_CHECK_BLOCKING=true. Reads the consumers with CATALOG_RESYNC_TOKEN
-# when this pipeline has it, anonymously otherwise.
+# branch's catalogs (scripts/python/pnpm-catalog-consumer-check.py), on the
+# pipeline of a branch with an open merge request that changes pnpm-config/: a
+# catalog MR shows which consumers it breaks before it lands. This project runs
+# branch pipelines only, so $CI_OPEN_MERGE_REQUESTS is what tells an MR's
+# pipeline from a plain push; elsewhere the job is manual. It only warns, unless
+# the pipeline is run with PNPM_CATALOG_CHECK_BLOCKING=true. Reads the consumers
+# with CATALOG_RESYNC_TOKEN when this pipeline has it, anonymously otherwise;
+# the consumers' install and type check never see the token.
 pnpm_catalog_consumer_check:
   extends: .job-defaults
   stage: test
@@ -328,14 +333,17 @@ pnpm_catalog_consumer_check:
     - *skip_on_renovate_rule
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: never
-    - if: $CI_COMMIT_BRANCH && $PNPM_CATALOG_CHECK_BLOCKING == "true"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $PNPM_CATALOG_CHECK_BLOCKING == "true"
       changes: &pnpm_catalog_changes
         paths:
           - pnpm-config/**/*
         compare_to: 'refs/heads/develop'
       allow_failure: false
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
       changes: *pnpm_catalog_changes
+      allow_failure: true
+    - if: $CI_COMMIT_BRANCH
+      when: manual
       allow_failure: true
 
 # =============================================================================

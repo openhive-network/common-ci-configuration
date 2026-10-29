@@ -12,7 +12,8 @@ refreshed with `pnpm install --lockfile-only`. When a file changed, the commit
 (which also moves the submodule) is force-pushed to the `ccc-catalog-resync`
 branch and one merge request to the default branch is opened (or updated) and
 set to merge when its pipeline succeeds, unless the consumer is listed with
-`no-auto-merge`. A consumer already in sync gets no commit, and its open re-sync
+`no-auto-merge`. When `ccc-catalog-resync` already carries the commit's tree it is
+not pushed again, so the consumer's pipeline is not restarted. A consumer already in sync gets no commit, and its open re-sync
 merge request, if any, is closed.
 
   python3 scripts/python/pnpm-catalog-resync.py [--commit SHA]
@@ -152,6 +153,16 @@ def _publish(gitlab: _GitLab, project: Dict[str, Any], consumer: Consumer, sha: 
     return str(request["web_url"])
 
 
+def _pushed_with_tree(repo: Path, sha: str) -> Optional[str]:
+    """The commit BRANCH has on `repo`'s origin when its tree is `sha`'s; None when it differs or there is no BRANCH."""
+    if not git(repo, "ls-remote", "origin", f"refs/heads/{BRANCH}", stdout=subprocess.PIPE).strip():
+        return None
+    git(repo, "fetch", "--quiet", "--depth", "1", "origin", f"+refs/heads/{BRANCH}:refs/remotes/origin/{BRANCH}")
+    pushed, tree = git(repo, "rev-parse", f"refs/remotes/origin/{BRANCH}", f"refs/remotes/origin/{BRANCH}^{{tree}}",
+                       stdout=subprocess.PIPE).split()
+    return pushed if tree == git(repo, "rev-parse", f"{sha}^{{tree}}", stdout=subprocess.PIPE).strip() else None
+
+
 def _process(gitlab: _GitLab, consumer: Consumer, server_url: str, ccc_commit: str) -> str:
     project = gitlab.call("GET", f"/projects/{urllib.parse.quote(consumer.project, safe='')}")
     target = project["default_branch"]
@@ -165,6 +176,9 @@ def _process(gitlab: _GitLab, consumer: Consumer, server_url: str, ccc_commit: s
                 gitlab.call("PUT", f"/projects/{project['id']}/merge_requests/{stale['iid']}", {"state_event": "close"})
                 return f"in sync on {target}; closed the stale {stale['web_url']}"
             return f"in sync on {target}"
+        pushed = _pushed_with_tree(repo, sha)
+        if pushed:
+            return f"{BRANCH} already carries this re-sync, not pushed; {_publish(gitlab, project, consumer, pushed, ccc_commit)}"
         git(repo, "push", "--force", "origin", f"{sha}:refs/heads/{BRANCH}")
         return _publish(gitlab, project, consumer, sha, ccc_commit)
 

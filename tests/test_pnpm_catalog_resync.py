@@ -302,6 +302,59 @@ def test_merge_request_is_set_to_merge_unless_the_consumer_is_no_auto_merge(auto
     assert ("no-auto-merge" in created[0]["description"]) is not auto_merge
 
 
+class _FakeProjectGitLab(_FakeGitLab):
+    """_FakeGitLab that also answers the project lookup, for a consumer at `origin` with default branch
+    master, and whose MR pipeline is at whatever ccc-catalog-resync holds there."""
+
+    def __init__(self: Self, origin: Path) -> None:
+        super().__init__("")
+        self.origin = origin
+
+    def call(self: Self, method: str, path: str, data: Optional[Dict[str, Any]] = None) -> Any:
+        self.sha = subprocess.run(["git", "-C", str(self.origin), "rev-parse", "--verify", "--quiet", "refs/heads/ccc-catalog-resync"],
+                                  capture_output=True, text=True, check=False).stdout.strip()
+        if method == "GET" and path.startswith("/projects/") and path.count("/") == 2:
+            self.calls.append((method, path, data))
+            return {"id": 3, "default_branch": "master"}
+        return super().call(method, path, data)
+
+
+def test_resync_branch_already_carrying_the_tree_is_not_pushed_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ccc = _ccc(tmp_path)
+    _consumer(tmp_path, ccc["old"], _merged(tmp_path, OLD_CATALOG))
+    origin = tmp_path / "origin"
+    monkeypatch.setattr(resync_module, "clone", lambda _server, _project, destination, branch: subprocess.run(
+        ["git", "clone", "--quiet", "--branch", branch, str(origin), str(destination)], check=True))
+    resync = resync_module.resync
+    monkeypatch.setattr(resync_module, "resync", lambda repo, consumer, _ccc, commit: resync(
+        repo, consumer, tmp_path / "ccc", commit, LOCKFILE_COMMAND))
+
+    def run(gitlab: _FakeGitLab) -> str:
+        result: str = resync_module._process(gitlab, MONOREPO, "unused", ccc["new"])
+        return result
+
+    first = run(_FakeProjectGitLab(origin))
+    pushed = _git(origin, "rev-parse", "refs/heads/ccc-catalog-resync")
+    assert first.endswith("/merge_requests/7")
+    assert _git(origin, "rev-parse", "ccc-catalog-resync:npm-common-config") == ccc["new"]
+
+    again = _FakeProjectGitLab(origin)
+    second = run(again)
+
+    assert second.startswith("ccc-catalog-resync already carries this re-sync, not pushed; ")
+    assert _git(origin, "rev-parse", "refs/heads/ccc-catalog-resync") == pushed
+    merges = [data for method, path, data in again.calls if path.endswith("/merge_requests/7/merge")]
+    assert merges == [{"merge_when_pipeline_succeeds": True, "should_remove_source_branch": True, "sha": pushed}]
+
+    (origin / "README.md").write_text("default branch moved on\n")
+    _git(origin, "add", "README.md")
+    _git(origin, "commit", "--quiet", "-m", "consumer change")
+    run(_FakeProjectGitLab(origin))
+    moved = _git(origin, "rev-parse", "refs/heads/ccc-catalog-resync")
+    assert moved != pushed
+    assert _git(origin, "rev-parse", "ccc-catalog-resync:README.md") == _git(origin, "rev-parse", "master:README.md")
+
+
 def test_without_token_the_job_skips_and_passes() -> None:
     env = {k: v for k, v in os.environ.items() if k != "CATALOG_RESYNC_TOKEN"}
     proc = subprocess.run([sys.executable, str(SCRIPTS / "pnpm-catalog-resync.py")],
