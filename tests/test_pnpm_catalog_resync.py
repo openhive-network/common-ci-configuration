@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Self
 
 import pytest
 
@@ -275,11 +275,11 @@ def test_consumer_list_is_project_submodule_mode_and_flag_per_line(tmp_path: Pat
 class _FakeGitLab:
     """Records the API calls of one merge request's publication; the MR's pipeline is already at `sha`."""
 
-    def __init__(self, sha: str) -> None:
+    def __init__(self: Self, sha: str) -> None:
         self.sha = sha
         self.calls: List[Any] = []
 
-    def call(self, method: str, path: str, data: Optional[Dict[str, Any]] = None) -> Any:
+    def call(self: Self, method: str, path: str, data: Optional[Dict[str, Any]] = None) -> Any:
         self.calls.append((method, path, data))
         if method == "GET" and "?" in path:
             return []
