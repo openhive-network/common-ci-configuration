@@ -29,8 +29,9 @@ application's tables, has not reached the range - raises SQLSTATE 55R23
 (RETRY_LATER_SQLSTATE), e.g. RAISE EXCEPTION '...' USING ERRCODE = '55R23'.
 The driver rolls the iteration back and calls hive.app_next_iteration again on
 the same connection, after --poll-interval seconds, doubling up to
---retry-delay (or up to --poll-interval, if that is longer). It logs when the wait starts, every 10 minutes while it lasts,
-and when a range next goes through.
+--retry-delay (or up to --poll-interval, if that is longer). It logs when the
+wait starts, every 10 minutes while it lasts, and when a range next goes
+through.
 
 55R23 is in class 55 ("object not in prerequisite state"), which psycopg2
 raises as OperationalError, so a driver without this rule still retries it, by
@@ -380,7 +381,8 @@ class Driver:
     def retry_later(self, e):
         """The iteration was rolled back (RETRY_LATER_SQLSTATE). Log when a wait starts and every
         STILL_WAITING_LOG_INTERVAL while it lasts, then sleep before asking again on the same
-        connection: --poll-interval at first, doubling up to --retry-delay."""
+        connection: --poll-interval at first, doubling up to --retry-delay (or up to
+        --poll-interval, if that is longer)."""
         now = time.monotonic()
         if self.waiting_since is None:
             self.flush_live_summary()
@@ -392,7 +394,8 @@ class Driver:
             self.waiting_logged = now
         self.sleep(self.retry_wait)
         self.retry_wait = min(self.retry_wait * 2, max(self.args.retry_delay, self.args.poll_interval))
-        # the NOTIFYs received while waiting are not needed: the next try asks anyway
+        # NOTIFYs read during the failed tries are not needed (the next try asks anyway);
+        # dropping them keeps conn.notifies from growing through a long wait
         del self.conn.notifies[:]
         # a rolled-back try is not an iteration for the batch and live-summary lines
         self.iterations = 0
@@ -424,7 +427,7 @@ def main():
     p.add_argument("--poll-interval", type=float, default=1.0,
                    help="seconds between polls while paused or waiting for a dependency (their progress does not "
                         "notify); also the first wait before retrying a range the processor was not ready for "
-                        "(SQLSTATE 55R23), doubling up to --retry-delay")
+                        "(SQLSTATE 55R23), doubling up to --retry-delay (never below this interval)")
     p.add_argument("--safety-interval", type=float, default=15.0,
                    help="seconds to idle without any notification before asking again anyway")
     p.add_argument("--live-log-interval", type=float, default=60.0, help="seconds between live-sync summary lines")
