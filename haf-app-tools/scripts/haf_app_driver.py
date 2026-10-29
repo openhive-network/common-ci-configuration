@@ -22,6 +22,16 @@ hive.app_register); a paused application (hive.app_pause) simply gets no ranges.
 
 Requires the application to be registered with a process procedure taking
 ( hive.blocks_range ). Uses only psycopg2 (as shipped in the psql image).
+
+A process procedure that cannot handle its range yet - because something it
+reads, such as another application's tables, has not reached the range - raises
+SQLSTATE 55R23 (RETRY_LATER_SQLSTATE). The driver rolls the range back, logs
+once that it is waiting, and asks for the range again every --poll-interval
+seconds on the same connection; it logs once more when a range goes through.
+55R23 is in class 55 ("object not in prerequisite state"), which psycopg2
+raises as OperationalError, so a driver without this rule still retries it, as
+a reconnect every --retry-delay seconds. Any other error from the procedure
+ends the driver, and a connection error reconnects.
 """
 
 import argparse
@@ -37,6 +47,8 @@ import psycopg2.extensions
 
 NOTIFY_CHANNELS = ("haf_new_block", "haf_new_irreversible")
 SERVER_LEVELS = {"DEBUG": 0, "LOG": 1, "INFO": 2, "NOTICE": 3, "WARNING": 4}
+# raised by a process procedure whose range is not ready yet (see the module docstring)
+RETRY_LATER_SQLSTATE = "55R23"
 
 
 LOG_FILE = None  # opened by main() when --log-file is given
@@ -75,6 +87,15 @@ class Stop(Exception):
     pass
 
 
+class RetryLater(Exception):
+    """The process procedure raised RETRY_LATER_SQLSTATE for blocks; the range was rolled back."""
+
+    def __init__(self, blocks, message):
+        super().__init__(message)
+        self.blocks = blocks
+        self.message = message
+
+
 class Driver:
     def __init__(self, args):
         self.args = args
@@ -98,6 +119,7 @@ class Driver:
         self.have_maintenance = False
         self.was_paused = False
         self.was_gated = False
+        self.waiting_since = None    # monotonic time of the first RetryLater of the current wait
 
     # -- signals -----------------------------------------------------------
     def request_stop(self, signum, frame):
@@ -179,6 +201,7 @@ class Driver:
     def iterate(self):
         """Returns the processed range or None."""
         cur = self.conn.cursor()
+        blocks = None
         cur.execute("BEGIN")
         try:
             cur.execute(
@@ -207,11 +230,13 @@ class Driver:
                 row = cur.fetchone()
                 threshold = float(row[0]) if row and row[0] is not None else None
             cur.execute("COMMIT")
-        except Exception:
+        except Exception as e:
             try:
                 cur.execute("ROLLBACK")
             except Exception:
                 pass
+            if getattr(e, "pgcode", None) == RETRY_LATER_SQLSTATE and blocks is not None:
+                raise RetryLater(blocks, getattr(e.diag, "message_primary", None) or str(e).strip()) from e
             raise
         finally:
             self.drain_notices()
@@ -319,7 +344,14 @@ class Driver:
     def loop(self):
         idle_checks = 0.0
         while not self.stop_requested:
-            blocks = self.iterate()
+            try:
+                blocks = self.iterate()
+            except RetryLater as e:
+                self.retry_later(e)
+                continue
+            if self.waiting_since is not None:
+                log(f"resumed after {time.monotonic() - self.waiting_since:.0f}s")
+                self.waiting_since = None
             if blocks is not None:
                 continue
             # nothing to do: explain why (rate limited), check the limit, then idle
@@ -334,6 +366,15 @@ class Driver:
             self.wait_for_event()
         self.flush_live_summary()
         log("stopped")
+
+    def retry_later(self, e):
+        """The range was rolled back (RETRY_LATER_SQLSTATE): log the first time in a row, then
+        ask again after --poll-interval, on the same connection."""
+        if self.waiting_since is None:
+            self.flush_live_summary()
+            log(f"blocks {e.blocks[0]}..{e.blocks[1]} not ready, retrying every {self.args.poll_interval}s: {e.message}")
+            self.waiting_since = time.monotonic()
+        self.sleep(self.args.poll_interval)
 
     def sleep(self, seconds):
         select.select([self.wake_r], [], [], seconds)
@@ -360,7 +401,8 @@ def main():
                    help="block-processor advisory lock to hold (hive.acquire_app_block_processor_locks); repeatable")
     p.add_argument("--override-max-batch", type=int, default=None, help="cap the blocks per iteration")
     p.add_argument("--poll-interval", type=float, default=1.0,
-                   help="seconds between polls while paused or waiting for a dependency (their progress does not notify)")
+                   help="seconds between polls while paused, waiting for a dependency (their progress does not "
+                        "notify), or retrying a range the process procedure was not ready for (SQLSTATE 55R23)")
     p.add_argument("--safety-interval", type=float, default=15.0,
                    help="seconds to idle without any notification before asking again anyway")
     p.add_argument("--live-log-interval", type=float, default=60.0, help="seconds between live-sync summary lines")
