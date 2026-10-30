@@ -201,7 +201,7 @@ packages next to the tools.
 `.lint_code_with_ruff_template`, `.type_check_with_mypy_template`, this
 repository's lint jobs, and as the base of docker-builder (tavern jobs).
 
-### node-test-tools
+### node-test-tools and node-test-tools-pg
 
 **Base:** Ubuntu 26.04
 
@@ -211,7 +211,56 @@ not included: headless runs (Playwright's default) use the shell, and a job
 that runs headed or with `channel: 'chromium'` has to `playwright install
 chromium` itself.
 
-**Used by:** `.npm_test_template`.
+**Preloaded pnpm store:** `/opt/pnpm-store` holds every package of the
+`pnpm-config/pnpm-workspace.yaml` catalogs at its catalog version, with its
+dependencies, installed from the same `scripts/python/pnpm-catalog-manifest.py`
+manifest and the same `PNPM_VERSION` as the emsdk store. The build fails when a
+catalog package did not reach the store (an offline reinstall from the
+preload's lockfile). `store-dir` comes from the environment
+(`npm_config_store_dir`), so it holds for every uid and `HOME`, and the store is
+readable and writable by every uid: a project's `pnpm install --frozen-lockfile`
+takes what its lockfile shares with the catalogs from the store and adds the
+rest. With the catalogs of `NODE_TEST_TOOLS_IMAGE_VERSION` 2 the store is about
+755 MB (215 MB gzipped), on top of about 405 MB gzipped for the rest of the
+image.
+
+**node-test-tools-pg** adds the PostgreSQL server of the major ccc pins
+everywhere (`PSQL_VERSION`, from the PGDG repository, the major of
+python-test-tools' psql and the pg18 ci-base images; `PSQL_IMAGE_VERSION` is
+only the psql image's own release tag). `initdb`, `pg_ctl` and `postgres` are on
+PATH (`/usr/lib/postgresql/<PSQL_VERSION>/bin`), no cluster is created at
+install time, and `/var/run/postgresql` is writable by every uid. A suite starts
+its own cluster:
+
+```bash
+initdb -D "$dir/data" -U postgres --auth=trust
+pg_ctl -D "$dir/data" -w -l "$dir/log" -o "-k $dir -c listen_addresses=" start
+```
+
+`initdb` refuses a uid without a passwd entry (root must run it as `postgres`;
+uid 1000 is `ubuntu`). For any other uid, give it one with nss_wrapper, which
+the image ships:
+
+```bash
+echo "tests:x:$(id -u):$(id -g)::/tmp:/bin/sh" > /tmp/passwd
+echo "tests:x:$(id -g):" > /tmp/group
+export LD_PRELOAD=libnss_wrapper.so NSS_WRAPPER_PASSWD=/tmp/passwd NSS_WRAPPER_GROUP=/tmp/group
+```
+
+**Layers:** OS, Node/pnpm/TypeScript/Playwright and (in -pg) PostgreSQL change
+only with a tool version; the catalog store is the top layer, copied with
+`COPY --link` from one build stage, so it is the same blob in both images and a
+catalog change re-downloads only it.
+
+**Tags:** `develop` (moving) and `NODE_TEST_TOOLS_IMAGE_VERSION` from the
+default branch, `<commit-sha>` from every build; both images are built by
+`build_node_test_tools_image` (bake group `node-test-tools-images`), which also
+runs when the catalogs or the manifest script change. Version `2` adds the
+store and the -pg image.
+
+**Used by:** `.npm_test_template`, ccc's `pnpm_catalog_resync` and
+`pnpm_catalog_consumer_check`. Intended for running hive Node projects' test
+suites directly (AIDEV and CI), so a lockfile change needs no new image.
 
 ## Test Runner Images
 

@@ -46,7 +46,8 @@ docker buildx bake <target>
 # Available targets: benchmark-test-runner, docker-builder, docker-dind,
 # python-scripts, tox-test-runner, emsdk, psql, dockerfile, nginx,
 # postgrest, alpine, python, python_runtime, python_development,
-# python-test-tools, node-test-tools
+# python-test-tools, node-test-tools, node-test-tools-pg
+# (node-test-tools-images builds both node images)
 ```
 
 Version pinning is managed in `docker-bake.hcl` - update variables there when bumping versions.
@@ -122,7 +123,7 @@ find-upstream-image.sh \
 - Emscripten version: `docker-bake.hcl` (`EMSCRIPTEN_VERSION`)
 - Docker CLI/dind version: `docker-bake.hcl` (`DOCKER_VERSION`, plus `DOCKER_COMPOSE_PLUGIN_VERSION` / `DOCKER_BUILDX_PLUGIN_VERSION`); `.gitlab-ci.yml` repeats `DOCKER_VERSION` as a CI variable, kept equal by `tests/test_tool_versions_defined_once.py`
 - emsdk image tag for consumers: `templates/npm_projects.gitlab-ci.yml` (`EMSCRIPTEN_IMAGE_TAG`) and alpine tag `templates/base.gitlab-ci.yml` (`ALPINE_IMAGE_TAG`); templates cannot read bake variables, so the test checks each names the tag `docker-bake.hcl` builds or an earlier one, never a later one (see below)
-- npm package pins (Hive libraries, React/Next, Vue/Nuxt, Tailwind, build tooling): the catalogs in `pnpm-config/pnpm-workspace.yaml`, referenced only as `catalog:<name>`, consumed by symlinking the file or, in monorepos, merging it with `scripts/python/pnpm-catalog-sync.py`; the emsdk image preloads them (`scripts/python/pnpm-catalog-manifest.py`)
+- npm package pins (Hive libraries, React/Next, Vue/Nuxt, Tailwind, build tooling): the catalogs in `pnpm-config/pnpm-workspace.yaml`, referenced only as `catalog:<name>`, consumed by symlinking the file or, in monorepos, merging it with `scripts/python/pnpm-catalog-sync.py`; the emsdk and node-test-tools images preload them (`scripts/python/pnpm-catalog-manifest.py`)
 - Test/lint tool versions (pytest, ruff, node, pnpm, ...): `docker-bake.hcl` only - passed as build args to python-test-tools, node-test-tools, docker-builder (built on python-test-tools) and emsdk; Dockerfiles have no defaults and templates never pin a tool (see README "CI/test tool versions")
 
 ## Moving Templates to a New Image Tag (two MRs)

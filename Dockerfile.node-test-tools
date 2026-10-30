@@ -1,11 +1,19 @@
 # syntax=docker/dockerfile:1.5
 # Node test tools for hive repos: Ubuntu 26.04 with node, pnpm, TypeScript and
 # Playwright (Chromium headless shell, with its system dependencies), plus
-# python3 for the GitHub Pages deploy script.
+# python3 for the GitHub Pages deploy script, and a pnpm store preloaded with
+# every package of the shared pnpm catalogs.
+#
+# Two final targets share every layer but one:
+#   node-test-tools     the tools and the catalog store
+#   node-test-tools-pg  the same plus the PostgreSQL server (initdb, pg_ctl on PATH)
+# The catalog store is the top layer of both, copied with --link: it is the same
+# layer in both images, and a catalog bump replaces only that layer.
 #
 # Every version is a build arg without a default: docker-bake.hcl is the only
-# place they are defined. Build with `docker buildx bake node-test-tools`.
-FROM ubuntu:26.04 AS node-test-tools
+# place they are defined. Build with `docker buildx bake node-test-tools` (or
+# node-test-tools-pg).
+FROM ubuntu:26.04 AS node-test-tools-base
 
 ARG NODE_VERSION
 ARG PNPM_VERSION
@@ -14,6 +22,9 @@ ARG TYPESCRIPT_VERSION
 
 ENV LANG=C.UTF-8
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# The store every uid's pnpm uses (the environment, not a user's rc file, so it
+# holds whatever uid and HOME a job runs with)
+ENV npm_config_store_dir=/opt/pnpm-store
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -39,3 +50,66 @@ RUN apt-get update && \
 RUN git config --system --add safe.directory '*'
 
 CMD ["/bin/bash"]
+
+# Every package of the shared pnpm catalogs (pnpm-config/pnpm-workspace.yaml) at
+# its catalog version, with its dependencies, installed from the same manifest
+# as the emsdk image's store (scripts/python/pnpm-catalog-manifest.py): a
+# consumer's `pnpm install --frozen-lockfile` takes from here whatever its
+# lockfile shares with the catalogs instead of downloading it. The @hiveio
+# packages exist only in the hive GitLab registry, so the project takes the
+# @hiveio registry line of pnpm-config/.npmrc (and none of its workspace
+# settings); registry metadata goes to a temporary cache-dir. The second,
+# offline install from the lockfile fails the build when a catalog package did
+# not reach the store. The store is then made writable by every uid, so a job
+# running as any user adds the packages it lacks to it.
+FROM node-test-tools-base AS pnpm-catalog-store
+
+COPY pnpm-config/pnpm-workspace.yaml /tmp/pnpm-catalog/
+COPY pnpm-config/.npmrc /tmp/pnpm-catalog.npmrc
+COPY scripts/python/pnpm-catalog-manifest.py /tmp/
+
+RUN cd /tmp/pnpm-catalog && \
+    grep "^@hiveio:registry=" /tmp/pnpm-catalog.npmrc > .npmrc && \
+    pnpm config get catalogs --json > /tmp/pnpm-catalogs.json && \
+    python3 /tmp/pnpm-catalog-manifest.py < /tmp/pnpm-catalogs.json > package.json && \
+    pnpm install --ignore-scripts --config.cache-dir=/tmp/pnpm-catalog-cache && \
+    rm -rf node_modules /tmp/pnpm-catalog-cache && \
+    pnpm install --offline --frozen-lockfile --ignore-scripts --config.cache-dir=/tmp/pnpm-catalog-cache && \
+    cd / && rm -rf /tmp/pnpm-catalog /tmp/pnpm-catalog-cache && \
+    chmod -R a+rwX /opt/pnpm-store
+
+FROM node-test-tools-base AS node-test-tools
+
+COPY --link --from=pnpm-catalog-store /opt/pnpm-store /opt/pnpm-store
+
+# PostgreSQL server for integration suites that start their own cluster (initdb,
+# then pg_ctl on a unix socket). PSQL_VERSION is the PostgreSQL major ccc pins
+# everywhere (python-test-tools' psql client, the pg18 ci-base images), from the
+# PGDG repository. No cluster is created at install time, and the default socket
+# directory is writable by every uid. initdb refuses a uid without a passwd
+# entry; a job running as such a uid gives it one with nss_wrapper
+# (libnss_wrapper.so, see docs/common-ci-images.md).
+FROM node-test-tools-base AS node-test-tools-pg-base
+
+ARG PSQL_VERSION
+
+ENV PATH="/usr/lib/postgresql/${PSQL_VERSION}/bin:${PATH}"
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gnupg && \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg && \
+    . /etc/os-release && \
+    echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list && \
+    mkdir -p /etc/postgresql-common/createcluster.d && \
+    echo "create_main_cluster = false" > /etc/postgresql-common/createcluster.d/no-main-cluster.conf && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        "postgresql-${PSQL_VERSION}" libnss-wrapper && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /var/run/postgresql && chmod 1777 /var/run/postgresql && \
+    initdb --version && pg_ctl --version
+
+FROM node-test-tools-pg-base AS node-test-tools-pg
+
+COPY --link --from=pnpm-catalog-store /opt/pnpm-store /opt/pnpm-store
