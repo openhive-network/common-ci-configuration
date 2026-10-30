@@ -6,7 +6,8 @@ Reads the catalogs as `pnpm config get catalogs --json` prints them (run in a
 directory holding pnpm-config/pnpm-workspace.yaml) and writes to stdout a
 package.json referencing each entry as `catalog:<catalog name>`. Installing that
 project fills the pnpm store with every catalog package at its catalog version,
-with its dependencies; the emsdk image does this to preload its store.
+with its dependencies; the emsdk and node-test-tools images do this to preload
+their store.
 
 A package listed in two catalogs is written once when both give the same
 version; different versions cannot share one package.json key and are an error.

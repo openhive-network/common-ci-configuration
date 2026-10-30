@@ -612,7 +612,8 @@ build_node_test_tools_image:
   extends: .build_docker_image
   stage: build
   variables:
-    BUILD_TARGET: "node-test-tools"
+    # node-test-tools and node-test-tools-pg (docker-bake.hcl group)
+    BUILD_TARGET: "node-test-tools-images"
     DOCKER_DIND_TAG: "latest"
     DOCKER_BUILDER_TAG: "latest"
   needs:
@@ -627,6 +628,9 @@ build_node_test_tools_image:
         paths: &node_test_tools_sources
           - Dockerfile.node-test-tools
           - docker-bake.hcl
+          - pnpm-config/.npmrc
+          - pnpm-config/pnpm-workspace.yaml
+          - scripts/python/pnpm-catalog-manifest.py
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       changes:
         paths: *node_test_tools_sources
@@ -1040,7 +1044,7 @@ buildkit_cache_cleanup:
   variables:
     # Use latest tag since the image may not be built in this pipeline (change detection)
     IMAGE_REMOVER_TAG: latest
-    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache,ci-base-image-ubuntu/cache,python-test-tools/cache,node-test-tools/cache"
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache,ci-base-image-ubuntu/cache,python-test-tools/cache,node-test-tools/cache,node-test-tools-pg/cache"
 
 # =============================================================================
 # Renovate Bot
