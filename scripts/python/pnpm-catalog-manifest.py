@@ -38,7 +38,7 @@ def manifest(catalogs):
     }
 
 
-def main():
+def main() -> int:
     """Reads catalogs JSON from stdin, writes package.json to stdout"""
     try:
         result = manifest(json.load(sys.stdin))
