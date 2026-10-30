@@ -4,11 +4,12 @@
 # python3 for the GitHub Pages deploy script, and a pnpm store preloaded with
 # every package of the shared pnpm catalogs.
 #
-# Two final targets share every layer but one:
-#   node-test-tools     the tools and the catalog store
-#   node-test-tools-pg  the same plus the PostgreSQL server (initdb, pg_ctl on PATH)
-# The catalog store is the top layer of both, copied with --link: it is the same
-# layer in both images, and a catalog bump replaces only that layer.
+# Three final targets share every layer but one:
+#   node-test-tools          the tools and the catalog store
+#   node-test-tools-pg       the same plus the PostgreSQL server (initdb, pg_ctl on PATH)
+#   node-test-tools-browser  the same plus full Chromium and Lighthouse
+# The catalog store is the top layer of each, copied with --link: it is the same
+# layer in every image, and a catalog bump replaces only that layer.
 #
 # Every version is a build arg without a default: docker-bake.hcl is the only
 # place they are defined. Build with `docker buildx bake node-test-tools` (or
@@ -111,5 +112,33 @@ RUN apt-get update && \
     initdb --version && pg_ctl --version
 
 FROM node-test-tools-pg-base AS node-test-tools-pg
+
+COPY --link --from=pnpm-catalog-store /opt/pnpm-store /opt/pnpm-store
+
+# Full Chromium and Lighthouse for suites a headless shell cannot run (Lighthouse
+# audits). Playwright's full Chromium goes beside the base's headless shell in
+# PLAYWRIGHT_BROWSERS_PATH; its path holds the browser revision, so it is linked
+# to /usr/local/bin/chromium and CHROME_PATH (read by Lighthouse and
+# chrome-launcher) names the link. Lighthouse has its own npm prefix, so it adds
+# nothing to the global packages of the other images.
+FROM node-test-tools-base AS node-test-tools-browser
+
+ARG LIGHTHOUSE_VERSION
+
+ENV CHROME_PATH=/usr/local/bin/chromium
+ENV PATH="/opt/lighthouse/bin:${PATH}"
+
+RUN apt-get update && \
+    playwright install --with-deps chromium && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" && \
+    chrome="$(find "${PLAYWRIGHT_BROWSERS_PATH}" -path '*/chromium-*/chrome-linux*/chrome' -type f)" && \
+    test -n "${chrome}" && test "$(wc -l <<< "${chrome}")" -eq 1 && \
+    ln -s "${chrome}" "${CHROME_PATH}" && \
+    "${CHROME_PATH}" --version
+
+RUN npm install -g --prefix /opt/lighthouse "lighthouse@${LIGHTHOUSE_VERSION}" && \
+    npm cache clean --force && \
+    test "$(lighthouse --version)" = "${LIGHTHOUSE_VERSION}"
 
 COPY --link --from=pnpm-catalog-store /opt/pnpm-store /opt/pnpm-store

@@ -612,7 +612,7 @@ build_node_test_tools_image:
   extends: .build_docker_image
   stage: build
   variables:
-    # node-test-tools and node-test-tools-pg (docker-bake.hcl group)
+    # node-test-tools, node-test-tools-pg and node-test-tools-browser (docker-bake.hcl group)
     BUILD_TARGET: "node-test-tools-images"
     DOCKER_DIND_TAG: "latest"
     DOCKER_BUILDER_TAG: "latest"
@@ -1044,7 +1044,7 @@ buildkit_cache_cleanup:
   variables:
     # Use latest tag since the image may not be built in this pipeline (change detection)
     IMAGE_REMOVER_TAG: latest
-    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache,ci-base-image-ubuntu/cache,python-test-tools/cache,node-test-tools/cache,node-test-tools-pg/cache"
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache,ci-base-image-ubuntu/cache,python-test-tools/cache,node-test-tools/cache,node-test-tools-pg/cache,node-test-tools-browser/cache"
 
 # =============================================================================
 # Renovate Bot
