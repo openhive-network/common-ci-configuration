@@ -201,15 +201,20 @@ packages next to the tools.
 `.lint_code_with_ruff_template`, `.type_check_with_mypy_template`, this
 repository's lint jobs, and as the base of docker-builder (tavern jobs).
 
-### node-test-tools and node-test-tools-pg
+### node-test-tools, node-test-tools-pg and node-test-tools-browser
 
 **Base:** Ubuntu 26.04
 
 **Includes:** node, pnpm, TypeScript, Playwright with the Chromium headless
 shell (`PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`). The full Chromium build is
-not included: headless runs (Playwright's default) use the shell, and a job
-that runs headed or with `channel: 'chromium'` has to `playwright install
-chromium` itself.
+not included in node-test-tools and -pg: headless runs (Playwright's default)
+use the shell; a suite that needs the full browser runs in
+node-test-tools-browser.
+
+**Which image:** node-test-tools for Node suites (unit tests, Playwright on the
+headless shell); node-test-tools-pg when a suite starts its own PostgreSQL
+cluster; node-test-tools-browser when it needs the full Chromium (headed runs,
+`channel: 'chromium'`) or Lighthouse.
 
 **Preloaded pnpm store:** `/opt/pnpm-store` holds every package of the
 `pnpm-config/pnpm-workspace.yaml` catalogs at its catalog version, with its
@@ -247,16 +252,25 @@ echo "tests:x:$(id -g):" > /tmp/group
 export LD_PRELOAD=libnss_wrapper.so NSS_WRAPPER_PASSWD=/tmp/passwd NSS_WRAPPER_GROUP=/tmp/group
 ```
 
-**Layers:** OS, Node/pnpm/TypeScript/Playwright and (in -pg) PostgreSQL change
-only with a tool version; the catalog store is the top layer, copied with
-`COPY --link` from one build stage, so it is the same blob in both images and a
-catalog change re-downloads only it.
+**node-test-tools-browser** adds Playwright's full Chromium (beside the
+headless shell, in the same `PLAYWRIGHT_BROWSERS_PATH`, readable by every uid)
+and Lighthouse `LIGHTHOUSE_VERSION` (npm prefix `/opt/lighthouse`, its `bin` on
+PATH). `CHROME_PATH=/usr/local/bin/chromium`, a link to that Chromium, is where
+Lighthouse and chrome-launcher find the browser, so a project needs no script
+locating it. A job running as a non-root uid without user namespaces passes
+`--chrome-flags="--headless --no-sandbox"` to Lighthouse.
+
+**Layers:** OS, Node/pnpm/TypeScript/Playwright and (in -pg) PostgreSQL or (in
+-browser) Chromium and Lighthouse change only with a tool version; the catalog
+store is the top layer, copied with `COPY --link` from one build stage, so it is
+the same blob in all three images and a catalog change re-downloads only it.
 
 **Tags:** `develop` (moving) and `NODE_TEST_TOOLS_IMAGE_VERSION` from the
-default branch, `<commit-sha>` from every build; both images are built by
+default branch, `<commit-sha>` from every build; all three images are built by
 `build_node_test_tools_image` (bake group `node-test-tools-images`), which also
 runs when the catalogs or the manifest script change. Version `2` adds the
-store and the -pg image.
+store and the -pg image; the -browser image is published under the same
+version tag.
 
 **Used by:** `.npm_test_template`, ccc's `pnpm_catalog_resync` and
 `pnpm_catalog_consumer_check`. Intended for running hive Node projects' test

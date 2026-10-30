@@ -132,9 +132,9 @@ def test_node_test_tools_store_build_fails_when_a_catalog_package_is_missing() -
     assert "chmod -R a+rwX /opt/pnpm-store" in store[check:]
 
 
-@pytest.mark.parametrize("stage", ["node-test-tools", "node-test-tools-pg"])
+@pytest.mark.parametrize("stage", ["node-test-tools", "node-test-tools-pg", "node-test-tools-browser"])
 def test_node_test_tools_images_end_with_the_shared_store_layer(stage: str) -> None:
-    """The store is the last layer of both images, copied with --link so both carry the
+    """The store is the last layer of every image, copied with --link so all carry the
     same layer and a catalog bump re-downloads only it."""
     lines = [line for line in _stage(NODE_DOCKERFILE.read_text(), stage).splitlines() if line and not line.startswith("#")]
     assert lines[-1] == "COPY --link --from=pnpm-catalog-store /opt/pnpm-store /opt/pnpm-store"
@@ -152,7 +152,19 @@ def test_node_test_tools_pg_runs_ccc_postgresql_major() -> None:
     bake = BAKE.read_text()
     block = re.search(r'target "node-test-tools-pg" \{(.*?)\n\}', bake, re.DOTALL)
     assert block and "PSQL_VERSION = PSQL_VERSION" in block.group(1)
-    assert re.search(r'group "node-test-tools-images" \{\s*targets = \["node-test-tools", "node-test-tools-pg"\]', bake)
+    assert re.search(r'group "node-test-tools-images" \{\s*targets = \["node-test-tools", "node-test-tools-pg",', bake)
+
+
+def test_node_test_tools_browser_points_chrome_path_at_full_chromium() -> None:
+    browser = _stage(NODE_DOCKERFILE.read_text(), "node-test-tools-browser")
+    assert "playwright install --with-deps chromium &&" in browser
+    assert '"lighthouse@${LIGHTHOUSE_VERSION}"' in browser
+    assert 'ln -s "${chrome}" "${CHROME_PATH}"' in browser
+    bake = BAKE.read_text()
+    block = re.search(r'target "node-test-tools-browser" \{(.*?)\n\}', bake, re.DOTALL)
+    assert block and "LIGHTHOUSE_VERSION = LIGHTHOUSE_VERSION" in block.group(1)
+    assert 'inherits = ["node-test-tools"]' in block.group(1)
+    assert re.search(r'group "node-test-tools-images" \{\s*targets = \[[^]]*"node-test-tools-browser"\]', bake)
 
 
 def _str_catalogs() -> Dict[str, Dict[str, str]]:

@@ -120,6 +120,10 @@ variable "PLAYWRIGHT_VERSION" {
 variable "TYPESCRIPT_VERSION" {
   default = "7.0.2"
 }
+# Lighthouse of node-test-tools-browser
+variable "LIGHTHOUSE_VERSION" {
+  default = "13.5.0"
+}
 # Docker: the docker:<DOCKER_VERSION>-cli mirror whose CLI docker-builder and
 # haf-app-test-runner copy, and the docker:<DOCKER_VERSION>-dind mirror
 # docker-dind is built on. .gitlab-ci.yml pins its cli image and dind service
@@ -438,6 +442,21 @@ target "node-test-tools-pg" {
   cache-to = generate-cache-to("node-test-tools-pg", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
 }
 
+# node-test-tools plus full Chromium (CHROME_PATH) and Lighthouse
+# (LIGHTHOUSE_VERSION) for suites a headless shell cannot run, such as Lighthouse
+# audits; like node-test-tools-pg it shares node-test-tools' lower layers and its
+# catalog store layer, and is published under the same version tag.
+target "node-test-tools-browser" {
+  inherits = ["node-test-tools"]
+  target = "node-test-tools-browser"
+  args = {
+    LIGHTHOUSE_VERSION = LIGHTHOUSE_VERSION,
+  }
+  tags = generate-tools-tags("node-test-tools-browser", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
+  cache-from = generate-cache-from("node-test-tools-browser", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
+  cache-to = generate-cache-to("node-test-tools-browser", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
+}
+
 group "node-test-tools-images" {
-  targets = ["node-test-tools", "node-test-tools-pg"]
+  targets = ["node-test-tools", "node-test-tools-pg", "node-test-tools-browser"]
 }
