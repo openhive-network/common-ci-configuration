@@ -102,7 +102,8 @@ variable "SHELLCHECK_VERSION" {
 variable "TOX_VERSION" {
   default = "4.67.1"
 }
-# PostgreSQL client (psql) major version, from the PGDG apt repository
+# PostgreSQL major, from the PGDG apt repository: the psql client of
+# python-test-tools and the server of node-test-tools-pg
 variable "PSQL_VERSION" {
   default = "18"
 }
@@ -143,7 +144,7 @@ variable "PYTHON_TEST_TOOLS_IMAGE_VERSION" {
   default = "1"
 }
 variable "NODE_TEST_TOOLS_IMAGE_VERSION" {
-  default = "1"
+  default = "2"
 }
 variable "TEST_TOOLS_MOVING_TAG" {
   default = "develop"
@@ -410,6 +411,7 @@ target "python-test-tools" {
 
 target "node-test-tools" {
   dockerfile = "Dockerfile.node-test-tools"
+  target = "node-test-tools"
   args = {
     NODE_VERSION = NODE_VERSION,
     PNPM_VERSION = PNPM_VERSION,
@@ -419,4 +421,23 @@ target "node-test-tools" {
   tags = generate-tools-tags("node-test-tools", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
   cache-from = generate-cache-from("node-test-tools", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
   cache-to = generate-cache-to("node-test-tools", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
+}
+
+# node-test-tools plus the PostgreSQL server (PSQL_VERSION) for suites that start
+# their own cluster; it shares node-test-tools' layers below PostgreSQL and its
+# catalog store layer, and is published under the same version tag. CI builds
+# both with the node-test-tools-images group, so the shared stages build once.
+target "node-test-tools-pg" {
+  inherits = ["node-test-tools"]
+  target = "node-test-tools-pg"
+  args = {
+    PSQL_VERSION = PSQL_VERSION,
+  }
+  tags = generate-tools-tags("node-test-tools-pg", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
+  cache-from = generate-cache-from("node-test-tools-pg", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
+  cache-to = generate-cache-to("node-test-tools-pg", "${NODE_TEST_TOOLS_IMAGE_VERSION}")
+}
+
+group "node-test-tools-images" {
+  targets = ["node-test-tools", "node-test-tools-pg"]
 }
