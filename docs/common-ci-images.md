@@ -190,9 +190,10 @@ hints (`.nvmrc`, volta, `engines`) should name only the Node major.
 
 **Base:** python_development (Ubuntu 26.04, Python 3.14)
 
-**Includes:** pytest, pytest-xdist, pytest-timeout, tavern, deepdiff, jsondiff,
-prettytable, ruff, mypy, pylint, yamllint, sqlfluff, tox (in `/python_venv`,
-first on PATH), shellcheck, postgrest, psql (PGDG client), poetry, git, jq,
+**Includes:** pytest, pytest-xdist, pytest-timeout, pytest-asyncio, pytest-cov,
+httpx (for `starlette.testclient`), tavern, deepdiff, jsondiff, prettytable,
+ruff, mypy, pylint, yamllint, sqlfluff, tox (in `/python_venv`, first on PATH),
+shellcheck, postgrest, psql (PGDG client), poetry, git, jq,
 xmlstarlet. The `hived` user (UID 1000, HAF container convention) owns the venv,
 so jobs in the images built on this one can `pip install` their own test
 packages next to the tools.
@@ -281,8 +282,8 @@ suites directly (AIDEV and CI), so a lockfile change needs no new image.
 ### haf-app-test-runner
 
 **Base:** python-test-tools (Ubuntu 26.04, Python 3.14), so it carries every
-python-test-tools tool (pytest, xdist, tavern, deepdiff, jsondiff, psql, ...) at
-the docker-bake.hcl versions
+python-test-tools tool (pytest, xdist, asyncio, cov, httpx, tavern, deepdiff,
+jsondiff, psql, ...) at the docker-bake.hcl versions
 
 Shared test runner for HAF applications' sync and tavern jobs. Adds JMeter + m2u
 (copied from benchmark-test-runner), openjdk 21 (with the `JAVA_TOOL_OPTIONS`
