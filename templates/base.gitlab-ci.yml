@@ -4,6 +4,9 @@ variables:
   # Override a tag only for a deliberate exception.
   PYTHON_TEST_TOOLS_TAG: "develop"
   PYTHON_TEST_TOOLS_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${PYTHON_TEST_TOOLS_TAG}"
+  # Where .python_test_tools_constraints writes the pip constraints of
+  # PYTHON_TEST_TOOLS_IMAGE
+  PYTHON_TEST_TOOLS_CONSTRAINTS: "${CI_PROJECT_DIR}/.python-test-tools-constraints.txt"
   NODE_TEST_TOOLS_TAG: "develop"
   NODE_TEST_TOOLS_IMAGE: "registry.gitlab.syncad.com/hive/common-ci-configuration/node-test-tools:${NODE_TEST_TOOLS_TAG}"
   # This project's alpine image: docker-bake.hcl's ALPINE_VERSION, or the previous
@@ -32,6 +35,34 @@ default:
   interruptible: true
   tags:
     - public-runner-docker
+
+# =============================================================================
+# python-test-tools versions for jobs that cannot run in python-test-tools
+# =============================================================================
+# Writes the image's pip constraints (name==version of each Python tool, the
+# versions installed in PYTHON_TEST_TOOLS_IMAGE) to PYTHON_TEST_TOOLS_CONSTRAINTS.
+# Works in any image with curl and python3; fails the job, naming the image and
+# the cause, when the constraints cannot be read (never an unconstrained install).
+#
+# Usage:
+#   test:
+#     image: my-image-with-a-compiler
+#     script:
+#       - !reference [.python_test_tools_constraints, script]
+#       - python3 -m pip install -c "$PYTHON_TEST_TOOLS_CONSTRAINTS" pytest pytest-xdist
+.python_test_tools_constraints:
+  script:
+    - |
+      constraints_dir="$(mktemp -d)"
+      for constraints_file in python-test-tools-constraints.py registry_auth.py; do
+        constraints_url="https://gitlab.syncad.com/hive/common-ci-configuration/-/raw/${COMMON_CI_REF:-develop}/scripts/python/$constraints_file"
+        curl -fsSL "$constraints_url" -o "$constraints_dir/$constraints_file" || {
+          echo "ERROR: no pip constraints for ${PYTHON_TEST_TOOLS_IMAGE}: could not download $constraints_url"
+          exit 1
+        }
+      done
+      python3 "$constraints_dir/python-test-tools-constraints.py" "$PYTHON_TEST_TOOLS_IMAGE" "$PYTHON_TEST_TOOLS_CONSTRAINTS" || exit 1
+      rm -rf "$constraints_dir"
 
 # =============================================================================
 # Pre-get-sources hooks for cleaning corrupt git state

@@ -11,18 +11,15 @@ Exit status: 0 when every pinned tag exists, 1 when one is missing, 2 when the
 registry could not be asked.
 """
 
-import base64
-import json
-import os
 import re
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import yaml
+from registry_auth import bearer_token
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 # Template variable pinning a tag of an image this repo builds -> template defining it
@@ -84,21 +81,6 @@ def split_reference(reference: str) -> Tuple[str, str, str]:
     return registry, repository, tag
 
 
-def _bearer_token(challenge: str) -> str:
-    """A pull token for a `WWW-Authenticate: Bearer realm=...,service=...,scope=...`
-    challenge; with the CI job token when the job has one, anonymous otherwise."""
-    params = dict(re.findall(r'(\w+)="([^"]*)"', challenge))
-    query = urllib.parse.urlencode({key: params[key] for key in ("service", "scope") if key in params})
-    request = urllib.request.Request(f"{params['realm']}?{query}")
-    job_token = os.environ.get("CI_JOB_TOKEN")
-    if job_token:
-        credentials = base64.b64encode(f"gitlab-ci-token:{job_token}".encode()).decode()
-        request.add_header("Authorization", f"Basic {credentials}")
-    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-        body = json.loads(response.read())
-    return body.get("token") or body["access_token"]
-
-
 def manifest_exists(registry: str, repository: str, tag: str) -> bool:
     """Whether the registry has a manifest for repository:tag (HEAD, as `docker
     pull` asks); raises on anything but found / not found."""
@@ -116,7 +98,7 @@ def manifest_exists(registry: str, repository: str, tag: str) -> bool:
                 return False
             challenge = error.headers.get("WWW-Authenticate", "")
             if error.code == 401 and token is None and challenge.lower().startswith("bearer "):
-                token = _bearer_token(challenge)
+                token = bearer_token(challenge)
                 continue
             raise
     raise RuntimeError(f"{url}: still unauthorized with a pull token")
