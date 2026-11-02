@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.5
 # Python test and lint tools for hive repos: Ubuntu 26.04 + Python 3.14 with
-# pytest (+ xdist, timeout), tavern, deepdiff, jsondiff, ruff, mypy, pylint,
+# pytest (+ xdist, timeout, asyncio, cov), httpx, tavern, deepdiff, jsondiff, ruff, mypy, pylint,
 # yamllint, sqlfluff, tox, shellcheck and the postgrest and psql binaries,
 # installed in /python_venv (first on PATH).
 #
@@ -12,6 +12,9 @@ FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python_development:
 ARG PYTEST_VERSION
 ARG PYTEST_XDIST_VERSION
 ARG PYTEST_TIMEOUT_VERSION
+ARG PYTEST_ASYNCIO_VERSION
+ARG PYTEST_COV_VERSION
+ARG HTTPX_VERSION
 ARG TAVERN_VERSION
 ARG DEEPDIFF_VERSION
 ARG JSONDIFF_VERSION
@@ -65,6 +68,9 @@ RUN pip install --no-cache-dir \
         "pytest==${PYTEST_VERSION}" \
         "pytest-xdist==${PYTEST_XDIST_VERSION}" \
         "pytest-timeout==${PYTEST_TIMEOUT_VERSION}" \
+        "pytest-asyncio==${PYTEST_ASYNCIO_VERSION}" \
+        "pytest-cov==${PYTEST_COV_VERSION}" \
+        "httpx==${HTTPX_VERSION}" \
         "tavern==${TAVERN_VERSION}" \
         "deepdiff==${DEEPDIFF_VERSION}" \
         "jsondiff==${JSONDIFF_VERSION}" \

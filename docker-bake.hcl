@@ -69,6 +69,16 @@ variable "PYTEST_XDIST_VERSION" {
 variable "PYTEST_TIMEOUT_VERSION" {
   default = "2.4.0"
 }
+variable "PYTEST_ASYNCIO_VERSION" {
+  default = "1.4.0"
+}
+variable "PYTEST_COV_VERSION" {
+  default = "7.1.0"
+}
+# httpx: the HTTP client starlette.testclient imports
+variable "HTTPX_VERSION" {
+  default = "0.28.1"
+}
 variable "TAVERN_VERSION" {
   default = "3.7.1"
 }
@@ -394,6 +404,9 @@ target "python-test-tools" {
     PYTEST_VERSION = PYTEST_VERSION,
     PYTEST_XDIST_VERSION = PYTEST_XDIST_VERSION,
     PYTEST_TIMEOUT_VERSION = PYTEST_TIMEOUT_VERSION,
+    PYTEST_ASYNCIO_VERSION = PYTEST_ASYNCIO_VERSION,
+    PYTEST_COV_VERSION = PYTEST_COV_VERSION,
+    HTTPX_VERSION = HTTPX_VERSION,
     TAVERN_VERSION = TAVERN_VERSION,
     DEEPDIFF_VERSION = DEEPDIFF_VERSION,
     JSONDIFF_VERSION = JSONDIFF_VERSION,
