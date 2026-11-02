@@ -23,6 +23,8 @@ TOOLS = {
     "pytest": "PYTEST_VERSION",
     "pytest-xdist": "PYTEST_XDIST_VERSION",
     "pytest-timeout": "PYTEST_TIMEOUT_VERSION",
+    "pytest-asyncio": "PYTEST_ASYNCIO_VERSION",
+    "pytest-cov": "PYTEST_COV_VERSION",
     "tavern": "TAVERN_VERSION",
     "deepdiff": "DEEPDIFF_VERSION",
     "jsondiff": "JSONDIFF_VERSION",

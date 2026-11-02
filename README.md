@@ -18,13 +18,13 @@ This project contains the common CI templates and scripts for Hive and Hive-rela
 
 ## CI/test tool versions
 
-Every test and lint tool version used by hive repos is defined **once**, as a variable in [docker-bake.hcl](docker-bake.hcl): `PYTEST_VERSION`, `PYTEST_XDIST_VERSION`, `PYTEST_TIMEOUT_VERSION`, `TAVERN_VERSION`, `DEEPDIFF_VERSION`, `JSONDIFF_VERSION`, `PRETTYTABLE_VERSION`, `RUFF_VERSION`, `MYPY_VERSION`, `PYLINT_VERSION`, `YAMLLINT_VERSION`, `SQLFLUFF_VERSION`, `SHELLCHECK_VERSION`, `TOX_VERSION`, `POSTGREST_VERSION`, `PSQL_VERSION` (PostgreSQL major: python-test-tools' client, node-test-tools-pg's server), `NODE_VERSION`, `PNPM_VERSION`, `PLAYWRIGHT_VERSION`, `TYPESCRIPT_VERSION` and `LIGHTHOUSE_VERSION` (node-test-tools-browser). Python comes from `PYTHON_RUNTIME_VERSION` (Python 3.14 on Ubuntu 26.04). The Dockerfiles receive them as build args and have no defaults of their own; templates never pin a tool.
+Every test and lint tool version used by hive repos is defined **once**, as a variable in [docker-bake.hcl](docker-bake.hcl): `PYTEST_VERSION`, `PYTEST_XDIST_VERSION`, `PYTEST_TIMEOUT_VERSION`, `PYTEST_ASYNCIO_VERSION`, `PYTEST_COV_VERSION`, `HTTPX_VERSION`, `TAVERN_VERSION`, `DEEPDIFF_VERSION`, `JSONDIFF_VERSION`, `PRETTYTABLE_VERSION`, `RUFF_VERSION`, `MYPY_VERSION`, `PYLINT_VERSION`, `YAMLLINT_VERSION`, `SQLFLUFF_VERSION`, `SHELLCHECK_VERSION`, `TOX_VERSION`, `POSTGREST_VERSION`, `PSQL_VERSION` (PostgreSQL major: python-test-tools' client, node-test-tools-pg's server), `NODE_VERSION`, `PNPM_VERSION`, `PLAYWRIGHT_VERSION`, `TYPESCRIPT_VERSION` and `LIGHTHOUSE_VERSION` (node-test-tools-browser). Python comes from `PYTHON_RUNTIME_VERSION` (Python 3.14 on Ubuntu 26.04). The Dockerfiles receive them as build args and have no defaults of their own; templates never pin a tool.
 
 The tools are published in these images:
 
 | Image | Contents |
 |-------|----------|
-| `registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools` | Ubuntu 26.04 + Python 3.14: pytest (+ xdist, timeout), tavern, deepdiff, jsondiff, ruff, mypy, pylint, yamllint, sqlfluff, tox, shellcheck, postgrest, psql |
+| `registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools` | Ubuntu 26.04 + Python 3.14: pytest (+ xdist, timeout, asyncio, cov), httpx, tavern, deepdiff, jsondiff, ruff, mypy, pylint, yamllint, sqlfluff, tox, shellcheck, postgrest, psql |
 | `registry.gitlab.syncad.com/hive/common-ci-configuration/node-test-tools` | Ubuntu 26.04: node, pnpm, TypeScript, Playwright with the Chromium headless shell, and a pnpm store (`/opt/pnpm-store`) preloaded with every package of the pnpm catalogs |
 | `registry.gitlab.syncad.com/hive/common-ci-configuration/node-test-tools-pg` | node-test-tools plus the PostgreSQL `PSQL_VERSION` server (`initdb`, `pg_ctl`, `postgres` on PATH) |
 | `registry.gitlab.syncad.com/hive/common-ci-configuration/node-test-tools-browser` | node-test-tools plus Playwright's full Chromium (`CHROME_PATH`) and Lighthouse `LIGHTHOUSE_VERSION`, for Lighthouse and other full-browser suites |
