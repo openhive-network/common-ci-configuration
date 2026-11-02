@@ -14,7 +14,7 @@ import urllib.error
 from email.message import Message
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Self
 
 import pytest
 import yaml
@@ -89,16 +89,16 @@ def test_label_and_install_use_the_pins() -> None:
 
 
 class _Response:
-    def __init__(self, body: bytes) -> None:
+    def __init__(self: Self, body: bytes) -> None:
         self.body = body
 
-    def __enter__(self) -> "_Response":
+    def __enter__(self: Self) -> "_Response":
         return self
 
-    def __exit__(self, *_: Any) -> None:
+    def __exit__(self: Self, *_: Any) -> None:
         return None
 
-    def read(self) -> bytes:
+    def read(self: Self) -> bytes:
         return self.body
 
 
@@ -115,11 +115,11 @@ class _Registry:
 
     CHALLENGE = 'Bearer realm="https://auth.example/jwt",service="registry",scope="repository:x:pull"'
 
-    def __init__(self, paths: Dict[str, Any]) -> None:
+    def __init__(self: Self, paths: Dict[str, Any]) -> None:
         self.paths = paths
         self.requests: List[Any] = []
 
-    def __call__(self, request: Any, timeout: int) -> _Response:
+    def __call__(self: Self, request: Any, timeout: int) -> _Response:
         self.requests.append(request)
         url = request.full_url
         if url.startswith("https://auth.example/"):

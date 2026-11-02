@@ -32,16 +32,16 @@ check = _load("check_template_image_tags", ROOT / "scripts" / "python" / "check-
 
 
 class _Response:
-    def __enter__(self) -> "_Response":
+    def __enter__(self: Any) -> "_Response":
         return self
 
-    def __exit__(self, *_: Any) -> None:
+    def __exit__(self: Any, *_: Any) -> None:
         return None
 
-    def __init__(self, body: bytes = b"") -> None:
+    def __init__(self: Any, body: bytes = b"") -> None:
         self.body = body
 
-    def read(self) -> bytes:
+    def read(self: Any) -> bytes:
         return self.body
 
 
@@ -55,12 +55,12 @@ def _http_error(url: str, code: int, challenge: Optional[str] = None) -> urllib.
 class _Registry:
     """Fake urlopen: answers manifest HEADs with `codes` in turn and token GETs with a token."""
 
-    def __init__(self, codes: List[int], challenge: Optional[str] = None) -> None:
+    def __init__(self: Any, codes: List[int], challenge: Optional[str] = None) -> None:
         self.codes = codes
         self.challenge = challenge
         self.requests: List[Any] = []
 
-    def __call__(self, request: Any, timeout: int) -> _Response:
+    def __call__(self: Any, request: Any, timeout: int) -> _Response:
         self.requests.append(request)
         if "/manifests/" not in request.full_url:
             return _Response(b'{"token": "pull-token"}')
