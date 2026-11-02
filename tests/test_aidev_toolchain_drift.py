@@ -25,6 +25,7 @@ TOOLS = {
     "pytest-timeout": "PYTEST_TIMEOUT_VERSION",
     "pytest-asyncio": "PYTEST_ASYNCIO_VERSION",
     "pytest-cov": "PYTEST_COV_VERSION",
+    "pytest-rerunfailures": "PYTEST_RERUNFAILURES_VERSION",
     "tavern": "TAVERN_VERSION",
     "deepdiff": "DEEPDIFF_VERSION",
     "jsondiff": "JSONDIFF_VERSION",
@@ -44,7 +45,9 @@ TOOLS = {
 }
 # Tools (or platform.<key>) docker-bake.hcl deliberately keeps at another
 # version than aidev, each with the reason
-EXCEPTIONS: Dict[str, str] = {}
+EXCEPTIONS: Dict[str, str] = {
+    "pytest-asyncio": "clive requires pytest-asyncio ^1.4.1; aidev's toolchain still pins 1.4.0",
+}
 _TIMEOUT_SECONDS = 30
 
 

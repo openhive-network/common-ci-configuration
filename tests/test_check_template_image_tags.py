@@ -1,6 +1,7 @@
 """scripts/python/check-template-image-tags.py: a template may only name a published image tag."""
 
 import importlib.util
+import sys
 import urllib.error
 from email.message import Message
 from pathlib import Path
@@ -26,6 +27,7 @@ def _load(name: str, path: Path) -> ModuleType:
     return module
 
 
+sys.path.insert(0, str(ROOT / "scripts" / "python"))
 check = _load("check_template_image_tags", ROOT / "scripts" / "python" / "check-template-image-tags.py")
 
 

@@ -190,8 +190,8 @@ hints (`.nvmrc`, volta, `engines`) should name only the Node major.
 
 **Base:** python_development (Ubuntu 26.04, Python 3.14)
 
-**Includes:** pytest, pytest-xdist, pytest-timeout, pytest-asyncio, pytest-cov,
-httpx (for `starlette.testclient`), tavern, deepdiff, jsondiff, prettytable,
+**Includes:** pytest, pytest-xdist, pytest-timeout, pytest-asyncio,
+pytest-rerunfailures, pytest-cov, httpx (for `starlette.testclient`), tavern, deepdiff, jsondiff, prettytable,
 ruff, mypy, pylint, yamllint, sqlfluff, tox (in `/python_venv`, first on PATH),
 shellcheck, postgrest, psql (PGDG client), poetry, git, jq,
 xmlstarlet. The `hived` user (UID 1000, HAF container convention) owns the venv,
@@ -201,6 +201,78 @@ packages next to the tools.
 **Used by:** `.haf_app_lint_bash`, `.haf_app_lint_sql`,
 `.lint_code_with_ruff_template`, `.type_check_with_mypy_template`, this
 repository's lint jobs, and as the base of docker-builder (tavern jobs).
+
+**Published constraints:** the image carries its Python tools' versions as
+pip constraints (`name==version` per tool, from the same `docker-bake.hcl`
+variables): the label `io.hive.python-test-tools.constraints` and the file
+`/etc/python-test-tools/constraints.txt`, which is also what the image's own
+`pip install` installs from, so both name exactly the installed versions.
+
+#### Installing the test tools in another image
+
+A job that cannot run in python-test-tools (it needs a compiler or `7z` from
+ci-base-image, runs a Python 3.12/3.14 matrix against a compiled wheel, or
+builds a published image) installs the test tools with the constraints instead
+of pinning them. Its versions then follow `docker-bake.hcl` like every other
+job's.
+
+In a CI job, in any image with `curl` and `python3`:
+
+```yaml
+include:
+  - project: 'hive/common-ci-configuration'
+    ref: develop
+    file: '/templates/base.gitlab-ci.yml'
+
+test:
+  image: registry.gitlab.syncad.com/hive/common-ci-configuration/ci-base-image:...
+  script:
+    - !reference [.python_test_tools_constraints, script]
+    - python3 -m pip install -c "$PYTHON_TEST_TOOLS_CONSTRAINTS" pytest pytest-asyncio pytest-xdist
+    - pytest -n auto tests/
+```
+
+`.python_test_tools_constraints` downloads
+`scripts/python/python-test-tools-constraints.py` and the `registry_auth.py`
+it imports (from `COMMON_CI_REF`, default `develop`; standard library only).
+The script reads the label of `PYTHON_TEST_TOOLS_IMAGE`
+(`python-test-tools:${PYTHON_TEST_TOOLS_TAG}`) from the registry, without
+pulling the image, and writes it to `PYTHON_TEST_TOOLS_CONSTRAINTS`
+(`$CI_PROJECT_DIR/.python-test-tools-constraints.txt`). It uses the job token
+when there is one, anonymous access otherwise, and picks the linux/amd64
+image of a multi-platform tag. When the constraints cannot be obtained (the
+script cannot be downloaded, the tag is not in the registry, the registry is
+unreachable, or the image predates the label) the job fails with
+`ERROR: no pip constraints for <image>: <cause>` and nothing is installed
+unconstrained. Outside CI, from a checkout of this repository:
+
+```bash
+python3 scripts/python/python-test-tools-constraints.py \
+  registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:develop constraints.txt
+```
+
+A constraint only holds a package that is installed; it does not install it,
+so name every tool the job needs. A project whose own dependencies require
+another version of a tool fails to resolve: move the project, not the
+constraint.
+
+In a Docker build, either write the file with the template in the job that
+builds and copy it from the build context, or copy it from the tools image
+(this pulls python-test-tools into the build):
+
+```dockerfile
+ARG PYTHON_TEST_TOOLS_TAG=develop
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python-test-tools:${PYTHON_TEST_TOOLS_TAG} AS python-test-tools
+
+FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python_development:3.12-u24.04-1
+# from the build context, written by .python_test_tools_constraints:
+COPY .python-test-tools-constraints.txt /tmp/python-test-tools-constraints.txt
+# or from the image:
+# COPY --from=python-test-tools /etc/python-test-tools/constraints.txt /tmp/python-test-tools-constraints.txt
+RUN python3 -m pip install -c /tmp/python-test-tools-constraints.txt pytest
+```
+
+Both copies are the same file; COPY fails the build when it is missing.
 
 ### node-test-tools, node-test-tools-pg and node-test-tools-browser
 
