@@ -1,11 +1,17 @@
 # syntax=docker/dockerfile:1.5
 # Python test and lint tools for hive repos: Ubuntu 26.04 + Python 3.14 with
-# pytest (+ xdist, timeout, asyncio, cov), httpx, tavern, deepdiff, jsondiff, ruff, mypy, pylint,
-# yamllint, sqlfluff, tox, shellcheck and the postgrest and psql binaries,
+# pytest (+ xdist, timeout, asyncio, rerunfailures, cov), httpx, tavern, deepdiff, jsondiff, ruff,
+# mypy, pylint, yamllint, sqlfluff, tox, shellcheck and the postgrest and psql binaries,
 # installed in /python_venv (first on PATH).
 #
 # Every version is a build arg without a default: docker-bake.hcl is the only
 # place they are defined. Build with `docker buildx bake python-test-tools`.
+#
+# The Python tools' pins are published as pip constraints, for jobs and builds
+# in other images: the image label io.hive.python-test-tools.constraints (what
+# scripts/python/python-test-tools-constraints.py reads from the registry) and
+# /etc/python-test-tools/constraints.txt. pip installs the tools from that file,
+# so both name exactly the installed versions.
 ARG PYTHON_RUNTIME_VERSION
 FROM registry.gitlab.syncad.com/hive/common-ci-configuration/python_development:${PYTHON_RUNTIME_VERSION} AS python-test-tools
 
@@ -13,6 +19,7 @@ ARG PYTEST_VERSION
 ARG PYTEST_XDIST_VERSION
 ARG PYTEST_TIMEOUT_VERSION
 ARG PYTEST_ASYNCIO_VERSION
+ARG PYTEST_RERUNFAILURES_VERSION
 ARG PYTEST_COV_VERSION
 ARG HTTPX_VERSION
 ARG TAVERN_VERSION
@@ -28,6 +35,27 @@ ARG SHELLCHECK_VERSION
 ARG TOX_VERSION
 ARG POSTGREST_VERSION
 ARG PSQL_VERSION
+
+# name==version of every Python tool, space-separated
+ARG PYTHON_TEST_TOOLS_PINS="\
+pytest==${PYTEST_VERSION} \
+pytest-xdist==${PYTEST_XDIST_VERSION} \
+pytest-timeout==${PYTEST_TIMEOUT_VERSION} \
+pytest-asyncio==${PYTEST_ASYNCIO_VERSION} \
+pytest-rerunfailures==${PYTEST_RERUNFAILURES_VERSION} \
+pytest-cov==${PYTEST_COV_VERSION} \
+httpx==${HTTPX_VERSION} \
+tavern==${TAVERN_VERSION} \
+deepdiff==${DEEPDIFF_VERSION} \
+jsondiff==${JSONDIFF_VERSION} \
+prettytable==${PRETTYTABLE_VERSION} \
+ruff==${RUFF_VERSION} \
+mypy==${MYPY_VERSION} \
+pylint==${PYLINT_VERSION} \
+yamllint==${YAMLLINT_VERSION} \
+sqlfluff==${SQLFLUFF_VERSION} \
+tox==${TOX_VERSION}"
+LABEL io.hive.python-test-tools.constraints="${PYTHON_TEST_TOOLS_PINS}"
 
 ENV LANG=C.UTF-8
 ENV VIRTUAL_ENV=/python_venv
@@ -63,24 +91,11 @@ RUN (userdel --remove ubuntu 2>/dev/null || true) && \
     echo "hived ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # The venv is chowned in the layer that fills it: a chown in a later layer
-# would copy the whole venv into that layer
-RUN pip install --no-cache-dir \
-        "pytest==${PYTEST_VERSION}" \
-        "pytest-xdist==${PYTEST_XDIST_VERSION}" \
-        "pytest-timeout==${PYTEST_TIMEOUT_VERSION}" \
-        "pytest-asyncio==${PYTEST_ASYNCIO_VERSION}" \
-        "pytest-cov==${PYTEST_COV_VERSION}" \
-        "httpx==${HTTPX_VERSION}" \
-        "tavern==${TAVERN_VERSION}" \
-        "deepdiff==${DEEPDIFF_VERSION}" \
-        "jsondiff==${JSONDIFF_VERSION}" \
-        "prettytable==${PRETTYTABLE_VERSION}" \
-        "ruff==${RUFF_VERSION}" \
-        "mypy==${MYPY_VERSION}" \
-        "pylint==${PYLINT_VERSION}" \
-        "yamllint==${YAMLLINT_VERSION}" \
-        "sqlfluff==${SQLFLUFF_VERSION}" \
-        "tox==${TOX_VERSION}" && \
+# would copy the whole venv into that layer. The unquoted pins split into one
+# constraints line each.
+RUN mkdir -p /etc/python-test-tools && \
+    printf '%s\n' ${PYTHON_TEST_TOOLS_PINS} > /etc/python-test-tools/constraints.txt && \
+    pip install --no-cache-dir -r /etc/python-test-tools/constraints.txt && \
     python3 -c "import sysconfig, compileall; compileall.compile_dir(sysconfig.get_path('purelib'), quiet=1)" && \
     chown -R hived:users "${VIRTUAL_ENV}"
 
