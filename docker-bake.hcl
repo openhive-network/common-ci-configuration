@@ -273,7 +273,7 @@ target "python-scripts" {
 
 target "emsdk" {
   dockerfile = "Dockerfile.emscripten"
-  tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}-13")
+  tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}-14")
   cache-from = generate-cache-from("emsdk", "${EMSCRIPTEN_VERSION}")
   cache-to = generate-cache-to("emsdk", "${EMSCRIPTEN_VERSION}")
   args = {
