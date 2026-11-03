@@ -2,3 +2,5 @@ extends: default
 rules:
   line-length: disable
   document-start: disable
+  truthy:
+    check-keys: false  # GitHub workflow files use the `on:` key

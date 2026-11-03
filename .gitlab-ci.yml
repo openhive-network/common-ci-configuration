@@ -8,6 +8,8 @@ variables:
   # DOCKER_VERSION in docker-bake.hcl (checked by
   # tests/test_tool_versions_defined_once.py), which bake also reads from here
   DOCKER_VERSION: "29.9.2"
+  # rhysd/actionlint image tag for lint_github_workflows (a published image, not built here)
+  ACTIONLINT_TAG: "1.7.12"
   # =============================================================================
   # Skip Docker Builds - Set to "true" to skip all Docker image builds
   # =============================================================================
@@ -182,7 +184,7 @@ lint_ci_templates:
   before_script:
     - pip install yamllint-junit
   script:
-    - yamllint --format parsable templates/ > yamllint-parsable-result.txt
+    - yamllint --format parsable templates/ github-actions/ > yamllint-parsable-result.txt
   after_script:
     - yamllint-junit -o yamllint-junit-result.xml yamllint-parsable-result.txt
   artifacts:
@@ -199,6 +201,7 @@ lint_ci_templates:
         paths:
           - templates/**/*.yml
           - templates/**/*.yaml
+          - github-actions/**/*.yml
           - .yamllint
           - .yamllint.yml
           - .yamllint.yaml
@@ -207,9 +210,33 @@ lint_ci_templates:
         paths:
           - templates/**/*.yml
           - templates/**/*.yaml
+          - github-actions/**/*.yml
           - .yamllint
           - .yamllint.yml
           - .yamllint.yaml
+        compare_to: 'refs/heads/develop'
+
+# The GitHub workflow templates (github-actions/workflows/) are linted with actionlint, which checks
+# the workflow syntax, expressions and the shell in `run:` steps. The composite actions are plain
+# YAML (covered by lint_ci_templates); actionlint only reads workflow files, which is why they are
+# named explicitly instead of letting it look for .github/workflows.
+lint_github_workflows:
+  extends: .validation_job
+  image:
+    name: rhysd/actionlint:${ACTIONLINT_TAG}
+    entrypoint: [""]
+  script:
+    - actionlint -color github-actions/workflows/*.yml
+  rules:
+    - *skip_on_renovate_rule
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+      changes:
+        paths:
+          - github-actions/workflows/*.yml
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        paths:
+          - github-actions/workflows/*.yml
         compare_to: 'refs/heads/develop'
 
 lint_python_scripts:
