@@ -1,0 +1,94 @@
+# Publish the Python wheels built by the GitLab tag pipeline to PyPI, with attestations, from GitHub.
+#
+# Template: copy it to .github/workflows/publish-pypi.yml in the project and
+#   1. fill in the `env:` block below;
+#   2. put the path of the common-ci-configuration submodule in every `uses: ./...` line (a `uses:`
+#      value cannot come from a variable);
+#   3. add a trusted publisher on pypi.org for this repository, this file name and the `pypi-release`
+#      environment, and create that environment restricted to the release tags.
+# Full procedure: docs/github-publishing.md in common-ci-configuration.
+#
+# The GitLab pipeline keeps building and testing the wheels; this workflow only waits for them,
+# checks they carry the tag's version, and uploads them. PyPI needs no rewrite of the files.
+name: Publish Python package
+
+on:
+  push:
+    tags:
+      - '1*'   # release tags, the same pattern as the protected tags on GitLab
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (re-run for a tag whose push run failed or expired)
+        required: true
+        type: string
+      dry-run:
+        description: Download and verify the distributions, but do not upload them
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  GITLAB_PROJECT: 'hive%2Fwax'                  # GitLab project id or URL-encoded path
+  GITLAB_BUILD_JOB: build_wheel                 # GitLab job (or parallel:matrix job) building the wheels
+  GITLAB_ARTIFACT: 'python/wax/dist/*.whl'      # the wheels' path inside that job's artifacts
+  PYPI_PROJECT: hiveio-wax                      # project name on PyPI (rejects other projects' wheels in the artifacts)
+  TAG_STRIP_PREFIX: ''                          # e.g. 'beekeeper-v' for tags like beekeeper-v1.28.5rc1
+  CCC_DIR: ts/npm-common-config                 # path of the common-ci-configuration submodule
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi-release
+    timeout-minutes: 360           # GitHub-hosted maximum; the GitLab pipeline must finish within it
+    permissions:
+      contents: read
+      id-token: write              # OIDC token for PyPI trusted publishing and attestations
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      # Only this submodule is needed; `submodules: true` would also fetch the others (wax: hive).
+      - name: Check out common-ci-configuration
+        run: git submodule update --init --depth 1 -- "${CCC_DIR}"
+
+      - name: Wait for the GitLab build and download the distributions
+        id: artifact
+        uses: ./ts/npm-common-config/github-actions/actions/gitlab-wait-for-artifact
+        with:
+          project: ${{ env.GITLAB_PROJECT }}
+          ref: ${{ env.RELEASE_TAG }}
+          job: ${{ env.GITLAB_BUILD_JOB }}
+          artifact: ${{ env.GITLAB_ARTIFACT }}
+          expected-sha: HEAD       # the checked-out tag's commit; the GitLab pipeline must be for the same one
+
+      - name: Check the distributions carry the tag's version
+        id: dist
+        uses: ./ts/npm-common-config/github-actions/actions/pypi-verify-wheels
+        with:
+          dist-dir: ${{ steps.artifact.outputs.artifact-dir }}
+          tag: ${{ env.RELEASE_TAG }}
+          tag-strip-prefix: ${{ env.TAG_STRIP_PREFIX }}
+          expected-name: ${{ env.PYPI_PROJECT }}
+
+      - name: Upload to PyPI with trusted publishing
+        if: ${{ !inputs.dry-run }}
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+        with:
+          packages-dir: ${{ steps.dist.outputs.dist-dir }}
+          skip-existing: true      # re-running for a published version is a no-op
+          print-hash: true
+
+      - name: Summary
+        env:
+          PROJECT: ${{ env.PYPI_PROJECT }}
+          VERSION: ${{ steps.dist.outputs.version }}
+          FILES: ${{ steps.dist.outputs.files }}
+          PIPELINE_URL: ${{ steps.artifact.outputs.pipeline-url }}
+        run: |
+          echo "${PROJECT} ${VERSION}: ${FILES} (built by ${PIPELINE_URL})" >> "${GITHUB_STEP_SUMMARY}"

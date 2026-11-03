@@ -1,0 +1,94 @@
+# Publish the npm package built by the GitLab tag pipeline to npmjs, with provenance, from GitHub.
+#
+# Template: copy it to .github/workflows/publish-npm.yml in the project and
+#   1. fill in the `env:` block below;
+#   2. put the path of the common-ci-configuration submodule in every `uses: ./...` line (a `uses:`
+#      value cannot come from a variable);
+#   3. configure the trusted publisher on npmjs.com for this repository, this file name and the
+#      `npm-release` environment, and create that environment restricted to the release tags.
+# Full procedure: docs/github-publishing.md in common-ci-configuration.
+#
+# The GitLab pipeline keeps building and testing the package; this workflow only waits for its
+# artifact, points package.json at npmjs and this repository, and publishes it.
+name: Publish npm package
+
+on:
+  push:
+    tags:
+      - '1*'   # release tags, the same pattern as the protected tags on GitLab
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (re-run for a tag whose push run failed or expired)
+        required: true
+        type: string
+      dry-run:
+        description: Download and rewrite the package, then run npm publish --dry-run only
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  GITLAB_PROJECT: '452'            # GitLab project id or URL-encoded path, e.g. hive%2Fworkerbee
+  GITLAB_BUILD_JOB: build          # GitLab job whose artifacts hold the package tarball
+  GITLAB_ARTIFACT: 'dist/*.tgz'    # the tarball's path inside that job's artifacts; must match exactly one file
+  CCC_DIR: npm-common-config       # path of the common-ci-configuration submodule
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-release
+    timeout-minutes: 360           # GitHub-hosted maximum; the GitLab pipeline must finish within it
+    permissions:
+      contents: read
+      id-token: write              # OIDC token for npm trusted publishing and provenance
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      # Only this submodule is needed; `submodules: true` would also fetch the others (wax: hive).
+      - name: Check out common-ci-configuration
+        run: git submodule update --init --depth 1 -- "${CCC_DIR}"
+
+      - name: Wait for the GitLab build and download the package
+        id: artifact
+        uses: ./npm-common-config/github-actions/actions/gitlab-wait-for-artifact
+        with:
+          project: ${{ env.GITLAB_PROJECT }}
+          ref: ${{ env.RELEASE_TAG }}
+          job: ${{ env.GITLAB_BUILD_JOB }}
+          artifact: ${{ env.GITLAB_ARTIFACT }}
+          expected-sha: HEAD       # the checked-out tag's commit; the GitLab pipeline must be for the same one
+
+      - name: Point the package at npmjs and this repository
+        id: package
+        uses: ./npm-common-config/github-actions/actions/npm-rewrite-package
+        with:
+          tarball: ${{ steps.artifact.outputs.artifact-dir }}/${{ steps.artifact.outputs.artifact-files }}
+          tag: ${{ env.RELEASE_TAG }}
+
+      # No registry-url: it would write a token placeholder to .npmrc and npm would skip OIDC.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Publish with trusted publishing
+        id: publish
+        uses: ./npm-common-config/github-actions/actions/npm-publish-package
+        with:
+          tarball: ${{ steps.package.outputs.tarball }}
+          dry-run: ${{ inputs.dry-run || false }}
+
+      - name: Summary
+        env:
+          NAME: ${{ steps.publish.outputs.name }}
+          VERSION: ${{ steps.publish.outputs.version }}
+          STATUS: ${{ steps.publish.outputs.status }}
+          PIPELINE_URL: ${{ steps.artifact.outputs.pipeline-url }}
+        run: |
+          echo "${NAME}@${VERSION}: ${STATUS} (built by ${PIPELINE_URL})" >> "${GITHUB_STEP_SUMMARY}"
