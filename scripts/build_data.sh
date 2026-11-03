@@ -201,7 +201,8 @@ if [[ -f "$DATA_CACHE/datadir/status" ]]; then
     fi
 fi
 
-touch "$DATA_CACHE/replay_running"
+# The owner id lets the CI after_script release only a lock this job took
+echo "${CI_JOB_ID:-$$}" > "$LOCK_FILE"
 
 echo "Didn't find valid previous replay, performing fresh replay"
 ls "$DATA_CACHE" -lath 2>/dev/null || true
