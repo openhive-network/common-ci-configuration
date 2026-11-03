@@ -447,7 +447,7 @@ Contains Python utilities for CI operations:
 
 PostgreSQL client for database operations in CI jobs.
 
-**Current version:** `14-2`
+**Current version:** `14-4`
 
 **Used by:** Jobs that need to run SQL queries or manage PostgreSQL databases.
 
@@ -523,7 +523,7 @@ Image versions are defined in `docker-bake.hcl`:
 | `PYTHON_RUNTIME_VERSION` | 3.14-u26.04-1 | python_runtime / python_development |
 | `PYTHON_VERSION` | 3.14.2-1 | python image (deprecated) |
 | `EMSCRIPTEN_VERSION` | 5.0.2 | Emscripten SDK version |
-| `PSQL_IMAGE_VERSION` | 14-2 | PostgreSQL client version |
+| `PSQL_IMAGE_VERSION` | 14-4 | PostgreSQL client version |
 | `POSTGREST_VERSION` | v12.0.2 | PostgREST version |
 | `ALPINE_VERSION` | 3.21.3 | Alpine base version |
 | `DOCKERFILE_IMAGE_VERSION` | 1.11 | Dockerfile frontend version |

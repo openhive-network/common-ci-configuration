@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.5
-# psql base image version: 14-2 (with SIGTERM handling in run_with_reconnect.sh)
+# psql base image version: 14-4 (scripts in /usr/local/bin installed 0755)
 #
 # NOTE on CI rebuild triggers: this image COPYs scripts from haf-app-tools/scripts/.
 # build_psql_image's rules in .gitlab-ci.yml must list those paths alongside
@@ -14,9 +14,22 @@ RUN <<EOF
     echo "haf_admin ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers
 EOF
 
-COPY haf-app-tools/scripts/run_with_reconnect.sh /usr/local/bin/run_with_reconnect.sh
-COPY haf-app-tools/scripts/install_with_app_lock.py /usr/local/bin/install_with_app_lock.py
-COPY haf-app-tools/scripts/haf_app_driver.py /usr/local/bin/haf_app_driver.py
+# --chmod: plain COPY keeps the build context's modes, and a checkout made under
+# umask 0000 (the GitLab Docker-executor default) leaves these 0777, writable by
+# the non-root runtime user of every app image built on this one.
+COPY --chmod=0755 haf-app-tools/scripts/run_with_reconnect.sh /usr/local/bin/run_with_reconnect.sh
+COPY --chmod=0755 haf-app-tools/scripts/install_with_app_lock.py /usr/local/bin/install_with_app_lock.py
+COPY --chmod=0755 haf-app-tools/scripts/haf_app_driver.py /usr/local/bin/haf_app_driver.py
+
+RUN <<EOF
+    set -e
+    writable="$(find /usr/local/bin -perm /022 -type f)"
+    if [ -n "$writable" ]; then
+        echo "group- or other-writable files in /usr/local/bin:" >&2
+        echo "$writable" >&2
+        exit 1
+    fi
+EOF
 
 USER haf_admin
 WORKDIR /home/haf_admin
