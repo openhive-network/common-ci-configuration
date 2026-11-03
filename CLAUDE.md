@@ -19,6 +19,7 @@ Detailed documentation is available in `docs/`:
 - `haf-app-testing.md` - Templates for HAF-dependent application testing
 - `image-cache-lookup.md` - Scripts for finding pre-built images and avoiding rebuilds
 - `npmjs-staged-publishing.md` - Staged (2FA-approved) publishing of @hiveio packages to npmjs: token, variable, approval
+- `github-publishing.md` - Publishing release npm/PyPI packages from GitHub Actions out of GitLab-built artifacts, with OIDC trusted publishing and provenance
 
 ## Validation Commands
 
@@ -31,6 +32,9 @@ yamllint templates/
 
 # Lint Python scripts
 pylint scripts/python/*.py
+
+# Lint GitHub workflow templates
+actionlint github-actions/workflows/*.yml
 ```
 
 These run automatically in CI during the `validation` stage.
@@ -86,6 +90,22 @@ Located in `scripts/bash/npm-helpers/`:
 - `npm_build_package.sh` - Build and package monorepos
 - `npm_publish.sh` - Publish to npm registries
 - `npm_pack_package.sh` - Create package tarballs
+
+## GitHub Actions Publishing (from GitLab-built artifacts)
+
+Release packages are published to npmjs.org / pypi.org from a project's GitHub mirror, without a
+rebuild and without registry tokens (OIDC trusted publishing, provenance). The logic is in scripts;
+projects reach them through their common-ci-configuration submodule. See `docs/github-publishing.md`.
+
+- `scripts/github-actions/gitlab-wait-for-artifact.sh` - Poll a GitLab pipeline for a ref/commit, download a job's artifacts
+- `scripts/github-actions/npm-rewrite-package.sh` - Point a GitLab-built tarball at npmjs and the GitHub repository
+- `scripts/github-actions/npm-publish-package.sh` - Idempotent `npm publish` / `npm stage publish` of a tarball
+- `scripts/github-actions/pypi-verify-wheels.sh` - Check wheels carry the tag's PEP 440 version, collect them for upload
+- `github-actions/actions/<name>/action.yml` - Composite actions wrapping the scripts (`uses: ./<submodule>/github-actions/actions/<name>`)
+- `github-actions/workflows/publish-npm.yml`, `publish-pypi.yml` - Workflow templates to copy into a project's `.github/workflows/`
+
+Keep the actions thin: inputs map to script options, outputs come from the script's `--output-env`
+file. New behaviour goes into the script and its pytest suite in `tests/`.
 
 ## Image Cache Lookup Scripts
 
