@@ -1,0 +1,70 @@
+# Composite action wrapping scripts/github-actions/npm-rewrite-package.sh.
+# Use it from a project that has common-ci-configuration as a submodule:
+#   uses: ./npm-common-config/github-actions/actions/npm-rewrite-package
+name: Rewrite npm package for publishing from GitHub
+description: >-
+  Points a GitLab-built npm tarball at npmjs and at this GitHub repository (publishConfig.registry,
+  repository.url) without rebuilding it, so it can be published with provenance.
+inputs:
+  tarball:
+    description: Tarball produced by the GitLab build job (pnpm pack / npm pack output)
+    required: true
+  output-dir:
+    description: Directory the rewritten tarball is written to, under the same file name
+    default: ${{ runner.temp }}/npm-package
+  repository-url:
+    description: Repository the workflow runs in; npm provenance requires repository.url to match it
+    default: ${{ github.server_url }}/${{ github.repository }}
+  repository-directory:
+    description: Package directory inside the repository, for monorepo packages (sets repository.directory)
+    default: ""
+  registry:
+    description: Target registry for publishConfig.registry
+    default: https://registry.npmjs.org/
+  dist-tag:
+    description: Dist-tag for publishConfig.tag; latest is the channel of protected tags
+    default: latest
+  expected-version:
+    description: Fail unless the tarball's package.json has exactly this version
+    default: ""
+  tag:
+    description: Derive expected-version from this git tag instead (the tag the workflow publishes)
+    default: ""
+  tag-subproject:
+    description: Subproject name whose "-<name>-" infix is dropped from the tag, as npm_generate_version.sh does
+    default: ""
+outputs:
+  tarball:
+    description: Path of the rewritten tarball
+    value: ${{ steps.rewrite.outputs.package_tarball }}
+  name:
+    description: Package name
+    value: ${{ steps.rewrite.outputs.package_name }}
+  version:
+    description: Package version
+    value: ${{ steps.rewrite.outputs.package_version }}
+  dist-tag:
+    description: Dist-tag written to publishConfig.tag
+    value: ${{ steps.rewrite.outputs.package_dist_tag }}
+runs:
+  using: composite
+  steps:
+    - id: rewrite
+      shell: bash
+      env:
+        INPUT_TARBALL: ${{ inputs.tarball }}
+        INPUT_OUTPUT_DIR: ${{ inputs.output-dir }}
+        INPUT_REPOSITORY_URL: ${{ inputs.repository-url }}
+        INPUT_REPOSITORY_DIRECTORY: ${{ inputs.repository-directory }}
+        INPUT_REGISTRY: ${{ inputs.registry }}
+        INPUT_DIST_TAG: ${{ inputs.dist-tag }}
+        INPUT_EXPECTED_VERSION: ${{ inputs.expected-version }}
+        INPUT_TAG: ${{ inputs.tag }}
+        INPUT_TAG_SUBPROJECT: ${{ inputs.tag-subproject }}
+      run: >-
+        "${GITHUB_ACTION_PATH}/../../../scripts/github-actions/npm-rewrite-package.sh"
+        --tarball "${INPUT_TARBALL}" --output-dir "${INPUT_OUTPUT_DIR}"
+        --repository-url "${INPUT_REPOSITORY_URL}" --repository-directory "${INPUT_REPOSITORY_DIRECTORY}"
+        --registry "${INPUT_REGISTRY}" --dist-tag "${INPUT_DIST_TAG}"
+        --expected-version "${INPUT_EXPECTED_VERSION}" --tag "${INPUT_TAG}" --tag-subproject "${INPUT_TAG_SUBPROJECT}"
+        --output-env "${GITHUB_OUTPUT}"

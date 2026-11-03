@@ -1,0 +1,49 @@
+# Composite action wrapping scripts/github-actions/npm-publish-package.sh.
+# Use it from a project that has common-ci-configuration as a submodule:
+#   uses: ./npm-common-config/github-actions/actions/npm-publish-package
+# The job needs `id-token: write`; npm >= 11.5.1 (Node 24) then publishes through OIDC
+# trusted publishing with provenance. Do not set registry-url in actions/setup-node.
+name: Publish npm package with trusted publishing
+description: >-
+  Publishes (or stages) a tarball at npmjs through OIDC trusted publishing, skipping versions that are
+  already published or staged.
+inputs:
+  tarball:
+    description: Tarball to publish; name, version, dist-tag and registry come from its package.json
+    required: true
+  mode:
+    description: "publish: the version goes live. stage: npm stage publish, a maintainer approves it with 2FA"
+    default: publish
+  access:
+    description: npm --access value
+    default: public
+  dry-run:
+    description: Run npm publish --dry-run instead of publishing or staging
+    default: "false"
+outputs:
+  status:
+    description: published, staged, skipped or dry-run
+    value: ${{ steps.publish.outputs.publish_status }}
+  name:
+    description: Package name
+    value: ${{ steps.publish.outputs.package_name }}
+  version:
+    description: Package version
+    value: ${{ steps.publish.outputs.package_version }}
+  dist-tag:
+    description: Dist-tag the version was published under
+    value: ${{ steps.publish.outputs.package_dist_tag }}
+runs:
+  using: composite
+  steps:
+    - id: publish
+      shell: bash
+      env:
+        INPUT_TARBALL: ${{ inputs.tarball }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_ACCESS: ${{ inputs.access }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
+      run: >-
+        "${GITHUB_ACTION_PATH}/../../../scripts/github-actions/npm-publish-package.sh"
+        --tarball "${INPUT_TARBALL}" --mode "${INPUT_MODE}" --access "${INPUT_ACCESS}"
+        --dry-run "${INPUT_DRY_RUN}" --output-env "${GITHUB_OUTPUT}"

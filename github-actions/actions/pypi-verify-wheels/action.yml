@@ -1,0 +1,49 @@
+# Composite action wrapping scripts/github-actions/pypi-verify-wheels.sh.
+# Use it from a project that has common-ci-configuration as a submodule:
+#   uses: ./npm-common-config/github-actions/actions/pypi-verify-wheels
+name: Verify Python distributions against the release tag
+description: >-
+  Checks that the wheels and sdists downloaded from GitLab carry the PEP 440 version of the git tag
+  (and belong to the expected project), and collects them into one flat directory for upload.
+inputs:
+  dist-dir:
+    description: Directory holding the *.whl and *.tar.gz files (searched recursively)
+    required: true
+  tag:
+    description: Git tag the workflow publishes, e.g. 1.28.8-rc3 (becomes 1.28.8rc3)
+    default: ${{ github.ref_name }}
+  tag-strip-prefix:
+    description: Extended regex removed from the start of the tag first, e.g. beekeeper-v
+    default: ""
+  expected-name:
+    description: Fail if a distribution belongs to another project (PEP 503 normalised comparison)
+    default: ""
+  collect-dir:
+    description: Flat directory the verified files are copied into; pass it to pypa/gh-action-pypi-publish as packages-dir
+    default: ${{ runner.temp }}/pypi-dist
+outputs:
+  version:
+    description: PEP 440 version of the tag
+    value: ${{ steps.verify.outputs.pypi_version }}
+  files:
+    description: Verified files, space separated, relative to dist-dir
+    value: ${{ steps.verify.outputs.pypi_files }}
+  dist-dir:
+    description: Directory holding the verified files, flat (collect-dir)
+    value: ${{ steps.verify.outputs.pypi_dist_dir }}
+runs:
+  using: composite
+  steps:
+    - id: verify
+      shell: bash
+      env:
+        INPUT_DIST_DIR: ${{ inputs.dist-dir }}
+        INPUT_TAG: ${{ inputs.tag }}
+        INPUT_TAG_STRIP_PREFIX: ${{ inputs.tag-strip-prefix }}
+        INPUT_EXPECTED_NAME: ${{ inputs.expected-name }}
+        INPUT_COLLECT_DIR: ${{ inputs.collect-dir }}
+      run: >-
+        "${GITHUB_ACTION_PATH}/../../../scripts/github-actions/pypi-verify-wheels.sh"
+        --dist-dir "${INPUT_DIST_DIR}" --tag "${INPUT_TAG}" --tag-strip-prefix "${INPUT_TAG_STRIP_PREFIX}"
+        --expected-name "${INPUT_EXPECTED_NAME}" --collect-dir "${INPUT_COLLECT_DIR}"
+        --output-env "${GITHUB_OUTPUT}"

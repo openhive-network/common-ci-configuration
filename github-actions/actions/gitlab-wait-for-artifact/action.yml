@@ -1,0 +1,86 @@
+# Composite action wrapping scripts/github-actions/gitlab-wait-for-artifact.sh.
+# Use it from a project that has common-ci-configuration as a submodule:
+#   uses: ./npm-common-config/github-actions/actions/gitlab-wait-for-artifact
+name: Wait for GitLab job artifacts
+description: >-
+  Polls the GitLab pipeline of a ref until the named job (and, by default, the whole pipeline)
+  succeeded, then extracts the files matching a glob from the job's artifacts.
+inputs:
+  project:
+    description: GitLab project id or URL-encoded path (e.g. 452 or hive%2Fworkerbee)
+    required: true
+  ref:
+    description: Git ref the GitLab pipeline ran for (tag or branch name)
+    default: ${{ github.ref_name }}
+  job:
+    description: Name of the GitLab job that produced the artifact; a parallel:matrix job matches all its instances
+    required: true
+  artifact:
+    description: Path or glob of the files to extract from the job's artifacts archive, e.g. dist/*.tgz ("*" also matches "/")
+    required: true
+  output-dir:
+    description: Directory the files are extracted into (their archive paths are kept)
+    default: ${{ runner.temp }}/gitlab-artifacts
+  gitlab-url:
+    description: GitLab instance URL
+    default: https://gitlab.syncad.com
+  expected-sha:
+    description: >-
+      Only accept a pipeline for this commit. Resolved through git in the checkout, so a tag name, HEAD or an
+      annotated tag's object SHA all work; empty disables the check
+    default: ${{ github.sha }}
+  wait-for:
+    description: "pipeline: the whole pipeline must succeed (default); job: only the matched job(s)"
+    default: pipeline
+  timeout:
+    description: Seconds to wait before giving up
+    default: "14400"
+  poll-interval:
+    description: Seconds between polls of the GitLab API
+    default: "60"
+  token:
+    description: GitLab private token, only needed for non-public projects
+    default: ""
+outputs:
+  artifact-dir:
+    description: Directory the files were extracted into
+    value: ${{ steps.wait.outputs.artifact_dir }}
+  artifact-files:
+    description: Extracted files, space separated, relative to artifact-dir
+    value: ${{ steps.wait.outputs.artifact_files }}
+  pipeline-id:
+    description: Id of the GitLab pipeline the artifacts come from
+    value: ${{ steps.wait.outputs.pipeline_id }}
+  pipeline-url:
+    description: Web URL of that pipeline
+    value: ${{ steps.wait.outputs.pipeline_url }}
+  pipeline-sha:
+    description: Commit that pipeline ran for
+    value: ${{ steps.wait.outputs.pipeline_sha }}
+  job-ids:
+    description: Ids of the GitLab jobs whose artifacts were downloaded, space separated
+    value: ${{ steps.wait.outputs.job_ids }}
+runs:
+  using: composite
+  steps:
+    - id: wait
+      shell: bash
+      env:
+        INPUT_PROJECT: ${{ inputs.project }}
+        INPUT_REF: ${{ inputs.ref }}
+        INPUT_JOB: ${{ inputs.job }}
+        INPUT_ARTIFACT: ${{ inputs.artifact }}
+        INPUT_OUTPUT_DIR: ${{ inputs.output-dir }}
+        INPUT_GITLAB_URL: ${{ inputs.gitlab-url }}
+        INPUT_EXPECTED_SHA: ${{ inputs.expected-sha }}
+        INPUT_WAIT_FOR: ${{ inputs.wait-for }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_POLL_INTERVAL: ${{ inputs.poll-interval }}
+        INPUT_TOKEN: ${{ inputs.token }}
+      run: >-
+        "${GITHUB_ACTION_PATH}/../../../scripts/github-actions/gitlab-wait-for-artifact.sh"
+        --gitlab-url "${INPUT_GITLAB_URL}" --project "${INPUT_PROJECT}" --ref "${INPUT_REF}"
+        --job "${INPUT_JOB}" --artifact "${INPUT_ARTIFACT}" --output-dir "${INPUT_OUTPUT_DIR}"
+        --expected-sha "${INPUT_EXPECTED_SHA}" --wait-for "${INPUT_WAIT_FOR}"
+        --timeout "${INPUT_TIMEOUT}" --poll-interval "${INPUT_POLL_INTERVAL}"
+        --token "${INPUT_TOKEN}" --output-env "${GITHUB_OUTPUT}"
