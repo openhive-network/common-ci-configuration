@@ -2,7 +2,7 @@
 """Fail when a template pins an image tag that is not in the registry yet.
 
 Templates pin tags of images this repo builds (EMSCRIPTEN_IMAGE_TAG,
-ALPINE_IMAGE_TAG). A new tag reaches a template only in a second MR, merged once
+ALPINE_IMAGE_TAG, PYTHON_IMAGE_TAG). A new tag reaches a template only in a second MR, merged once
 the image MR's develop pipeline has published it (CLAUDE.md, "Moving Templates
 to a New Image Tag"). This check is what makes that MR's pipeline fail until
 then: it asks the registry for the manifest of every pinned image.
@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 PINNED_TAG_VARIABLES = {
     "EMSCRIPTEN_IMAGE_TAG": "templates/npm_projects.gitlab-ci.yml",
     "ALPINE_IMAGE_TAG": "templates/base.gitlab-ci.yml",
+    "PYTHON_IMAGE_TAG": "templates/python_projects.gitlab-ci.yml",
 }
 MANIFEST_TYPES = ", ".join(
     [

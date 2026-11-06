@@ -85,7 +85,7 @@ def test_image_references_name_this_repos_images_at_the_pinned_tag() -> None:
 
         assert registry == "registry.gitlab.syncad.com"
         assert repository.startswith("hive/common-ci-configuration/")
-        assert tag == template["variables"][variable]
+        assert tag == template["variables"][variable].lstrip(":")
 
 
 @pytest.mark.parametrize(
