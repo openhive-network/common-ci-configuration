@@ -28,14 +28,16 @@ default 3.14, selectable at runtime via the `PYTHON_VERSION` environment
 variable (`select-python` wrapper).
 
 **Includes:**
-- C++ build toolchain (gcc-toolset, cmake 3.28.6, ninja, sccache, clang 21)
+- C++ build toolchain (gcc-toolset, cmake 3.28.6, ninja, sccache, clang 21);
+  sccache is `SCCACHE_VERSION` (see "sccache" below)
 - Boost (built from source, static, -fPIC), OpenSSL, snappy, zopfli
 - Prebuilt RocksDB (commit-hash-indexed) and the aarch64 buildroot cross
   toolchain (`/opt/hive/cross/aarch64`)
 - Poetry, Docker CLI + buildx (`DOCKER_VERSION`, `DOCKER_BUILDX_PLUGIN_VERSION`), PostgreSQL 18 client libraries
 
-**Current version:** `pypa_2_28-pg18-4` (canonical tag; supersedes
-`pypa_2_28-4`, `pypa_2_28-pg18-3` and `pypa_2_28-pg18-arm-1`)
+**Current version:** `pypa_2_28-pg18-6` (sccache 0.19.0; `pypa_2_28-pg18-5`
+and older ship sccache 0.8.1; `pypa_2_28-pg18-4` is the canonical tag that
+superseded `pypa_2_28-4`, `pypa_2_28-pg18-3` and `pypa_2_28-pg18-arm-1`)
 
 **Used by:** hive and wax build/test pipelines, and all Python jobs via
 `templates/python_projects.gitlab-ci.yml` (`PYTHON_IMAGE`).
@@ -54,9 +56,10 @@ Ubuntu-built binaries).
 **Includes:**
 - Distro toolchain: gcc 15.2, clang/clang-tidy/lld 21, CMake 4.2, Boost 1.90
 - libpqxx 7.10 (built from source), PostgreSQL 18 dev packages (pgdg)
-- Poetry, Docker CLI + buildx (`DOCKER_VERSION`, `DOCKER_BUILDX_PLUGIN_VERSION`), sccache, websocat, faketime
+- Poetry, Docker CLI + buildx (`DOCKER_VERSION`, `DOCKER_BUILDX_PLUGIN_VERSION`), sccache (`SCCACHE_VERSION`), websocat, faketime
 
-**Current version:** `ubuntu26.04-pg18-1`
+**Current version:** `ubuntu26.04-pg18-3` (sccache 0.19.0; `ubuntu26.04-pg18-2`
+and older ship sccache 0.8.1)
 
 **Used by:** haf and hafah pipelines (`HIVE_CI_BASE_IMAGE` / `PYTHON_IMAGE` /
 builder images) and hive's fc canary job.
@@ -139,9 +142,10 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
   Consumers pick up the catalog by bumping their `npm-common-config`
   submodule; one still on an older catalog cannot launch the image's browsers
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
-- Build tools: ninja, autoconf, libtool, protobuf
+- Build tools: ninja, autoconf, libtool, protobuf, sccache (`SCCACHE_VERSION`)
 
-**Current version:** `5.0.2-14` (preloads healthchecker-component
+**Current version:** `5.0.2-15` (sccache 0.19.0; `5.0.2-14` and older ship
+sccache 0.8.1; `5.0.2-14` preloads healthchecker-component
 2.0.2-stable.261101230602, with API sets and a tailwindcss 4 peer; `5.0.2-13`'s
 `npm_build_package.sh` also builds the workspace root of a single-package project; `5.0.2-12` preloads TypeScript
 6.0.3, typedoc 0.28 and rollup-plugin-dts 6.5; `5.0.2-11` preloads the workerbee and hb-auth builds
@@ -164,6 +168,21 @@ image itself instead of a separate Ubuntu tag, because binaries built on a
 newer release (26.04, newer glibc) would not load in it.
 
 **Used by:** wax and other WASM projects for building JavaScript/TypeScript packages.
+
+### sccache
+
+ci-base-image, ci-base-image-ubuntu and emsdk install the same sccache release,
+`SCCACHE_VERSION` in `docker-bake.hcl` (0.19.0 since `pypa_2_28-pg18-6`,
+`ubuntu26.04-pg18-3` and `5.0.2-15`). `SCCACHE_SHA256` beside it is the sha256
+the release publishes for `sccache-v<version>-x86_64-unknown-linux-musl.tar.gz`
+(its `.sha256` asset); the builds verify the downloaded tarball against it and
+fail on a mismatch, and check that `sccache --version` reports
+`SCCACHE_VERSION`. Bumping sccache changes both variables and moves the tag of
+all three images (and then the templates' pins, see "Moving templates to a new
+image tag"). `SCCACHE_DIR=/tmp/sccache` is set in ci-base-image; backends are
+chosen by the jobs' `SCCACHE_*` environment (e.g. `SCCACHE_REDIS`,
+`SCCACHE_WEBDAV_ENDPOINT`), whose names 0.19 keeps. sccache's cache keys
+changed between 0.8.1 and 0.19, so the 0.19 images start from a cold cache once.
 
 ## Test Tools Images
 
