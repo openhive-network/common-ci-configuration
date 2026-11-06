@@ -31,11 +31,11 @@ variable "CI_BASE_IMAGE_VERSION" {
   # -4: canonical tag consolidating pypa_2_28-4 / pypa_2_28-pg18-3 /
   # pypa_2_28-pg18-arm-1 (includes the prebuilt aarch64 buildroot cross
   # toolchain, see aarch64-toolchain/)
-  default = "pypa_2_28-pg18-5"
+  default = "pypa_2_28-pg18-6"
 }
 
 variable "CI_BASE_IMAGE_UBUNTU_VERSION" {
-  default = "ubuntu26.04-pg18-2"
+  default = "ubuntu26.04-pg18-3"
 }
 
 variable "HAF_APP_TEST_RUNNER_VERSION" {
@@ -155,6 +155,15 @@ variable "DOCKER_COMPOSE_PLUGIN_VERSION" {
 variable "DOCKER_BUILDX_PLUGIN_VERSION" {
   default = "v0.38.1"
 }
+# sccache of ci-base-image, ci-base-image-ubuntu and emsdk, with the sha256 its
+# release publishes for sccache-v<version>-x86_64-unknown-linux-musl.tar.gz
+# (the builds fail on any other tarball); bumping it means a new tag of each
+variable "SCCACHE_VERSION" {
+  default = "0.19.0"
+}
+variable "SCCACHE_SHA256" {
+  default = "aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd"
+}
 # Image version tags, bumped when an image changes in a way consumers should be
 # able to pin; most consumers follow TEST_TOOLS_MOVING_TAG instead
 variable "PYTHON_TEST_TOOLS_IMAGE_VERSION" {
@@ -273,7 +282,7 @@ target "python-scripts" {
 
 target "emsdk" {
   dockerfile = "Dockerfile.emscripten"
-  tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}-14")
+  tags = generate-tags("emsdk", "${EMSCRIPTEN_VERSION}-15")
   cache-from = generate-cache-from("emsdk", "${EMSCRIPTEN_VERSION}")
   cache-to = generate-cache-to("emsdk", "${EMSCRIPTEN_VERSION}")
   args = {
@@ -282,7 +291,9 @@ target "emsdk" {
     OPENSSL_VERSION_TAG = "${OPENSSL_VERSION_TAG}",
     NODE_VERSION = "${NODE_VERSION}",
     PNPM_VERSION = "${PNPM_VERSION}",
-    PLAYWRIGHT_VERSION = "${PLAYWRIGHT_VERSION}"
+    PLAYWRIGHT_VERSION = "${PLAYWRIGHT_VERSION}",
+    SCCACHE_VERSION = "${SCCACHE_VERSION}",
+    SCCACHE_SHA256 = "${SCCACHE_SHA256}"
   }
 }
 
@@ -357,6 +368,8 @@ target "ci-base-image" {
   args = {
     DOCKER_VERSION = DOCKER_VERSION,
     DOCKER_BUILDX_PLUGIN_VERSION = DOCKER_BUILDX_PLUGIN_VERSION,
+    SCCACHE_VERSION = SCCACHE_VERSION,
+    SCCACHE_SHA256 = SCCACHE_SHA256,
   }
   tags = generate-tags("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
   cache-from = generate-cache-from("ci-base-image", "${CI_BASE_IMAGE_VERSION}")
@@ -368,6 +381,8 @@ target "ci-base-image-ubuntu" {
   args = {
     DOCKER_VERSION = DOCKER_VERSION,
     DOCKER_BUILDX_PLUGIN_VERSION = DOCKER_BUILDX_PLUGIN_VERSION,
+    SCCACHE_VERSION = SCCACHE_VERSION,
+    SCCACHE_SHA256 = SCCACHE_SHA256,
   }
   tags = generate-tags("ci-base-image-ubuntu", "${CI_BASE_IMAGE_UBUNTU_VERSION}")
   cache-from = generate-cache-from("ci-base-image-ubuntu", "${CI_BASE_IMAGE_UBUNTU_VERSION}")

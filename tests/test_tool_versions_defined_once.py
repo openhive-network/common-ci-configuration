@@ -45,10 +45,13 @@ TOOL_VARIABLES = (
     "DOCKER_VERSION",
     "DOCKER_COMPOSE_PLUGIN_VERSION",
     "DOCKER_BUILDX_PLUGIN_VERSION",
+    "SCCACHE_VERSION",
 )
+# Release checksums pinned beside a tool version, passed to Dockerfiles like it
+CHECKSUM_VARIABLES = ("SCCACHE_SHA256",)
 # Base image versions, passed to Dockerfiles like the tool versions
 BASE_IMAGE_VARIABLES = ("EMSCRIPTEN_VERSION", "ALPINE_VERSION")
-BUILD_ARG_VARIABLES = TOOL_VARIABLES + BASE_IMAGE_VARIABLES
+BUILD_ARG_VARIABLES = TOOL_VARIABLES + CHECKSUM_VARIABLES + BASE_IMAGE_VARIABLES
 # Versions no file but docker-bake.hcl (and the CI variable below) may spell out
 REPO_WIDE_VARIABLES = (
     "DOCKER_VERSION",
@@ -424,6 +427,33 @@ def test_tool_version_is_passed_to_a_build() -> None:
     assert set(BUILD_ARG_VARIABLES) <= passed
 
 
+def test_sccache_downloads_are_versioned_and_checksummed() -> None:
+    installs = {
+        str(path.relative_to(ROOT)): text
+        for path in _dockerfiles()
+        if "releases/download" in (text := path.read_text()) and "sccache" in text
+    }
+    bake = BAKE.read_text()
+    unchecked = {
+        name
+        for name, text in installs.items()
+        if "sccache/releases/download/v${SCCACHE_VERSION}/" not in text
+        or '"${SCCACHE_SHA256}  /tmp/sccache.tar.gz" | sha256sum -c -' not in text
+        or not re.search(
+            rf'dockerfile = "{re.escape(name)}"(?:(?!\ntarget ).)*?SCCACHE_SHA256 = ',
+            bake,
+            re.DOTALL,
+        )
+    }
+
+    assert set(installs) >= {
+        "Dockerfile.ci-base-image",
+        "Dockerfile.ci-base-image-ubuntu",
+        "Dockerfile.emscripten",
+    }
+    assert unchecked == set()
+
+
 def test_templates_and_dockerfiles_name_no_literal_image_tag() -> None:
     literal = {
         str(path.relative_to(ROOT)): tags
@@ -590,7 +620,7 @@ def test_docker_build_args_override_ccc_node_version(tmp_path: Path) -> None:
 def test_bake_target_tag_expands_bake_variables() -> None:
     defaults = _bake_defaults()
 
-    assert _bake_target_tag("emsdk") == f"{defaults['EMSCRIPTEN_VERSION']}-14"
+    assert _bake_target_tag("emsdk") == f"{defaults['EMSCRIPTEN_VERSION']}-15"
     assert _bake_target_tag("alpine") == defaults["ALPINE_VERSION"]
 
 
