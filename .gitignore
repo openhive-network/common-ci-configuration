@@ -2,3 +2,6 @@
 tmp/
 # AIDEV check reports (.aidev/run-checks.sh)
 test-results/
+
+# Python bytecode
+__pycache__/

@@ -40,7 +40,9 @@ and older ship sccache 0.8.1; `pypa_2_28-pg18-4` is the canonical tag that
 superseded `pypa_2_28-4`, `pypa_2_28-pg18-3` and `pypa_2_28-pg18-arm-1`)
 
 **Used by:** hive and wax build/test pipelines, and all Python jobs via
-`templates/python_projects.gitlab-ci.yml` (`PYTHON_IMAGE`).
+`templates/python_projects.gitlab-ci.yml` (`PYTHON_IMAGE`, tag `PYTHON_IMAGE_TAG`:
+`:pypa_2_28-pg18-6`; it moves only after the tag is published, see "Moving
+templates to a new image tag").
 
 ### ci-base-image-ubuntu
 
@@ -59,7 +61,9 @@ Ubuntu-built binaries).
 - Poetry, Docker CLI + buildx (`DOCKER_VERSION`, `DOCKER_BUILDX_PLUGIN_VERSION`), sccache (`SCCACHE_VERSION`), websocat, faketime
 
 **Current version:** `ubuntu26.04-pg18-3` (sccache 0.19.0; `ubuntu26.04-pg18-2`
-and older ship sccache 0.8.1)
+and older ship sccache 0.8.1). Published as its own repository,
+`registry.gitlab.syncad.com/hive/common-ci-configuration/ci-base-image-ubuntu:<tag>`,
+not as a tag of `ci-base-image`.
 
 **Used by:** haf and hafah pipelines (`HIVE_CI_BASE_IMAGE` / `PYTHON_IMAGE` /
 builder images) and hive's fc canary job.
@@ -158,7 +162,7 @@ Playwright in their store; `5.0.2-5` and older also install TypeScript, rollup,
 typedoc and protobuf tooling globally, at versions of their own rather than the
 catalog's; `5.0.2-4`: Node 24, Playwright 1.59; `5.0.2-3` has Node 22)
 
-**Used by the templates:** `5.0.2-10` (`EMSCRIPTEN_IMAGE_TAG` in
+**Used by the templates:** `5.0.2-15` (`EMSCRIPTEN_IMAGE_TAG` in
 `templates/npm_projects.gitlab-ci.yml`; it moves only after the tag is
 published, see "Moving templates to a new image tag")
 
@@ -536,8 +540,8 @@ Image versions are defined in `docker-bake.hcl`:
 
 | Variable | Current Value | Description |
 |----------|---------------|-------------|
-| `CI_BASE_IMAGE_VERSION` | pypa_2_28-pg18-4 | manylinux CI base image |
-| `CI_BASE_IMAGE_UBUNTU_VERSION` | ubuntu26.04-pg18-1 | Ubuntu CI base image (HAF) |
+| `CI_BASE_IMAGE_VERSION` | pypa_2_28-pg18-6 | manylinux CI base image |
+| `CI_BASE_IMAGE_UBUNTU_VERSION` | ubuntu26.04-pg18-3 | Ubuntu CI base image (HAF) |
 | `HAF_APP_TEST_RUNNER_VERSION` | 4.0 | HAF app test runner (also tagged `develop` and `HAF_APP_TEST_RUNNER_PINNED_TAG`) |
 | `PYTHON_RUNTIME_VERSION` | 3.14-u26.04-1 | python_runtime / python_development |
 | `PYTHON_VERSION` | 3.14.2-1 | python image (deprecated) |
@@ -552,9 +556,10 @@ Image versions are defined in `docker-bake.hcl`:
 
 ### Moving templates to a new image tag
 
-Two templates pin the tag of an image built here: `EMSCRIPTEN_IMAGE_TAG`
-(`templates/npm_projects.gitlab-ci.yml`, emsdk) and `ALPINE_IMAGE_TAG`
-(`templates/base.gitlab-ci.yml`, alpine). Projects that include the templates
+Three templates pin the tag of an image built here: `EMSCRIPTEN_IMAGE_TAG`
+(`templates/npm_projects.gitlab-ci.yml`, emsdk), `ALPINE_IMAGE_TAG`
+(`templates/base.gitlab-ci.yml`, alpine) and `PYTHON_IMAGE_TAG`
+(`templates/python_projects.gitlab-ci.yml`, ci-base-image). Projects that include the templates
 from `develop` (beekeeper, hive) pull the pinned tag as soon as the change is
 merged, while the tag itself appears only when the develop pipeline's build job
 has published it. Moving the template in the same MR as the image leaves those

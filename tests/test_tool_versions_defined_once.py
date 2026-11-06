@@ -77,6 +77,7 @@ LITERAL_IMAGE_TAG = re.compile(r"\b(?:(?:emsdk|node|alpine)[:-]|docker-)(v?\d[^\
 TEMPLATE_PINNED_TAGS = {
     "EMSCRIPTEN_IMAGE_TAG": ("templates/npm_projects.gitlab-ci.yml", "emsdk"),
     "ALPINE_IMAGE_TAG": ("templates/base.gitlab-ci.yml", "alpine"),
+    "PYTHON_IMAGE_TAG": ("templates/python_projects.gitlab-ci.yml", "ci-base-image"),
 }
 # Template variables restating a bake version for downstream projects, without
 # its "v" (official node: image tags have none):
@@ -132,7 +133,7 @@ PYTHON_TEST_TOOLS = f"{REGISTRY}python-test-tools:"
 
 
 def _bake_defaults() -> Dict[str, str]:
-    pattern = re.compile(r'variable "(\w+)" \{\s*default = "([^"]*)"')
+    pattern = re.compile(r'variable "(\w+)" \{\s*(?:#[^\n]*\n\s*)*default = "([^"]*)"')
     return dict(pattern.findall(BAKE.read_text()))
 
 
