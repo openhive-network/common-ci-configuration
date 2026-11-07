@@ -247,23 +247,36 @@ build_hived:
 
 ### 2. Downstream Repo (clive)
 
-Clive looks up the latest hive image without maintaining a submodule:
+Clive looks up the latest hived images without maintaining a submodule, using
+`templates/hived_image.gitlab-ci.yml`. Its templates take hive's source patterns from
+hive's `scripts/ci-helpers/source-patterns.sh` (at `HIVED_PATTERNS_REF`, default
+`develop`) and fail when no image is found:
 
 ```yaml
-find_hive:
-  extends: .find_upstream_image
+include:
+  - project: 'hive/common-ci-configuration'
+    ref: develop
+    file: '/templates/hived_image.gitlab-ci.yml'
+
+find_hived_image:
+  extends: .find_mainnet_hived_image_template          # HIVED_UPSTREAM_* in hived_image.env
+
+find_hived_testnet_image:
+  extends: .find_testnet_hived_image_template          # HIVED_TESTNET_UPSTREAM_* in hived_testnet_image.env
   variables:
-    UPSTREAM_REPO_URL: "https://gitlab.syncad.com/hive/hive.git"
-    UPSTREAM_REGISTRY: "registry.gitlab.syncad.com/hive/hive"
-    UPSTREAM_PATTERNS: "libraries/,programs/,CMakeLists.txt,Dockerfile"
+    HIVED_OVERRIDE_TAG: "v1.27.0"  # optional: use this tag instead of looking one up
 
 build_clive:
-  needs: [find_hive]
+  needs: [find_hived_image, find_hived_testnet_image]
   script:
-    - echo "Building with hive: $UPSTREAM_IMAGE"
-    - docker pull "$UPSTREAM_IMAGE"
-    - ./build.sh --hive-image="$UPSTREAM_IMAGE"
+    - docker pull "$HIVED_UPSTREAM_IMAGE"
+    - ./build.sh --hive-image="$HIVED_TESTNET_UPSTREAM_IMAGE"
 ```
+
+The testnet lookup also counts `tests/unit/` as source, as hive does when it tags
+testnet images (they ship the unit test binaries). `.find_hived_image` is the
+parameterizable base (`HIVED_IMAGE_TYPE`, `HIVED_VAR_PREFIX`, `UPSTREAM_OUTPUT`);
+see the comments in the template.
 
 ### 3. HAF App (balance_tracker)
 
