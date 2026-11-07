@@ -2,16 +2,17 @@
 
 A stand-in pnpm logs every command (and, with PNPM_ENV_LOG, its environment),
 lists the fixture's workspace projects and fails the commands named in
-PNPM_FAIL, so nothing touches the network.
+PNPM_FAIL (printing PNPM_FAIL_OUTPUT first), so nothing touches the network.
 """
 
 import importlib.util
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import List
+from typing import Any, Dict, List
 
 import pytest
 
@@ -31,7 +32,9 @@ if sys.argv[1:3] == ["list", "--recursive"]:
     print(Path.cwd())
     for package in sorted(Path("packages").glob("*/package.json")):
         print(package.parent.resolve())
-sys.exit(1 if command in os.environ.get("PNPM_FAIL", "").split(";") else 0)
+if command in os.environ.get("PNPM_FAIL", "").split(";"):
+    print(os.environ.get("PNPM_FAIL_OUTPUT", ""))
+    sys.exit(1)
 """
 
 
@@ -91,8 +94,8 @@ def test_workspace_without_a_root_script_checks_each_project(tmp_path: Path, pnp
 
     assert result == check_module.Result("hive/app", ".", "type check failed in packages/ui", False)
     assert pnpm_log.read_text().splitlines() == [
-        "repo: install --no-frozen-lockfile",
         "repo: list --recursive --depth -1 --parseable",
+        "repo: install --no-frozen-lockfile",
         "lib: exec tsc --noEmit -p tsconfig.json",
         "ui: run type-check",
     ]
@@ -104,16 +107,33 @@ def test_root_type_check_script_covers_the_workspace(tmp_path: Path, pnpm_log: P
     _package(repo / "ts" / "packages" / "lib", '{"typecheck": "tsc"}')
 
     assert check_module._check_directory("hive/wax", repo, "ts") == check_module.Result("hive/wax", "ts", "passed", True)
-    assert pnpm_log.read_text().splitlines() == ["ts: install --no-frozen-lockfile", "ts: run typecheck"]
+    assert pnpm_log.read_text().splitlines() == [
+        "ts: list --recursive --depth -1 --parseable", "ts: install --no-frozen-lockfile", "ts: run typecheck"]
+
+
+def test_failure_reports_the_first_type_error_of_the_first_failing_project(
+        tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    _package(repo, '{"build": "pnpm -r build"}')
+    _package(repo / "packages" / "lib", '{"typecheck": "tsc"}')
+    _package(repo / "packages" / "ui", '{"typecheck": "vue-tsc"}')
+    monkeypatch.setenv("PNPM_FAIL", "run typecheck")
+    monkeypatch.setenv("PNPM_FAIL_OUTPUT", "> tsc\nsrc/a.ts(3,7): error TS2322: Type 'string' is not assignable to type 'number'.\n"
+                                           "src/b.ts(1,1): error TS2304: Cannot find name 'x'.\n ELIFECYCLE  Command failed with exit code 2.")
+
+    assert check_module._check_directory("hive/app", repo, ".") == check_module.Result(
+        "hive/app", ".", "type check failed in packages/lib, packages/ui; first error (packages/lib): "
+        "src/a.ts(3,7): error TS2322: Type 'string' is not assignable to type 'number'.", False)
 
 
 def test_failed_install_skips_the_type_check(tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _package(tmp_path / "repo", '{"typecheck": "tsc"}')
     monkeypatch.setenv("PNPM_FAIL", "install --no-frozen-lockfile")
+    monkeypatch.setenv("PNPM_FAIL_OUTPUT", "Progress: resolved 1\n\x1b[31m ERR_PNPM_FETCH_404\x1b[39m GET https://registry/x: Not Found")
 
     assert check_module._check_directory("hive/app", repo, ".") == check_module.Result(
-        "hive/app", ".", "install failed (exit 1)", False)
-    assert pnpm_log.read_text().splitlines() == ["repo: install --no-frozen-lockfile"]
+        "hive/app", ".", "install failed (exit 1): ERR_PNPM_FETCH_404 GET https://registry/x: Not Found", False)
+    assert pnpm_log.read_text().splitlines() == ["repo: list --recursive --depth -1 --parseable", "repo: install --no-frozen-lockfile"]
 
 
 def test_project_without_a_type_check_passes_on_its_install(tmp_path: Path, pnpm_log: Path) -> None:
@@ -121,7 +141,7 @@ def test_project_without_a_type_check_passes_on_its_install(tmp_path: Path, pnpm
 
     assert check_module._check_directory("hive/app", repo, ".") == check_module.Result(
         "hive/app", ".", "installed; no type check found", True)
-    assert pnpm_log.read_text().splitlines() == ["repo: install --no-frozen-lockfile", "repo: list --recursive --depth -1 --parseable"]
+    assert pnpm_log.read_text().splitlines() == ["repo: list --recursive --depth -1 --parseable", "repo: install --no-frozen-lockfile"]
 
 
 def test_install_and_type_check_never_see_the_token_or_ci_credentials(
@@ -148,9 +168,74 @@ def test_install_and_type_check_never_see_the_token_or_ci_credentials(
     assert check_module._check_directory("hive/app", repo, ".").passed
 
     seen = [json.loads(line) for line in environments.read_text().splitlines()]
-    assert len(seen) == 3  # install, workspace listing, the package's type check
+    assert len(seen) == 3  # workspace listing, install, the package's type check
     for environment in seen:
         assert not set(credentials) & set(environment)
         assert not any("glpat-secret" in value or "job-token" in value for value in environment.values())
         assert environment["CI_PROJECT_PATH"] == "hive/common-ci-configuration"
         assert environment["PATH"] == os.environ["PATH"]
+
+
+def _catalog_workspace(directory: Path) -> None:
+    (directory / "pnpm-workspace.yaml").write_text(
+        'packages:\n  - ./packages/**/*\n\ncatalogs:\n  hiveio-toolset:\n    "@hiveio/wax": 1.28.8-stable.1\n'
+        '    "@hiveio/hb-auth": 1.28.4-stable.1\n  other:\n    "@hiveio/built": 1.0.0\n')
+
+
+def _unbuilt(directory: Path, name: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "package.json").write_text(json.dumps({"name": name, "types": "dist/index.d.ts", "main": "dist/index.js"}))
+    return directory
+
+
+def _dependencies(project: Path) -> Dict[str, Any]:
+    manifest = json.loads((project / "package.json").read_text())
+    return {field: manifest[field] for field in ("dependencies", "devDependencies", "peerDependencies", "pnpm") if field in manifest}
+
+
+def test_local_packages_that_need_a_build_come_from_the_catalogs(tmp_path: Path, pnpm_log: Path) -> None:
+    repo = tmp_path / "repo"
+    _unbuilt(repo / "ts", "@hiveio/wax")
+    _unbuilt(repo / "unpinned", "@hiveio/unpinned")
+    built = _unbuilt(repo / "built", "@hiveio/built")
+    (built / "dist").mkdir()
+    (built / "dist" / "index.d.ts").write_text("export {};\n")
+    app = repo / "examples" / "app"
+    app.mkdir(parents=True)
+    _catalog_workspace(app)
+    (app / "package.json").write_text(json.dumps({
+        "name": "app",
+        "dependencies": {"@hiveio/wax": "file:../../ts", "@hiveio/built": "link:../../built", "@hiveio/unpinned": "file:../../unpinned"},
+        "devDependencies": {"typescript": "catalog:typescript-toolset"},
+        "pnpm": {"overrides": {"@hiveio/wax@*": "file:../../ts", "axios": "^1.8.4"}},
+    }))
+
+    result = check_module._check_directory("hive/wax", repo, "examples/app")
+
+    assert result == check_module.Result(
+        "hive/wax", "examples/app", "installed; no type check found; @hiveio/wax from the catalogs' published versions", True)
+    assert _dependencies(app) == {
+        "dependencies": {"@hiveio/wax": "catalog:hiveio-toolset", "@hiveio/built": "link:../../built", "@hiveio/unpinned": "file:../../unpinned"},
+        "devDependencies": {"typescript": "catalog:typescript-toolset"},
+        "pnpm": {"overrides": {"@hiveio/wax@*": "catalog:hiveio-toolset", "axios": "^1.8.4"}},
+    }
+    listing, install, *rest = pnpm_log.read_text().splitlines()
+    assert (listing, rest) == ("app: list --recursive --depth -1 --parseable", [])
+    assert re.fullmatch(r"app: install --no-frozen-lockfile --config\.@hiveio:registry=https://\S+", install), install
+
+
+def test_workspace_members_take_the_published_root_package(tmp_path: Path, pnpm_log: Path) -> None:
+    repo = tmp_path / "repo"
+    workspace = _unbuilt(repo / "ts", "@hiveio/wax")
+    _catalog_workspace(workspace)
+    signer = _package(workspace / "packages" / "signer", '{"typecheck": "tsc"}')
+    manifest = json.loads((signer / "package.json").read_text())
+    manifest.update(devDependencies={"@hiveio/wax": "workspace:../.."}, peerDependencies={"@hiveio/hb-auth": "workspace:*"})
+    (signer / "package.json").write_text(json.dumps(manifest))
+    _unbuilt(workspace / "packages" / "hb-auth", "@hiveio/hb-auth")
+
+    assert check_module._check_directory("hive/wax", repo, "ts") == check_module.Result(
+        "hive/wax", "ts", "passed; @hiveio/hb-auth, @hiveio/wax from the catalogs' published versions", True)
+    assert _dependencies(signer) == {
+        "devDependencies": {"@hiveio/wax": "catalog:hiveio-toolset"}, "peerDependencies": {"@hiveio/hb-auth": "catalog:hiveio-toolset"}}
+    assert pnpm_log.read_text().splitlines()[-1] == "signer: run typecheck"
