@@ -65,6 +65,7 @@ Templates are in `templates/` and are included by downstream projects:
 | `python_projects.gitlab-ci.yml` | Python linting/testing |
 | `haf_app_testing.gitlab-ci.yml` | HAF app change detection, DinD testing, Tavern |
 | `source_change_detection.gitlab-ci.yml` | Source change detection, skip rules, upstream image lookup |
+| `hived_image.gitlab-ci.yml` | Upstream hived image lookup (`.find_mainnet_hived_image_template`, `.find_testnet_hived_image_template`) |
 | `cache-manager.gitlab-ci.yml` | Cache-manager script setup |
 | `base.gitlab-ci.yml` | Common job defaults |
 
