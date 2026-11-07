@@ -9,7 +9,11 @@ commit (a `merge` consumer also gets the catalogs merged into its
 pnpm-workspace.yaml), and in each directory whose lockfile follows the catalogs
 run `pnpm install --no-frozen-lockfile` and the type check: the directory's
 `typecheck`, `type-check` or `tsc` script when its package.json has one, else
-that script or `tsc --noEmit -p tsconfig.json` in each workspace project.
+in each workspace project that script, or for a Nuxt project (a nuxt.config.* or
+a `nuxt` dependency) depending on `vue-tsc` `nuxi prepare` and then
+`nuxi typecheck` (a Nuxt project without vue-tsc has no type check), or for a
+project depending on `vue-tsc` `vue-tsc --noEmit -p tsconfig.json`, or
+`tsc --noEmit -p tsconfig.json`.
 A dependency on a package of the clone that ships its type declarations only
 once built (wax's examples and signers on `@hiveio/wax`, which needs the wasm
 toolchain) is pointed at the catalog entry pinning its published version
@@ -42,6 +46,9 @@ from pnpm_catalogs import Catalogs, CatalogError, read_catalogs
 TOKEN_VARIABLE = "CATALOG_RESYNC_TOKEN"
 INSTALL_COMMAND = ("pnpm", "install", "--no-frozen-lockfile")
 TYPE_CHECK_SCRIPTS = ("typecheck", "type-check", "tsc")
+NUXT_PREPARE_COMMAND = ("pnpm", "exec", "nuxi", "prepare")
+NUXT_TYPE_CHECK_COMMAND = ("pnpm", "exec", "nuxi", "typecheck")
+_NUXT_CONFIGS = ("nuxt.config.ts", "nuxt.config.js", "nuxt.config.mjs", "nuxt.config.mts", "nuxt.config.cjs", "nuxt.config.cts")
 _NPMRC = ROOT / "pnpm-config" / ".npmrc"
 _SCOPED_REGISTRY = re.compile(r"@[^\s=]+:registry=\S+")
 _DEPENDENCY_FIELDS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
@@ -81,14 +88,34 @@ def _type_check_script(project: Path) -> Optional[str]:
     return next((name for name in TYPE_CHECK_SCRIPTS if name in scripts), None)
 
 
+def _depends_on(manifest: Dict[str, Any], name: str) -> bool:
+    return any(name in manifest.get(field, {}) for field in _DEPENDENCY_FIELDS)
+
+
+def _is_nuxt(project: Path) -> bool:
+    return any((project / config).is_file() for config in _NUXT_CONFIGS) or _depends_on(_manifest(project), "nuxt")
+
+
+def _prepare_command(project: Path) -> Optional[List[str]]:
+    """The command generating what type_check_command(project) needs: `nuxi prepare` (the .nuxt
+    directory, whose tsconfigs a Nuxt project's tsconfig.json extends or references) before
+    `nuxi typecheck`, else None."""
+    return list(NUXT_PREPARE_COMMAND) if type_check_command(project) == list(NUXT_TYPE_CHECK_COMMAND) else None
+
+
 def type_check_command(project: Path) -> Optional[List[str]]:
-    """The command type-checking the package at `project`: its first TYPE_CHECK_SCRIPTS script,
-    else `tsc --noEmit` on its tsconfig.json, else None."""
+    """The command type-checking the package at `project`: its first TYPE_CHECK_SCRIPTS script;
+    else for a Nuxt project `nuxi typecheck` when it depends on vue-tsc (nuxi's type checker),
+    None otherwise; else `vue-tsc --noEmit` (for a project depending on vue-tsc) or `tsc --noEmit`
+    on its tsconfig.json; else None."""
     script = _type_check_script(project)
     if script:
         return ["pnpm", "run", script]
+    vue_tsc = _depends_on(_manifest(project), "vue-tsc")
+    if _is_nuxt(project):
+        return list(NUXT_TYPE_CHECK_COMMAND) if vue_tsc else None
     if (project / "tsconfig.json").is_file():
-        return ["pnpm", "exec", "tsc", "--noEmit", "-p", "tsconfig.json"]
+        return ["pnpm", "exec", "vue-tsc" if vue_tsc else "tsc", "--noEmit", "-p", "tsconfig.json"]
     return None
 
 
@@ -196,6 +223,21 @@ def _run(command: List[str], cwd: Path, environment: Mapping[str, str]) -> Tuple
     return process.returncode, "".join(output)
 
 
+def _type_check(label: str, package: Path, command: List[str], environment: Mapping[str, str]) -> Tuple[int, Optional[str]]:
+    """Run _prepare_command(package), if any, then `command` in `package`; returns the exit status
+    of the one that ran last and, when it failed, its first error (a failed prepare named as such)."""
+    prepare = _prepare_command(package)
+    if prepare:
+        print(f"-- {label}: {' '.join(prepare)}", flush=True)
+        status, output = _run(prepare, package, environment)
+        if status:
+            first = _first_error(output)
+            return status, f"{' '.join(prepare)} failed (exit {status})" + (f": {first}" if first else "")
+    print(f"-- {label}: {' '.join(command)}", flush=True)
+    status, output = _run(command, package, environment)
+    return status, _first_error(output) if status else None
+
+
 def _check_directory(project: str, repo: Path, directory: str) -> Result:
     workspace = repo / directory
     environment = _consumer_environment(os.environ)
@@ -221,11 +263,10 @@ def _check_directory(project: str, repo: Path, directory: str) -> Result:
         if command is None:
             continue
         where = package.relative_to(repo).as_posix() or "."
-        print(f"-- {project} {where}: {' '.join(command)}", flush=True)
         checked += 1
-        status, output = _run(command, package, environment)
+        status, first = _type_check(f"{project} {where}", package, command, environment)
         if status:
-            failed.append((where, _first_error(output)))
+            failed.append((where, first))
     if failed:
         places = ", ".join(where for where, _ in failed)
         where, first = next(((where, first) for where, first in failed if first), failed[0])
