@@ -37,8 +37,22 @@ variables:
   before_script:
     - echo "Using Python project directory - ${PYPROJECT_DIR}"
     # Create virtualenv directly with target Python (poetry env use is broken - uses poetry's Python)
-    - python3 -m venv ~/venv-${PYTHON_VERSION}
+    # An image's python3 is its default Python, not necessarily PYTHON_VERSION
+    - |
+      PYTHON_INTERPRETER="python${PYTHON_VERSION}"
+      [ -n "${PYTHON_VERSION}" ] || PYTHON_INTERPRETER=python3
+      if ! command -v "${PYTHON_INTERPRETER}" > /dev/null; then
+        echo "Python ${PYTHON_VERSION} (PYTHON_VERSION) is not available in image ${CI_JOB_IMAGE:-${PYTHON_IMAGE}}: no ${PYTHON_INTERPRETER} on PATH" >&2
+        exit 1
+      fi
+      "${PYTHON_INTERPRETER}" -m venv ~/venv-${PYTHON_VERSION}
     - source ~/venv-${PYTHON_VERSION}/bin/activate
+    - |
+      VENV_PYTHON_VERSION=$(python3 -c 'import sys, sysconfig; print("%d.%d%s" % (sys.version_info[0], sys.version_info[1], "t" if sysconfig.get_config_var("Py_GIL_DISABLED") else ""))')
+      if [ -n "${PYTHON_VERSION}" ] && [ "${VENV_PYTHON_VERSION}" != "${PYTHON_VERSION}" ]; then
+        echo "The venv runs Python ${VENV_PYTHON_VERSION}, not PYTHON_VERSION=${PYTHON_VERSION} (image ${CI_JOB_IMAGE:-${PYTHON_IMAGE}})" >&2
+        exit 1
+      fi
     - poetry -C "${PYPROJECT_DIR}" env use system
     - python3 -V
     - poetry -C "${PYPROJECT_DIR}" -V
