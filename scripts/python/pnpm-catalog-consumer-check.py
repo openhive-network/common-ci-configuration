@@ -14,6 +14,11 @@ a `nuxt` dependency) depending on `vue-tsc` `nuxi prepare` and then
 `nuxi typecheck` (a Nuxt project without vue-tsc has no type check), or for a
 project depending on `vue-tsc` `vue-tsc --noEmit -p tsconfig.json`, or
 `tsc --noEmit -p tsconfig.json`.
+A type check failing only because tsc cannot find modules inside the package's own
+tree that its checkout lacks (its own build output, such as wax's wasm build) is
+reported as not checked, naming the missing paths, and one failing only on
+TS18003 (its tsconfig matches no inputs) as having no type check; neither fails
+the consumer, and a failure names its first other error.
 A dependency on a package of the clone that ships its type declarations only
 once built (wax's examples and signers on `@hiveio/wax`, which needs the wasm
 toolchain) is pointed at the catalog entry pinning its published version
@@ -37,7 +42,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Set, Tuple
 
 from pnpm_catalog_consumers import (
     ROOT, Consumer, ConsumerError, clone, git_auth_environment, point_at, start)
@@ -54,11 +59,29 @@ _SCOPED_REGISTRY = re.compile(r"@[^\s=]+:registry=\S+")
 _DEPENDENCY_FIELDS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
 # Tried in order: a TypeScript diagnostic, then a pnpm error code, then any line naming an error.
 _ERROR_PATTERNS = (re.compile(r"error TS\d+"), re.compile(r"ERR_PNPM_\w+"), re.compile(r"\berror\b", re.IGNORECASE))
+# A whole tsc diagnostic line: plain (`file(line,col): error TSn: ...`), pretty (`file:line:col - error TSn: ...`) or without a file.
+_DIAGNOSTIC = re.compile(r"(?:(?P<file>[^\s(]+)(?:\(\d+,\d+\):|:\d+:\d+ -) )?error (?P<code>TS\d+): (?P<message>.*)")
+_MISSING_MODULE = re.compile(r"Cannot find module '(?P<module>\.{1,2}/[^']*)'")
+_MISSING_MODULE_CODE = "TS2307"
+_NO_INPUTS = "TS18003"
+_RELATIVE_IMPORT = re.compile(r"""(?:\bfrom|\bimport|\brequire\(|\bimport\()\s*["'](\.{1,2}/[^"']+)["']""")
+_SOURCE_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".d.ts")
+_SCRIPT_SUFFIXES = (".js", ".jsx", ".mjs", ".cjs")
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _MAX_ERROR_LENGTH = 300
 _CREDENTIAL_VARIABLES = frozenset((
     TOKEN_VARIABLE, "CI_JOB_TOKEN", "CI_BUILD_TOKEN", "CI_JOB_JWT", "CI_JOB_JWT_V1", "CI_JOB_JWT_V2",
     "CI_REGISTRY_PASSWORD", "CI_DEPENDENCY_PROXY_PASSWORD", "CI_DEPLOY_PASSWORD", "CI_REPOSITORY_URL"))
+
+
+class _PackageCheck(NamedTuple):
+    """One package's type check: its exit status, the first error of a failure, and the paths
+    of its own build output a failure needed (sorted, repo-relative; empty for any other
+    failure) or whether it only reported TS18003."""
+    status: int
+    first: Optional[str] = None
+    missing_build: Tuple[str, ...] = ()
+    no_inputs: bool = False
 
 
 class Result(NamedTuple):
@@ -211,6 +234,72 @@ def _first_error(output: str) -> Optional[str]:
     return None
 
 
+def _missing_path(file: Path, module: str, package: Path) -> Optional[Path]:
+    """The outermost path inside `package` the checkout lacks on the way to `module`, a module
+    `file` imports; None when it resolves outside `package` or exists."""
+    target = Path(os.path.normpath(file.parent / module))
+    if package not in target.parents:
+        return None
+    for part in [*reversed(target.relative_to(package).parents), target]:
+        if not (package / part).exists():
+            return package / part
+    return None
+
+
+def _resolved_import(importer: Path, module: str) -> Optional[Path]:
+    """The source file the relative import `module` of `importer` names, None when there is none."""
+    target = Path(os.path.normpath(importer.parent / module))
+    stem = target.with_suffix("") if target.suffix in _SCRIPT_SUFFIXES else target
+    candidates = [target, *(stem.with_name(stem.name + suffix) for suffix in _SOURCE_SUFFIXES),
+                  *(target / f"index{suffix}" for suffix in _SOURCE_SUFFIXES)]
+    return next((candidate for candidate in candidates if candidate.is_file()), None)
+
+
+def _imports_any(file: Path, importers: Set[Path], package: Path) -> bool:
+    """True when `file` is one of `importers` or reaches one through relative imports inside `package`."""
+    seen: Set[Path] = set()
+    pending = [file]
+    while pending:
+        current = pending.pop()
+        if current in importers:
+            return True
+        if current in seen or package not in current.parents or not current.is_file():
+            continue
+        seen.add(current)
+        modules = _RELATIVE_IMPORT.findall(current.read_text(encoding="utf-8", errors="replace"))
+        pending += [resolved for resolved in (_resolved_import(current, module) for module in modules) if resolved]
+    return False
+
+
+def _diagnosed(status: int, output: str, package: Path, repo: Path) -> Optional[_PackageCheck]:
+    """The type check of `package` (in the clone at `repo`) that failed with `status` and `output`,
+    when that names a tsc diagnostic. A TS2307 for a relative module of the package's own tree its
+    checkout lacks (its build output) names the missing path, and every other diagnostic in a file
+    reaching such an import (types tsc could not know) is taken as its consequence: when that
+    accounts for every diagnostic the package is not checked, naming the missing paths; when every
+    one is TS18003 it has no inputs; else it failed on its first other diagnostic. None without a
+    tsc diagnostic."""
+    lines = [_ANSI_ESCAPE.sub("", line).strip() for line in output.splitlines()]
+    diagnostics = [(line, _DIAGNOSTIC.fullmatch(line)) for line in lines if _ERROR_PATTERNS[0].search(line)]
+    if not diagnostics:
+        return None
+    sources = {line: Path(os.path.normpath(package / found["file"])) for line, found in diagnostics if found and found["file"]}
+    missing: Dict[str, Path] = {}
+    for line, found in diagnostics:
+        module = _MISSING_MODULE.match(found["message"]) if found and found["code"] == _MISSING_MODULE_CODE else None
+        path = _missing_path(sources[line], module["module"], package) if module and line in sources else None
+        if path:
+            missing[line] = path
+    importers = {sources[line] for line in missing}
+    real = [line for line, found in diagnostics
+            if line not in missing and not (found and found["code"] == _NO_INPUTS and not found["file"])
+            and not (line in sources and missing and _imports_any(sources[line], importers, package))]
+    if real:
+        return _PackageCheck(status, real[0][:_MAX_ERROR_LENGTH])
+    paths = sorted({path.relative_to(repo).as_posix() for path in missing.values()})
+    return _PackageCheck(status, None, tuple(paths), not paths)
+
+
 def _run(command: List[str], cwd: Path, environment: Mapping[str, str]) -> Tuple[int, str]:
     """Run `command`, copying its output to stdout as it comes; returns its exit status and output."""
     output = []
@@ -223,19 +312,44 @@ def _run(command: List[str], cwd: Path, environment: Mapping[str, str]) -> Tuple
     return process.returncode, "".join(output)
 
 
-def _type_check(label: str, package: Path, command: List[str], environment: Mapping[str, str]) -> Tuple[int, Optional[str]]:
-    """Run _prepare_command(package), if any, then `command` in `package`; returns the exit status
-    of the one that ran last and, when it failed, its first error (a failed prepare named as such)."""
+def _type_check(label: str, package: Path, repo: Path, command: List[str], environment: Mapping[str, str]) -> _PackageCheck:
+    """Run _prepare_command(package), if any, then `command` in `package` (inside the clone at
+    `repo`); the result of the one that ran last, a failure classified by _diagnosed (a failed
+    prepare named as such, and always a failure)."""
     prepare = _prepare_command(package)
     if prepare:
         print(f"-- {label}: {' '.join(prepare)}", flush=True)
         status, output = _run(prepare, package, environment)
         if status:
             first = _first_error(output)
-            return status, f"{' '.join(prepare)} failed (exit {status})" + (f": {first}" if first else "")
+            return _PackageCheck(status, f"{' '.join(prepare)} failed (exit {status})" + (f": {first}" if first else ""))
     print(f"-- {label}: {' '.join(command)}", flush=True)
     status, output = _run(command, package, environment)
-    return status, _first_error(output) if status else None
+    if not status:
+        return _PackageCheck(0)
+    return _diagnosed(status, output, package, repo) or _PackageCheck(status, _first_error(output))
+
+
+def _type_check_outcome(checks: List[Tuple[str, _PackageCheck]]) -> Tuple[str, bool]:
+    """The outcome of a directory whose packages' type checks (`where`, result) are `checks`, and
+    whether it passed: a package not checked for its own build output, or without inputs, fails nothing."""
+    missing_build = [path for _, check in checks for path in check.missing_build]
+    checked = [(where, check) for where, check in checks if not check.missing_build and not check.no_inputs]
+    failed = [(where, check.first) for where, check in checked if check.status]
+    needs_build = f"not checked: needs its own build ({', '.join(missing_build)})"
+    unchecked = f"; {needs_build}" if missing_build else ""
+    if failed:
+        places = ", ".join(where for where, _ in failed)
+        where, first = next(((where, first) for where, first in failed if first), failed[0])
+        detail = f"; first error ({where}): {first}" if first else ""
+        return f"type check failed in {places}{detail}{unchecked}", False
+    if checked:
+        return f"passed{unchecked}", True
+    if missing_build:
+        return needs_build, True
+    if checks:  # each one without inputs
+        return "installed; no type check found (tsconfig has no inputs)", True
+    return "installed; no type check found", True
 
 
 def _check_directory(project: str, repo: Path, directory: str) -> Result:
@@ -256,25 +370,15 @@ def _check_directory(project: str, repo: Path, directory: str) -> Result:
     if status:
         first = _first_error(output)
         return Result(project, directory, f"install failed (exit {status})" + (f": {first}" if first else "") + note, False)
-    failed: List[Tuple[str, Optional[str]]] = []
-    checked = 0
+    checks: List[Tuple[str, _PackageCheck]] = []
     for package in [workspace] if _type_check_script(workspace) else projects:
         command = type_check_command(package)
         if command is None:
             continue
         where = package.relative_to(repo).as_posix() or "."
-        checked += 1
-        status, first = _type_check(f"{project} {where}", package, command, environment)
-        if status:
-            failed.append((where, first))
-    if failed:
-        places = ", ".join(where for where, _ in failed)
-        where, first = next(((where, first) for where, first in failed if first), failed[0])
-        detail = f"; first error ({where}): {first}" if first else ""
-        return Result(project, directory, f"type check failed in {places}{detail}{note}", False)
-    if not checked:
-        return Result(project, directory, f"installed; no type check found{note}", True)
-    return Result(project, directory, f"passed{note}", True)
+        checks.append((where, _type_check(f"{project} {where}", package, repo, command, environment)))
+    outcome, passed = _type_check_outcome(checks)
+    return Result(project, directory, outcome + note, passed)
 
 
 def _check(consumer: Consumer, server_url: str, ccc_commit: str, clone_environment: Mapping[str, str]) -> List[Result]:
