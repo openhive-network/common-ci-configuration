@@ -10,10 +10,15 @@ pnpm-workspace.yaml), and in each directory whose lockfile follows the catalogs
 run `pnpm install --no-frozen-lockfile` and the type check: the directory's
 `typecheck`, `type-check` or `tsc` script when its package.json has one, else
 that script or `tsc --noEmit -p tsconfig.json` in each workspace project.
+A dependency on a package of the clone that ships its type declarations only
+once built (wax's examples and signers on `@hiveio/wax`, which needs the wasm
+toolchain) is pointed at the catalog entry pinning its published version
+before the install, which then also takes ccc's scoped registries
+(pnpm-config/.npmrc); a dependency no catalog pins is left as it is.
 
   python3 scripts/python/pnpm-catalog-consumer-check.py [--commit SHA] [--summary FILE]
 
-Each consumer's result is printed and written to FILE. Exit 1 when a consumer
+Each consumer's result, with the first error of a failure, is printed and written to FILE. Exit 1 when a consumer
 could not be cloned, installed or type-checked. The consumers are cloned with
 CATALOG_RESYNC_TOKEN when it is set (read only), anonymously otherwise; their
 install and type check, which run the consumer's own code, get an environment
@@ -23,18 +28,27 @@ on PATH must be the version docker-bake.hcl's PNPM_VERSION gives the images.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Mapping, NamedTuple, Optional
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 
 from pnpm_catalog_consumers import (
     ROOT, Consumer, ConsumerError, clone, git_auth_environment, point_at, start)
+from pnpm_catalogs import Catalogs, CatalogError, read_catalogs
 
 TOKEN_VARIABLE = "CATALOG_RESYNC_TOKEN"
 INSTALL_COMMAND = ("pnpm", "install", "--no-frozen-lockfile")
 TYPE_CHECK_SCRIPTS = ("typecheck", "type-check", "tsc")
+_NPMRC = ROOT / "pnpm-config" / ".npmrc"
+_SCOPED_REGISTRY = re.compile(r"@[^\s=]+:registry=\S+")
+_DEPENDENCY_FIELDS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
+# Tried in order: a TypeScript diagnostic, then a pnpm error code, then any line naming an error.
+_ERROR_PATTERNS = (re.compile(r"error TS\d+"), re.compile(r"ERR_PNPM_\w+"), re.compile(r"\berror\b", re.IGNORECASE))
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+_MAX_ERROR_LENGTH = 300
 _CREDENTIAL_VARIABLES = frozenset((
     TOKEN_VARIABLE, "CI_JOB_TOKEN", "CI_BUILD_TOKEN", "CI_JOB_JWT", "CI_JOB_JWT_V1", "CI_JOB_JWT_V2",
     "CI_REGISTRY_PASSWORD", "CI_DEPENDENCY_PROXY_PASSWORD", "CI_DEPLOY_PASSWORD", "CI_REPOSITORY_URL"))
@@ -57,9 +71,13 @@ def _consumer_environment(environment: Mapping[str, str]) -> Dict[str, str]:
             if name not in _CREDENTIAL_VARIABLES and not name.startswith("GIT_CONFIG_") and not (token and token in value)}
 
 
+def _manifest(package: Path) -> Dict[str, Any]:
+    path = package / "package.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
 def _type_check_script(project: Path) -> Optional[str]:
-    manifest = project / "package.json"
-    scripts = json.loads(manifest.read_text(encoding="utf-8")).get("scripts", {}) if manifest.is_file() else {}
+    scripts = _manifest(project).get("scripts", {})
     return next((name for name in TYPE_CHECK_SCRIPTS if name in scripts), None)
 
 
@@ -74,38 +92,148 @@ def type_check_command(project: Path) -> Optional[List[str]]:
     return None
 
 
-def _workspace_projects(directory: Path, environment: Mapping[str, str]) -> List[Path]:
-    """The workspace root `directory` when its package.json has a type-check script (it checks the
-    whole workspace), else every project of the workspace, root included."""
-    if _type_check_script(directory):
-        return [directory]
+def _listed_projects(directory: Path, environment: Mapping[str, str]) -> List[Path]:
+    """Every project of the workspace at `directory`, root included."""
     listed = subprocess.run(["pnpm", "list", "--recursive", "--depth", "-1", "--parseable"], cwd=directory, check=True,
                             stdout=subprocess.PIPE, text=True, env=environment).stdout
     return [Path(line) for line in listed.splitlines() if line.strip()] or [directory]
 
 
+def _local_package(project: Path, name: str, spec: Any, members: Mapping[str, Path]) -> Optional[Path]:
+    """The directory in the clone `project`'s dependency `name`: `spec` takes its package from
+    (a `file:`, `link:` or `workspace:` spec), None for any other spec."""
+    if not isinstance(spec, str):
+        return None
+    protocol, _, target = spec.partition(":")
+    if protocol in ("file", "link") or (protocol == "workspace" and target.startswith(".")):
+        return (project / target).resolve()
+    if protocol == "workspace":
+        return members.get(name)
+    return None
+
+
+def _needs_build(package: Path) -> bool:
+    """True when the package at `package` declares type declarations (else a main entry) its
+    checkout does not have, i.e. they only exist once it is built."""
+    manifest = _manifest(package)
+    entry = manifest.get("types") or manifest.get("typings") or manifest.get("main")
+    return isinstance(entry, str) and not (package / entry).is_file()
+
+
+def _override_package(selector: str) -> str:
+    """The package a pnpm `overrides` selector (`pkg`, `pkg@range`, `parent>pkg`) overrides."""
+    package = selector.rpartition(">")[2]
+    at = package.rfind("@")
+    return package[:at] if at > 0 else package
+
+
+def _local_dependencies(manifest: Dict[str, Any]) -> List[Tuple[Dict[str, str], str, str]]:
+    """(mapping, key, package name) of every dependency and pnpm override `manifest` declares."""
+    entries = [(dependencies, name, name) for field in _DEPENDENCY_FIELDS
+               for dependencies in [manifest.get(field, {})] for name in dependencies]
+    overrides = manifest.get("pnpm", {}).get("overrides", {})
+    return entries + [(overrides, selector, _override_package(selector)) for selector in overrides]
+
+
+def _use_published_packages(projects: List[Path], catalogs: Catalogs) -> List[str]:
+    """Point each dependency (or pnpm override) of `projects` on a package of the clone that needs
+    a build (_needs_build) at the first catalog pinning that package, rewriting the projects'
+    package.json; returns the names of the packages it repointed."""
+    names = ((_manifest(project).get("name"), project) for project in projects)
+    members: Dict[str, Path] = {name: project for name, project in names if isinstance(name, str)}
+    repointed = set()
+    for project in projects:
+        manifest = _manifest(project)
+        changed = False
+        for mapping, key, name in _local_dependencies(manifest):
+            catalog = next((catalog for catalog, packages in catalogs.items() if name in packages), None)
+            package = _local_package(project, name, mapping[key], members)
+            if catalog and package and _needs_build(package):
+                mapping[key] = f"catalog:{catalog}"
+                repointed.add(name)
+                changed = True
+        if changed:
+            (project / "package.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return sorted(repointed)
+
+
+def _catalogs(workspace: Path) -> Catalogs:
+    manifest = workspace / "pnpm-workspace.yaml"
+    if not manifest.is_file():
+        return {}
+    try:
+        return read_catalogs(manifest.read_text(encoding="utf-8"))
+    except CatalogError as error:
+        print(f"-- {manifest}: catalogs not readable, local packages are not repointed: {error}", flush=True)
+        return {}
+
+
+def _registry_options() -> List[str]:
+    """pnpm options giving an install ccc's scoped registries, which hold the published versions the catalogs pin."""
+    lines = (line.strip() for line in _NPMRC.read_text(encoding="utf-8").splitlines())
+    return [f"--config.{line}" for line in lines if _SCOPED_REGISTRY.fullmatch(line)]
+
+
+def _first_error(output: str) -> Optional[str]:
+    """The first line of `output` naming an error, by _ERROR_PATTERNS precedence; None without one."""
+    lines = [_ANSI_ESCAPE.sub("", line).strip() for line in output.splitlines()]
+    for pattern in _ERROR_PATTERNS:
+        found = next((line for line in lines if pattern.search(line)), None)
+        if found:
+            return found[:_MAX_ERROR_LENGTH]
+    return None
+
+
+def _run(command: List[str], cwd: Path, environment: Mapping[str, str]) -> Tuple[int, str]:
+    """Run `command`, copying its output to stdout as it comes; returns its exit status and output."""
+    output = []
+    with subprocess.Popen(command, cwd=cwd, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          text=True, errors="replace") as process:
+        for line in process.stdout or ():
+            sys.stdout.write(line)
+            output.append(line)
+    sys.stdout.flush()
+    return process.returncode, "".join(output)
+
+
 def _check_directory(project: str, repo: Path, directory: str) -> Result:
     workspace = repo / directory
     environment = _consumer_environment(os.environ)
-    print(f"-- {project} {directory}: {' '.join(INSTALL_COMMAND)}", flush=True)
-    installed = subprocess.run(list(INSTALL_COMMAND), cwd=workspace, check=False, env=environment)
-    if installed.returncode:
-        return Result(project, directory, f"install failed (exit {installed.returncode})", False)
-    failed, checked = [], 0
-    for package in _workspace_projects(workspace, environment):
+    try:
+        projects = _listed_projects(workspace, environment)
+    except subprocess.CalledProcessError as listing:
+        return Result(project, directory, f"workspace projects not listed (exit {listing.returncode})", False)
+    install = list(INSTALL_COMMAND)
+    published = _use_published_packages(projects, _catalogs(workspace))
+    note = f"; {', '.join(published)} from the catalogs' published versions" if published else ""
+    if published:
+        print(f"-- {project} {directory}: {', '.join(published)} need a build: using the catalogs' published versions", flush=True)
+        install += _registry_options()
+    print(f"-- {project} {directory}: {' '.join(install)}", flush=True)
+    status, output = _run(install, workspace, environment)
+    if status:
+        first = _first_error(output)
+        return Result(project, directory, f"install failed (exit {status})" + (f": {first}" if first else "") + note, False)
+    failed: List[Tuple[str, Optional[str]]] = []
+    checked = 0
+    for package in [workspace] if _type_check_script(workspace) else projects:
         command = type_check_command(package)
         if command is None:
             continue
         where = package.relative_to(repo).as_posix() or "."
         print(f"-- {project} {where}: {' '.join(command)}", flush=True)
         checked += 1
-        if subprocess.run(command, cwd=package, check=False, env=environment).returncode:
-            failed.append(where)
+        status, output = _run(command, package, environment)
+        if status:
+            failed.append((where, _first_error(output)))
     if failed:
-        return Result(project, directory, f"type check failed in {', '.join(failed)}", False)
+        places = ", ".join(where for where, _ in failed)
+        where, first = next(((where, first) for where, first in failed if first), failed[0])
+        detail = f"; first error ({where}): {first}" if first else ""
+        return Result(project, directory, f"type check failed in {places}{detail}{note}", False)
     if not checked:
-        return Result(project, directory, "installed; no type check found", True)
-    return Result(project, directory, "passed", True)
+        return Result(project, directory, f"installed; no type check found{note}", True)
+    return Result(project, directory, f"passed{note}", True)
 
 
 def _check(consumer: Consumer, server_url: str, ccc_commit: str, clone_environment: Mapping[str, str]) -> List[Result]:
