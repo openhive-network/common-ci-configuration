@@ -27,19 +27,19 @@ index 67055253..00000000
 -     }
 -   }
 diff --git a/package/boost/boost.hash b/package/boost/boost.hash
-index 14403758..808dabc4 100644
+index 14403758..c41fd4d5 100644
 --- a/package/boost/boost.hash
 +++ b/package/boost/boost.hash
 @@ -1,5 +1,5 @@
 -# From https://www.boost.org/users/history/version_1_83_0.html
 -sha256  6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e  boost_1_83_0.tar.bz2
-+# From https://www.boost.org/users/history/version_1_88_0.html
-+sha256  46d9d2c06637b219270877c9e16155cbd015b6dc84349af064c088e9b5b12f7b  boost_1_88_0.tar.bz2
++# From https://www.boost.org/users/history/version_1_90_0.html
++sha256  49551aff3b22cbc5c5a9ed3dbc92f0e23ea50a0f7325b0d198b705e8ee3fc305  boost_1_90_0.tar.bz2
  
  # Locally computed
  sha256  c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566  LICENSE_1_0.txt
 diff --git a/package/boost/boost.mk b/package/boost/boost.mk
-index 1dcc4a4b..8b3ae9fc 100644
+index 1dcc4a4b..f475cd7c 100644
 --- a/package/boost/boost.mk
 +++ b/package/boost/boost.mk
 @@ -4,7 +4,7 @@
@@ -47,7 +47,7 @@ index 1dcc4a4b..8b3ae9fc 100644
  ################################################################################
  
 -BOOST_VERSION = 1.83.0
-+BOOST_VERSION = 1.88.0
++BOOST_VERSION = 1.90.0
  BOOST_SOURCE = boost_$(subst .,_,$(BOOST_VERSION)).tar.bz2
  BOOST_SITE = https://archives.boost.io/release/$(BOOST_VERSION)/source
  BOOST_INSTALL_STAGING = YES
