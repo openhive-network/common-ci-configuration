@@ -157,14 +157,40 @@ _touch_lock() {
     fi
 }
 
-# Create cache type directory with world-writable permissions
-# This ensures different container UIDs can write to the shared NFS cache
+# Create a cache directory with world-writable permissions
+# Jobs run as mixed UIDs (root and 1000), so every directory between CACHE_NFS_PATH
+# and $dir must be world-accessible, not just the leaf: mkdir -p creates parents
+# with the caller's umask (077 for root jobs), and whichever UID creates a cache
+# type directory first would otherwise lock out the others.
+# Returns 1 when a directory stays not world-accessible (e.g. owned by another
+# UID and no sudo), since every later write into it would fail anyway.
 _ensure_cache_dir() {
     local dir="$1"
-    mkdir -p "$dir" 2>/dev/null || sudo mkdir -p "$dir" 2>/dev/null || true
-    # Make directory world-writable so any UID can create files
-    # Try without sudo first, then with sudo if that fails
-    chmod 777 "$dir" 2>/dev/null || sudo chmod 777 "$dir" 2>/dev/null || true
+    local nfs_root="${CACHE_NFS_PATH%/}"
+
+    local -a dirs=("$dir")
+    local parent
+    parent=$(dirname "$dir")
+    while [[ "$parent" == "$nfs_root"/* ]]; do
+        dirs=("$parent" "${dirs[@]}")
+        parent=$(dirname "$parent")
+    done
+
+    (umask 000 && mkdir -p "$dir") 2>/dev/null || sudo mkdir -p "$dir" 2>/dev/null || true
+
+    local d mode
+    for d in "${dirs[@]}"; do
+        mode=$(stat -c '%a' "$d" 2>/dev/null) || {
+            _error "Cannot create cache directory: $d"
+            return 1
+        }
+        (( (8#$mode & 8#7) == 7 )) && continue
+        # Try without sudo first, then with sudo if that fails
+        if ! chmod 777 "$d" 2>/dev/null && ! sudo chmod 777 "$d" 2>/dev/null; then
+            _error "Cache directory $d is not world-accessible (mode $mode, owner $(stat -c '%U' "$d" 2>/dev/null)) and chmod failed; other job UIDs cannot use it"
+            return 1
+        fi
+    done
 }
 
 # Write lock holder info for debugging stale locks
@@ -1114,7 +1140,7 @@ cmd_put() {
 
         # Create tar archive (local I/O on NFS host, still fast)
         _log "Storing cache on NFS host: $NFS_TAR_FILE"
-        _ensure_cache_dir "$(dirname "$NFS_TAR_FILE")"
+        _ensure_cache_dir "$(dirname "$NFS_TAR_FILE")" || return 1
         _touch_lock "$NFS_TAR_LOCK"
 
         # Check for stale locks before attempting to acquire
@@ -1131,7 +1157,7 @@ cmd_put() {
         fi
 
         # Write metadata
-        mkdir -p "$NFS_CACHE_DIR"
+        _ensure_cache_dir "$NFS_CACHE_DIR"
         _write_metadata "$cache_type" "$cache_key" "$local_source"
         _update_lru "$cache_type" "$cache_key"
         _log "Cache stored successfully on NFS host"
@@ -1208,7 +1234,7 @@ cmd_put() {
         return 0
     fi
 
-    _ensure_cache_dir "$(dirname "$NFS_TAR_FILE")"
+    _ensure_cache_dir "$(dirname "$NFS_TAR_FILE")" || return 1
     _touch_lock "$NFS_TAR_LOCK"
 
     # Check for stale locks before attempting to acquire
@@ -1254,7 +1280,7 @@ LOCKINFO
     # Write metadata next to tar file (if NFS push succeeded)
     if [[ -f "$NFS_TAR_FILE" ]]; then
         local TAR_METADATA="${NFS_TAR_FILE%.tar}/.metadata"
-        mkdir -p "$(dirname "$TAR_METADATA")"
+        _ensure_cache_dir "$(dirname "$TAR_METADATA")"
         _write_metadata "$cache_type" "$cache_key" "$local_source"
         mv "$METADATA_FILE" "$TAR_METADATA" 2>/dev/null || true
         _update_lru "$cache_type" "$cache_key"
