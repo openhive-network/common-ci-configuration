@@ -511,14 +511,6 @@ BuildKit frontend for advanced Dockerfile features.
 
 **Current version:** `1.11`
 
-### tox-test-runner (RETIRED)
-
-**Base:** Alpine (python:3.11-alpine)
-
-No remaining consumers (hafah's pattern tests use
-`.haf_app_pattern_tests_template`, which is pytest-based). Scheduled for
-removal together with its bake target and template block.
-
 ## Python Version Summary
 
 | Image | Python Version | Notes |

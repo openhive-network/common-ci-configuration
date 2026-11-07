@@ -44,9 +44,10 @@ Images are built using Docker BuildKit with `docker-bake.hcl`:
 docker buildx bake <target>
 
 # Available targets: benchmark-test-runner, docker-builder, docker-dind,
-# python-scripts, tox-test-runner, emsdk, psql, dockerfile, nginx,
-# postgrest, alpine, python, python_runtime, python_development,
-# python-test-tools, node-test-tools, node-test-tools-pg, node-test-tools-browser
+# python-scripts, emsdk, psql, dockerfile, nginx, postgrest, alpine,
+# python, python_runtime, python_development, ci-base-image,
+# ci-base-image-ubuntu, haf-app-test-runner, python-test-tools,
+# node-test-tools, node-test-tools-pg, node-test-tools-browser
 # (node-test-tools-images builds all three node images)
 ```
 
@@ -60,7 +61,7 @@ Templates are in `templates/` and are included by downstream projects:
 |----------|---------|
 | `docker_image_jobs.gitlab-ci.yml` | Docker image building/cleanup |
 | `npm_projects.gitlab-ci.yml` | npm/pnpm package builds |
-| `test_jobs.gitlab-ci.yml` | pytest, jmeter, tox test runners |
+| `test_jobs.gitlab-ci.yml` | pytest, jmeter test runners |
 | `python_projects.gitlab-ci.yml` | Python linting/testing |
 | `haf_app_testing.gitlab-ci.yml` | HAF app change detection, DinD testing, Tavern |
 | `source_change_detection.gitlab-ci.yml` | Source change detection, skip rules, upstream image lookup |
