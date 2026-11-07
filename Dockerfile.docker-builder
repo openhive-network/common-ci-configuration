@@ -12,10 +12,6 @@ ARG DOCKER_VERSION
 ARG DOCKER_COMPOSE_PLUGIN_VERSION
 ARG DOCKER_BUILDX_PLUGIN_VERSION
 
-# Disable buildx attestations (provenance/SBOM) to avoid panic in buildkit
-# when parsing empty digests. Can be removed when buildkit bug is fixed.
-# See: https://github.com/moby/buildkit/issues/4778
-ENV BUILDX_NO_DEFAULT_ATTESTATIONS=1
 # Read by docker-entrypoint.sh, which points DOCKER_HOST at the `docker` DinD
 # service (with TLS when its client certs are mounted)
 ENV DOCKER_TLS_CERTDIR=/certs
