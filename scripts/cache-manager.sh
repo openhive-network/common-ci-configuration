@@ -31,6 +31,8 @@
 #   CACHE_QUIET           - Suppress verbose output (default: false)
 #   SHARED_BLOCK_LOG_LOCAL - Local block_log path (default: /blockchain/block_log_5m)
 #   SHARED_BLOCK_LOG_NFS   - NFS block_log path (default: /nfs/ci-cache/hive/blockchain/block_log_5m)
+#   BLOCK_LOG_SOURCE_DIR   - block_log linked into hive/haf caches extracted with an empty blockchain dir
+#                            (falls back to SHARED_BLOCK_LOG_DIR, then /blockchain/block_log_5m)
 
 set -euo pipefail
 
@@ -930,7 +932,7 @@ cmd_get() {
                 # Create block_log symlinks if blockchain dir exists but is empty
                 blockchain_dir='${local_dest}/datadir/blockchain'
                 if [ -d \"\$blockchain_dir\" ] && [ -z \"\$(ls -A \"\$blockchain_dir\" 2>/dev/null)\" ]; then
-                    for block_file in \"${SHARED_BLOCK_LOG_DIR:-/blockchain/block_log_5m}\"/block_log* ; do
+                    for block_file in \"${BLOCK_LOG_SOURCE_DIR:-${SHARED_BLOCK_LOG_DIR:-/blockchain/block_log_5m}}\"/block_log* ; do
                         if [ -f \"\$block_file\" ]; then
                             ln -sf \"\$block_file\" \"\$blockchain_dir/\$(basename \"\$block_file\")\" 2>/dev/null || true
                         fi
