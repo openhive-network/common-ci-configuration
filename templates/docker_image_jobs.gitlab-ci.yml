@@ -13,6 +13,11 @@ variables:
   # cache miss can take, so a cold wheel would fail the job instead of delaying it.
   PIP_DEFAULT_TIMEOUT: "120"
   PIP_RETRIES: "10"
+  # Kill switch for buildx's default provenance attestation. "0" pushes tags as
+  # OCI indexes carrying an attestation manifest; set "1" as a project/group
+  # CI/CD variable to push plain manifests again without rebuilding
+  # docker-builder. Never leave it empty: buildx rejects "" and fails the build.
+  BUILDX_NO_DEFAULT_ATTESTATIONS: "0"
 
 include:
   - local: templates/base.gitlab-ci.yml
@@ -54,6 +59,9 @@ include:
         BUILDKIT_CONFIG_ARG="--config /etc/buildkitd.toml"
       fi
       docker buildx create --driver docker-container --name docker-container-builder --use $BUILDKIT_CONFIG_ARG builder-context
+      # The buildkit image is not pinned, so record the version this job builds with
+      docker buildx inspect --bootstrap | grep -E '^(BuildKit version|Driver):' || true
+      echo "BUILDX_NO_DEFAULT_ATTESTATIONS=${BUILDX_NO_DEFAULT_ATTESTATIONS-<unset>}"
       echo -e "\e[0Ksection_end:$(date +%s):buildkit_config\r\e[0K"
 
 .script_docker_fix_workspace:

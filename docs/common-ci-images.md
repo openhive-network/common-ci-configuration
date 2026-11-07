@@ -89,6 +89,20 @@ already runs docker-builder with the DinD service and expects Python test
 tooling in it (the Alpine image carried Python 3.12 for tavern/tox): keeping
 the image name keeps them working while giving them the shared tool versions.
 
+**Attestations:** buildx attaches its default provenance attestation, so a
+pushed tag is an OCI index holding the image manifest plus an
+`attestation-manifest` entry (`docker buildx imagetools inspect <tag>` shows
+both). The image no longer sets `BUILDX_NO_DEFAULT_ATTESTATIONS`; the
+`docker_image_jobs` template sets it to `"0"`. If attestations break a build or
+a consumer that expects a plain manifest digest, set the CI/CD variable
+`BUILDX_NO_DEFAULT_ATTESTATIONS=1` on the project or group (it overrides the
+template value, no image rebuild needed). Never set it empty: buildx fails with
+`invalid BUILDX_NO_DEFAULT_ATTESTATIONS`. Builds that pass `--provenance=false`
+(this repository's bake jobs and `.docker_build_job_template`) are unaffected
+either way. `.script_docker_setup_buildkit` logs the BuildKit version of the
+builder it creates (the buildkit image is not pinned). Attestations had been disabled for a buildkit panic (`no ':' separator in digest ""`)
+that no longer reproduces with the bake `DOCKER_BUILDX_PLUGIN_VERSION`.
+
 **Used by:**
 - `prepare_hived_image` jobs in hive/haf
 - `prepare_haf_data` replay jobs
