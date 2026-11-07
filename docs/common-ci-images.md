@@ -30,12 +30,14 @@ variable (`select-python` wrapper).
 **Includes:**
 - C++ build toolchain (gcc-toolset, cmake 3.28.6, ninja, sccache, clang 21);
   sccache is `SCCACHE_VERSION` (see "sccache" below)
-- Boost (built from source, static, -fPIC), OpenSSL, snappy, zopfli
+- Boost 1.90.0 (built from source, static, -fPIC), OpenSSL, snappy, zopfli
 - Prebuilt RocksDB (commit-hash-indexed) and the aarch64 buildroot cross
-  toolchain (`/opt/hive/cross/aarch64`)
+  toolchain (`/opt/hive/cross/aarch64`), whose sysroot carries the same Boost
+  version (since `pypa_2_28-pg18-7`; earlier tags ship Boost 1.88 there)
 - Poetry, Docker CLI + buildx (`DOCKER_VERSION`, `DOCKER_BUILDX_PLUGIN_VERSION`), PostgreSQL 18 client libraries
 
-**Current version:** `pypa_2_28-pg18-6` (sccache 0.19.0; `pypa_2_28-pg18-5`
+**Current version:** `pypa_2_28-pg18-7` (aarch64 sysroot on Boost 1.90.0;
+sccache 0.19.0 since `pypa_2_28-pg18-6`; `pypa_2_28-pg18-5`
 and older ship sccache 0.8.1; `pypa_2_28-pg18-4` is the canonical tag that
 superseded `pypa_2_28-4`, `pypa_2_28-pg18-3` and `pypa_2_28-pg18-arm-1`)
 
@@ -549,7 +551,7 @@ Image versions are defined in `docker-bake.hcl`:
 
 | Variable | Current Value | Description |
 |----------|---------------|-------------|
-| `CI_BASE_IMAGE_VERSION` | pypa_2_28-pg18-6 | manylinux CI base image |
+| `CI_BASE_IMAGE_VERSION` | pypa_2_28-pg18-7 | manylinux CI base image |
 | `CI_BASE_IMAGE_UBUNTU_VERSION` | ubuntu26.04-pg18-3 | Ubuntu CI base image (HAF) |
 | `HAF_APP_TEST_RUNNER_VERSION` | 4.0 | HAF app test runner (also tagged `develop` and `HAF_APP_TEST_RUNNER_PINNED_TAG`) |
 | `PYTHON_RUNTIME_VERSION` | 3.14-u26.04-1 | python_runtime / python_development |
