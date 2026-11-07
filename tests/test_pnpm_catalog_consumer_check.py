@@ -69,6 +69,36 @@ def test_type_check_prefers_a_script_then_the_tsconfig(tmp_path: Path, scripts: 
     assert check_module.type_check_command(_package(tmp_path / "app", scripts, tsconfig)) == expected
 
 
+def _vue_package(directory: Path, manifest: Dict[str, Any], tsconfig: bool = True, nuxt_config: bool = False) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "package.json").write_text(json.dumps({"name": directory.name, **manifest}))
+    if tsconfig:
+        (directory / "tsconfig.json").write_text('{"extends": "./.nuxt/tsconfig.json"}')
+    if nuxt_config:
+        (directory / "nuxt.config.ts").write_text("export default defineNuxtConfig({})\n")
+    return directory
+
+
+@pytest.mark.parametrize("manifest, tsconfig, nuxt_config, expected", [
+    ({"dependencies": {"nuxt": "catalog:vue-toolset"}, "devDependencies": {"vue-tsc": "catalog:vue-toolset"}}, True, True,
+     ["pnpm", "exec", "nuxi", "typecheck"]),
+    ({"devDependencies": {"nuxt": "catalog:vue-toolset", "vue-tsc": "catalog:vue-toolset"}}, True, False,
+     ["pnpm", "exec", "nuxi", "typecheck"]),
+    ({"devDependencies": {"vue-tsc": "catalog:vue-toolset"}}, False, True, ["pnpm", "exec", "nuxi", "typecheck"]),
+    ({"dependencies": {"nuxt": "catalog:vue-toolset", "vue": "catalog:vue-toolset"}}, True, True, None),
+    ({"devDependencies": {"vue-tsc": "catalog:vue-toolset"}}, True, False,
+     ["pnpm", "exec", "vue-tsc", "--noEmit", "-p", "tsconfig.json"]),
+    ({"devDependencies": {"vue-tsc": "catalog:vue-toolset"}}, False, False, None),
+    ({"devDependencies": {"typescript": "catalog:typescript-toolset"}}, True, False,
+     ["pnpm", "exec", "tsc", "--noEmit", "-p", "tsconfig.json"]),
+    ({"scripts": {"typecheck": "vue-tsc -b"}, "dependencies": {"nuxt": "catalog:vue-toolset"}}, True, True,
+     ["pnpm", "run", "typecheck"]),
+])
+def test_vue_and_nuxt_projects_get_their_own_type_checker(
+        tmp_path: Path, manifest: Dict[str, Any], tsconfig: bool, nuxt_config: bool, expected: List[str]) -> None:
+    assert check_module.type_check_command(_vue_package(tmp_path / "app", manifest, tsconfig, nuxt_config)) == expected
+
+
 @pytest.fixture(name="pnpm_log")
 def _pnpm_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     tools = tmp_path / "tools"
@@ -239,3 +269,37 @@ def test_workspace_members_take_the_published_root_package(tmp_path: Path, pnpm_
     assert _dependencies(signer) == {
         "devDependencies": {"@hiveio/wax": "catalog:hiveio-toolset"}, "peerDependencies": {"@hiveio/hb-auth": "catalog:hiveio-toolset"}}
     assert pnpm_log.read_text().splitlines()[-1] == "signer: run typecheck"
+
+
+def test_nuxt_project_is_prepared_before_its_type_check(tmp_path: Path, pnpm_log: Path) -> None:
+    repo = tmp_path / "repo"
+    _package(repo, '{"build": "pnpm -r build"}')
+    _vue_package(repo / "packages" / "app", {"dependencies": {"nuxt": "catalog:vue-toolset"},
+                                             "devDependencies": {"vue-tsc": "catalog:vue-toolset"}}, nuxt_config=True)
+    _vue_package(repo / "packages" / "example", {"dependencies": {"nuxt": "catalog:vue-toolset"}}, nuxt_config=True)
+    _vue_package(repo / "packages" / "ui", {"devDependencies": {"vue-tsc": "catalog:vue-toolset"}})
+    _vue_package(repo / "packages" / "site", {"scripts": {"type-check": "nuxt typecheck"}, "dependencies": {"nuxt": "4"}})
+
+    assert check_module._check_directory("hive/app", repo, ".") == check_module.Result("hive/app", ".", "passed", True)
+    assert pnpm_log.read_text().splitlines() == [
+        "repo: list --recursive --depth -1 --parseable",
+        "repo: install --no-frozen-lockfile",
+        "app: exec nuxi prepare",
+        "app: exec nuxi typecheck",
+        "site: run type-check",
+        "ui: exec vue-tsc --noEmit -p tsconfig.json",
+    ]
+
+
+def test_failed_nuxt_prepare_fails_the_project_without_type_checking_it(
+        tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _vue_package(tmp_path / "repo", {"devDependencies": {"nuxt": "catalog:vue-toolset", "vue-tsc": "catalog:vue-toolset"}},
+                        nuxt_config=True)
+    monkeypatch.setenv("PNPM_FAIL", "exec nuxi prepare")
+    monkeypatch.setenv("PNPM_FAIL_OUTPUT", "ERROR  Cannot find module 'shadcn-nuxt'")
+
+    assert check_module._check_directory("hive/app", repo, ".") == check_module.Result(
+        "hive/app", ".", "type check failed in .; first error (.): pnpm exec nuxi prepare failed (exit 1): "
+        "ERROR  Cannot find module 'shadcn-nuxt'", False)
+    assert pnpm_log.read_text().splitlines() == [
+        "repo: list --recursive --depth -1 --parseable", "repo: install --no-frozen-lockfile", "repo: exec nuxi prepare"]
