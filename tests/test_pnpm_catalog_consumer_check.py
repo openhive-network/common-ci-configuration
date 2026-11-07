@@ -303,3 +303,79 @@ def test_failed_nuxt_prepare_fails_the_project_without_type_checking_it(
         "ERROR  Cannot find module 'shadcn-nuxt'", False)
     assert pnpm_log.read_text().splitlines() == [
         "repo: list --recursive --depth -1 --parseable", "repo: install --no-frozen-lockfile", "repo: exec nuxi prepare"]
+
+
+# Captured from `tsc --noEmit -p tsconfig.json` in hive/wax ts, whose sources import its unbuilt wasm output:
+# visitor.ts reaches it only through protocol.ts.
+WAX_TS_OUTPUT = """wasm/lib/detailed/base.ts(5,28): error TS2307: Cannot find module '../build_wasm/wax.common.js' or its corresponding type declarations.
+wasm/lib/detailed/protocol.ts(4,29): error TS2307: Cannot find module '../proto/transaction.js' or its corresponding type declarations.
+wasm/lib/detailed/visitor.ts(22,14): error TS2420: Class 'OperationVisitor<R>' incorrectly implements interface 'TOperationVisitor<R>'.
+  Index signature for type 'string' is missing in type 'OperationVisitor<R>'.
+wasm/lib/index.ts(8,32): error TS2307: Cannot find module './build_wasm/wax.common.js' or its corresponding type declarations.
+"""
+
+
+def _wax_ts(repo: Path) -> Path:
+    package = _package(repo / "ts", '{"build": "rollup -c"}', tsconfig=True)
+    sources = package / "wasm" / "lib"
+    (sources / "detailed").mkdir(parents=True)
+    (sources / "index.ts").write_text('export * from "./detailed/base.js";\nimport Wax from "./build_wasm/wax.common.js";\n')
+    (sources / "detailed" / "base.ts").write_text('import type { MainModule } from "../build_wasm/wax.common.js";\n')
+    (sources / "detailed" / "protocol.ts").write_text('export { transaction } from "../proto/transaction.js";\n')
+    (sources / "detailed" / "visitor.ts").write_text('import {\n  operation\n} from "./protocol.js";\n')
+    (sources / "detailed" / "chain.ts").write_text('import axios from "axios";\n')
+    return package
+
+
+def test_type_check_needing_only_its_own_build_output_is_not_checked(
+        tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    _wax_ts(repo)
+    monkeypatch.setenv("PNPM_FAIL", "exec tsc --noEmit -p tsconfig.json")
+    monkeypatch.setenv("PNPM_FAIL_OUTPUT", WAX_TS_OUTPUT)
+
+    assert check_module._check_directory("hive/wax", repo, "ts") == check_module.Result(
+        "hive/wax", "ts", "not checked: needs its own build (ts/wasm/lib/build_wasm, ts/wasm/lib/proto)", True)
+
+
+@pytest.mark.parametrize("real_error", [
+    "wasm/lib/detailed/chain.ts(1,19): error TS2307: Cannot find module 'axios' or its corresponding type declarations.",
+    "wasm/lib/detailed/chain.ts:3:7 - error TS2322: Type 'string' is not assignable to type 'number'.",
+    "wasm/lib/detailed/chain.ts(1,19): error TS2307: Cannot find module '../../../../outside.js' or its corresponding type declarations.",
+])
+def test_real_type_error_beside_missing_build_output_fails_naming_it(
+        tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch, real_error: str) -> None:
+    repo = tmp_path / "repo"
+    _wax_ts(repo)
+    monkeypatch.setenv("PNPM_FAIL", "exec tsc --noEmit -p tsconfig.json")
+    monkeypatch.setenv("PNPM_FAIL_OUTPUT", WAX_TS_OUTPUT + f"\x1b[96m{real_error}\x1b[0m\n")
+
+    assert check_module._check_directory("hive/wax", repo, "ts") == check_module.Result(
+        "hive/wax", "ts", f"type check failed in ts; first error (ts): {real_error}", False)
+
+
+def test_missing_build_output_of_one_project_does_not_hide_the_others(
+        tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    _package(repo, '{"build": "pnpm -r build"}')
+    lib = _package(repo / "packages" / "lib", '{"typecheck": "tsc"}')
+    (lib / "src").mkdir()
+    (lib / "src" / "index.ts").write_text('export * from "../build/lib.js";\n')
+    _package(repo / "packages" / "ui", '{"tsc": "tsc"}')
+    monkeypatch.setenv("PNPM_FAIL", "run typecheck")
+    monkeypatch.setenv("PNPM_FAIL_OUTPUT",
+                       "src/index.ts(1,15): error TS2307: Cannot find module '../build/lib.js' or its corresponding type declarations.")
+
+    assert check_module._check_directory("hive/app", repo, ".") == check_module.Result(
+        "hive/app", ".", "passed; not checked: needs its own build (packages/lib/build)", True)
+
+
+def test_tsconfig_without_inputs_is_no_type_check(tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _package(tmp_path / "repo", '{"build": "vite build"}', tsconfig=True)
+    monkeypatch.setenv("PNPM_FAIL", "exec tsc --noEmit -p tsconfig.json")
+    # Captured from tsc 7.0.2 on a tsconfig.json whose include matches no file.
+    monkeypatch.setenv("PNPM_FAIL_OUTPUT", f"error TS18003: No inputs were found in config file '{repo}/tsconfig.json'. "
+                                           "Specified 'include' paths were '[\"src/**/*.ts\"]' and 'exclude' paths were '[]'.")
+
+    assert check_module._check_directory("hive/wax", repo, ".") == check_module.Result(
+        "hive/wax", ".", "installed; no type check found (tsconfig has no inputs)", True)
