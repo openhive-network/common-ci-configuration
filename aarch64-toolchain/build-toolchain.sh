@@ -8,7 +8,7 @@
 # This encapsulates (and fixes the documented gaps of) the procedure in
 # hive/doc/building.md "Support for ARM":
 #   - the buildroot patches are actually applied (git apply), not just copied
-#   - boost is bumped to 1.88.0 to match the regular x64 build
+#   - boost is bumped to 1.90.0 to match the regular x64 build
 #
 # Must run as a NON-root user (buildroot refuses to build several packages as root).
 set -euo pipefail
@@ -36,8 +36,8 @@ cd "$WORK_DIR"
 echo "==> apply hive buildroot config"
 cp "$ASSETS_DIR/buildroot.config" .config
 
-echo "==> apply patches (glibc downgrade, snappy static, boost 1.88)"
-for p in glibc_downgrade.patch snappy_static_build.patch boost_1_88_upgrade.patch; do
+echo "==> apply patches (glibc downgrade, snappy static, boost 1.90)"
+for p in glibc_downgrade.patch snappy_static_build.patch boost_1_90_upgrade.patch; do
   echo "    - $p"
   git apply "$ASSETS_DIR/patches/$p"
 done

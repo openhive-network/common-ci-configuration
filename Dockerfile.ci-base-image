@@ -116,10 +116,10 @@ RUN rm -rf /tmp/rocksdb-build
 # --- aarch64 cross toolchain builder ---
 # Builds a buildroot cross toolchain (x86_64 host -> aarch64 target) used to
 # cross-compile hived for ARM: GCC 14.2.0 / binutils 2.43.1 / glibc 2.35, with an
-# aarch64 sysroot carrying Boost 1.88 (NOTE: native build moved to 1.90; the
-# prebuilt buildroot toolchain still ships 1.88 until it is regenerated), OpenSSL, snappy,
-# zlib, bzip2, readline, liburing, icu. Definition lives in aarch64-toolchain/
-# (config + patches + Toolchain.cmake). buildroot must build as a non-root user.
+# aarch64 sysroot carrying Boost 1.90 (same version as the native build below;
+# keep them in step), OpenSSL, snappy, zlib, bzip2, readline, liburing, icu.
+# Definition lives in aarch64-toolchain/ (config + patches + Toolchain.cmake).
+# buildroot must build as a non-root user.
 # This stage is heavy (~20 min) but fully cached by BuildKit until the toolchain
 # definition changes.
 FROM ${BASE_IMAGE} AS aarch64-toolchain-builder
@@ -398,7 +398,7 @@ RUN git clone --depth 1 --branch 7.8.1 https://github.com/jtv/libpqxx.git /tmp/l
 # - sst_dump tool (in bin/)
 COPY --from=rocksdb-builder /opt/hive/vendor /opt/hive/vendor
 
-# Copy the prebuilt aarch64 cross toolchain (buildroot: GCC 14.2 / glibc 2.35 / Boost 1.88).
+# Copy the prebuilt aarch64 cross toolchain (buildroot: GCC 14.2 / glibc 2.35 / Boost 1.90).
 # Used to cross-compile hived for ARM (see hive/doc/aarch64 and build_arm.sh). The
 # Toolchain.cmake at $CROSS_ROOT/Toolchain.cmake honors the CROSS_ROOT env var.
 COPY --from=aarch64-toolchain-builder /opt/hive/cross /opt/hive/cross

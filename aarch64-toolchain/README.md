@@ -13,9 +13,13 @@ of truth for hive issue #831; the matching hive-side material is in
   - `glibc_downgrade.patch` — pins glibc to 2.35 so binaries run on a wide range
     of arm64 runtimes.
   - `snappy_static_build.patch` — builds snappy as a static lib.
-  - `boost_1_88_upgrade.patch` — bumps buildroot's Boost 1.83 → **1.88.0** to
-    match the x64 ci-base-image build. (Boost `random` is also enabled in
-    `buildroot.config` because 1.88's b2 builds it transitively.)
+  - `boost_1_90_upgrade.patch` — bumps buildroot's Boost 1.83 → **1.90.0** to
+    match the x64 ci-base-image build (Boost 1.90 changed the in-memory layout of
+    containers such as `boost::container::deque`, so hived shared-memory state is
+    only interchangeable between builds using the same Boost). (Boost `random` is
+    also enabled in `buildroot.config` because b2 builds it transitively.
+    `BR2_PACKAGE_BOOST_SYSTEM` stays selected by the other Boost options, but
+    since 1.89 Boost.System is header-only and no `libboost_system` is built.)
 - `Toolchain.cmake` — CMake toolchain file; honors `$CROSS_ROOT` (defaults to the
   baked image path `/opt/hive/cross/aarch64`).
 - `build-toolchain.sh` — clones buildroot, applies config+patches, builds, and
@@ -41,6 +45,6 @@ ELF (runs on ARM hardware, or under `qemu-aarch64`).
 ## Updating
 - New buildroot release: change `BUILDROOT_VERSION` (Dockerfile arg /
   `build-toolchain.sh` default) and re-verify patches apply.
-- Boost bump: update `patches/boost_1_88_upgrade.patch` (version + hash) and keep
-  it in sync with the x64 Boost version in `Dockerfile.ci-base-image`.
+- Boost bump: update `patches/boost_1_90_upgrade.patch` (version + hash), rename
+  it and its reference in `build-toolchain.sh`, and keep it in sync with the x64 Boost version in `Dockerfile.ci-base-image`.
 - After any change, bump `CI_BASE_IMAGE_VERSION` in `docker-bake.hcl`.
