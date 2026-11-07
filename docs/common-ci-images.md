@@ -42,7 +42,10 @@ superseded `pypa_2_28-4`, `pypa_2_28-pg18-3` and `pypa_2_28-pg18-arm-1`)
 **Used by:** hive and wax build/test pipelines, and all Python jobs via
 `templates/python_projects.gitlab-ci.yml` (`PYTHON_IMAGE`, tag `PYTHON_IMAGE_TAG`:
 `:pypa_2_28-pg18-6`; it moves only after the tag is published, see "Moving
-templates to a new image tag").
+templates to a new image tag"). `.configuration_template` builds its venv with
+`python${PYTHON_VERSION}` and fails, naming the version and the job image, when
+that interpreter is missing or reports another version, so a job that overrides
+`PYTHON_IMAGE` with an image without the wrapper still gets the version it asks for.
 
 ### ci-base-image-ubuntu
 
