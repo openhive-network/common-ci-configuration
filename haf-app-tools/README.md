@@ -19,7 +19,7 @@ These tools were previously located in the `haf` repository and required apps to
 
 | File | Purpose |
 |------|---------|
-| `process_openapi.py` | Generates SQL types/functions and nginx rewrite rules from OpenAPI YAML embedded in SQL comments |
+| `process_openapi.py` | Generates SQL types/functions, nginx rewrite rules (`rewrite_rules.conf`) and the arguments each function declares (`rpc_arguments.lua`, for the nginx image's `hive.rpc_form` module, see `docs/common-ci-images.md`) from OpenAPI YAML embedded in SQL comments |
 | `requirements.txt` | Python dependencies for `process_openapi.py` |
 
 ### Config (`config/`)

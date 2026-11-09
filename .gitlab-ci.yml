@@ -656,12 +656,60 @@ build_nginx_image:
       changes:
         paths:
           - Dockerfile.nginx
+          - nginx/lualib/**/*
     - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
       exists:
         - Dockerfile.nginx
       changes:
         paths:
           - Dockerfile.nginx
+          - nginx/lualib/**/*
+        compare_to: 'refs/heads/develop'
+
+# Tests the nginx image's hive.rpc_form module with the argument map
+# process_openapi.py writes: nginx/tests/run.sh builds the image from this
+# commit's Dockerfile.nginx in the DinD service and runs PostgreSQL, PostgREST
+# and a rewriter there (docs/common-ci-images.md, "nginx"). The default builder
+# (not .script_docker_setup_buildkit's docker-container one) is kept, so the
+# rewriter's build finds the nginx image just built in the daemon.
+nginx_rewriter_test:
+  extends: .pure_docker_image_builder_job_template
+  stage: test
+  needs: []
+  variables:
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+    # The tests reach the stack's ports on the DinD service's address
+    PUBLISH_ADDRESS: "0.0.0.0"
+    RESULTS_DIR: "$CI_PROJECT_DIR/nginx-rewriter-results"
+  before_script:
+    - |
+      for i in $(seq 1 30); do
+        docker info >/dev/null 2>&1 && break
+        echo "Waiting for docker daemon... ($i/30)"
+        sleep 2
+      done
+  script:
+    - nginx/tests/run.sh -v
+  artifacts:
+    when: always
+    paths:
+      - nginx-rewriter-results/
+    reports:
+      junit: nginx-rewriter-results/junit.xml
+  rules:
+    - *skip_on_renovate_rule
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        paths: &nginx_rewriter_sources
+          - Dockerfile.nginx
+          - nginx/**/*
+          - haf-app-tools/python/process_openapi.py
+          - haf-app-tools/python/requirements.txt
+          - docker-bake.hcl
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      changes:
+        paths: *nginx_rewriter_sources
         compare_to: 'refs/heads/develop'
 
 build_postgrest_image:

@@ -113,6 +113,8 @@ find-upstream-image.sh \
 
 **emsdk image** (`Dockerfile.emscripten`): Contains Emscripten toolchain with Node.js, pnpm, and pre-compiled WASM dependencies (Boost, OpenSSL, secp256k1). Used by wax and other WASM projects.
 
+**nginx image** (`Dockerfile.nginx`): OpenResty that HAF app postgrest-rewriters build from. Ships the Lua module `hive.rpc_form` (`nginx/lualib/hive/`), which forwards a GET/HEAD of `/rpc/<function>` as a form POST carrying the parameters the function declares, from the `rpc_arguments.lua` map `haf-app-tools/python/process_openapi.py` writes beside `rewrite_rules.conf`. Tested by `nginx/tests/run.sh` (docker compose: PostgreSQL, PostgREST, rewriter; CI job `nginx_rewriter_test`).
+
 **python-scripts image** (`Dockerfile.python-scripts`): Contains Python utilities for GitLab registry cleanup (`delete-image.py`, `remove-buildkit-cache.py`).
 
 **Template inheritance**: Jobs extend from `.job-defaults` (in `base.gitlab-ci.yml`) which sets common retry policies and interruptible flags.
