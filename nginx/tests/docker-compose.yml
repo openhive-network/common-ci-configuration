@@ -1,0 +1,44 @@
+# PostgreSQL with the fixture API, PostgREST serving it and the rewriter in front,
+# for run.sh. NGINX_IMAGE, POSTGRES_IMAGE and POSTGREST_VERSION come from run.sh;
+# PUBLISH_ADDRESS is where the rewriter's and PostgREST's ports are published.
+x-build: &build
+  context: ../..
+  dockerfile: nginx/tests/Dockerfile
+  args:
+    NGINX_IMAGE: ${NGINX_IMAGE:?}
+    POSTGRES_IMAGE: ${POSTGRES_IMAGE:?}
+
+services:
+  db:
+    build:
+      <<: *build
+      target: db
+    environment:
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      # The entrypoint's init scripts run on a server listening on its socket only
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+      interval: 1s
+      timeout: 5s
+      retries: 60
+
+  postgrest:
+    image: registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/postgrest-postgrest-${POSTGREST_VERSION:?}
+    environment:
+      PGRST_DB_URI: postgres://postgres:postgres@db:5432/postgres
+      PGRST_DB_SCHEMAS: rewriter_fixture
+      PGRST_DB_ANON_ROLE: rewriter_anon
+    ports:
+      - "${PUBLISH_ADDRESS:-127.0.0.1}::3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  rewriter:
+    build:
+      <<: *build
+      target: rewriter
+    ports:
+      - "${PUBLISH_ADDRESS:-127.0.0.1}::80"
+    depends_on:
+      - postgrest

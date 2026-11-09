@@ -4,6 +4,7 @@ import json
 import re
 import sys
 import argparse
+from typing import Any
 
 from pathlib import Path
 
@@ -26,7 +27,7 @@ openapi_merger = Merger(
 collected_openapi_fragments = {}
 all_openapi_fragments = {}  # Includes internal endpoints for rewrite rules
 
-def merge_openapi_fragment(new_fragment):
+def merge_openapi_fragment(new_fragment) -> None:
     global collected_openapi_fragments, all_openapi_fragments
     # sys.stdout.write('Before:')
     # sys.stdout.write(yaml.dump(collected_openapi_fragments, Dumper=yaml.Dumper))
@@ -59,7 +60,7 @@ def merge_openapi_fragment(new_fragment):
     # sys.stdout.write('After:')
     # sys.stdout.write(yaml.dump(collected_openapi_fragments, Dumper=yaml.Dumper))
 
-def generate_code_for_enum_openapi_fragment(enum_name, enum_values_openapi_fragment, sql_output):
+def generate_code_for_enum_openapi_fragment(enum_name, enum_values_openapi_fragment, sql_output) -> None:
     sql_output.write('-- openapi-generated-code-begin\n')
     sql_output.write(f'DROP TYPE IF EXISTS {enum_name} CASCADE;\n')
     sql_output.write(f'CREATE TYPE {enum_name} AS ENUM (\n')
@@ -154,7 +155,7 @@ def generate_type_field_or_parameter_string_from_openapi_fragment(property_name,
         type_field_string += generate_default_value_string_from_schema(property_properties)
     return type_field_string
 
-def generate_code_for_object_openapi_fragment(object_name, object_openapi_fragment, sql_output):
+def generate_code_for_object_openapi_fragment(object_name, object_openapi_fragment, sql_output) -> None:
     sql_output.write('-- openapi-generated-code-begin\n')
     sql_output.write(f'DROP TYPE IF EXISTS {object_name} CASCADE;\n')
     sql_output.write(f'CREATE TYPE {object_name} AS (\n')
@@ -162,7 +163,7 @@ def generate_code_for_object_openapi_fragment(object_name, object_openapi_fragme
     sql_output.write('\n);\n')
     sql_output.write('-- openapi-generated-code-end\n')
 
-def generate_function_signature(method, method_fragment, sql_output):
+def generate_function_signature(method, method_fragment, sql_output) -> None:
     def generate_parameter_string(parameter_openapi_fragment, include_default_values):
         name = parameter_openapi_fragment['name']
         schema = parameter_openapi_fragment['schema']
@@ -204,7 +205,7 @@ def generate_function_signature(method, method_fragment, sql_output):
         sql_output.write(f'RETURNS {response_type_string} \n')
         sql_output.write('-- openapi-generated-code-end\n')
 
-def generate_code_from_openapi_fragment(openapi_fragment, sql_output):
+def generate_code_from_openapi_fragment(openapi_fragment, sql_output) -> None:
     # figure out what type of fragment this is so we know what to generate
     if len(openapi_fragment) == 1:
         key = next(iter(openapi_fragment))
@@ -247,7 +248,7 @@ def generate_code_from_openapi_fragment(openapi_fragment, sql_output):
 
 # return true if this is a PostgreSQL keyword.  List taken from https://www.postgresql.org/docs/current/sql-keywords-appendix.html
 # excluding all keywords which are marked 'reserved', or 'non-reserved' but with qualifications
-def is_sql_keyword(word):
+def is_sql_keyword(word) -> bool:
     keywords = {'BETWEEN',
                 'BIGINT',
                 'BIT',
@@ -418,14 +419,42 @@ def is_sql_keyword(word):
     return word.upper() in keywords
 
 
-def dump_openapi_spec(sql_output):
+def dump_openapi_spec(sql_output) -> None:
     sql_output.write('-- openapi-generated-code-begin\n')
     sql_output.write('  openapi json = $$\n')
     sql_output.write(json.dumps(collected_openapi_fragments, indent = 2))
     sql_output.write('\n$$;\n')
     sql_output.write('-- openapi-generated-code-end\n')
 
-def generate_rewrite_rules(rewrite_rules_file, use_home_rewrite=False):
+def rpc_function_name(method_data: dict[str, Any]) -> str:
+    return str(method_data['operationId']).split('.')[-1]
+
+def lua_string(text: str) -> str:
+    # json.dumps escapes quotes, backslashes and \n, \t, ... as Lua reads them; only a control
+    # character without such an escape (never part of a parameter or function name) would not be
+    return json.dumps(text, ensure_ascii=False)
+
+def generate_rpc_arguments(rpc_arguments_file: str) -> None:
+    # The parameters each /rpc/ function declares (its SQL parameters, path parameters included),
+    # as the Lua table the nginx image's hive.rpc_form module takes: the arguments a rewriter
+    # forwards in a form POST body rather than as PostgREST query parameters.
+    # Use all_openapi_fragments, like the rewrite rules (includes internal endpoints)
+    if 'paths' in all_openapi_fragments:
+        arguments: dict[str, set[str]] = {}
+        for methods_for_path in all_openapi_fragments['paths'].values():
+            for method_data in methods_for_path.values():
+                names = arguments.setdefault(rpc_function_name(method_data), set())
+                names.update(param['name'] for param in method_data.get('parameters') or [])
+        with open(rpc_arguments_file, 'w') as lua_output:
+            lua_output.write('-- Generated by process_openapi.py: the parameters each /rpc/ function declares.\n')
+            lua_output.write('return {\n')
+            for function_name, names in sorted(arguments.items()):
+                fields = ', '.join(f'[{lua_string(name)}] = true' for name in sorted(names))
+                fields = f' {fields} ' if fields else ''
+                lua_output.write(f'    [{lua_string(function_name)}] = {{{fields}}},\n')
+            lua_output.write('}\n')
+
+def generate_rewrite_rules(rewrite_rules_file, use_home_rewrite=False) -> None:
     # Use all_openapi_fragments for rewrite rules (includes internal endpoints)
     if 'paths' in all_openapi_fragments:
         with open(rewrite_rules_file, 'w') as rewrite_rules_file:
@@ -452,7 +481,7 @@ def generate_rewrite_rules(rewrite_rules_file, use_home_rewrite=False):
                     rewrite_parts = ['^']
                     query_parts = []
                     next_placeholder = 1
-                    rpc_method_name = method_data['operationId'].split('.')[-1]
+                    rpc_method_name = rpc_function_name(method_data)
                     path_filter_present = False  # Track if `path_filter` is a parameter
 
                     # Check for parameters
@@ -489,13 +518,13 @@ def generate_rewrite_rules(rewrite_rules_file, use_home_rewrite=False):
                     rewrite_rules_file.write(f'# endpoint for {method} {path}{internal_comment}\n')
                     rewrite_rules_file.write(f'rewrite {rewrite_from} {rewrite_to} break;\n\n')
 
-def process_sql_file(sql_input, sql_output):
+def process_sql_file(sql_input, sql_output) -> None:
     yaml_comment_path = []
     yaml_comment_lines = []
     in_yaml_comment = False
     in_generated_code = False
 
-    def finish_comment():
+    def finish_comment() -> None:
         nonlocal yaml_comment_lines
         nonlocal yaml_comment_path
         comment_yaml = yaml.load(''.join(yaml_comment_lines), Loader=yaml.FullLoader)
@@ -543,7 +572,7 @@ def process_sql_file(sql_input, sql_output):
                     yaml_comment_path = []
                 in_yaml_comment = True
 
-def process_sql_files(input_sql_filenames, output_dir = None):
+def process_sql_files(input_sql_filenames, output_dir = None) -> None:
     for input_sql_filename in input_sql_filenames:
         with open(input_sql_filename) as sql_input:
             if output_dir == None:
@@ -565,6 +594,7 @@ if __name__ == "__main__":
     output_dir = args.output_dir
     input_files = args.input_files
     rewrite_rules_file = 'rewrite_rules.conf'
+    rpc_arguments_file = 'rpc_arguments.lua'
     use_home_rewrite = args.home_rewrite
 
     # Do a first pass that just collects all the openapi fragments
@@ -576,3 +606,5 @@ if __name__ == "__main__":
     process_sql_files(input_files, output_dir)
     # and dump the nginx rewrite rules
     generate_rewrite_rules(rewrite_rules_file, use_home_rewrite)
+    # and the arguments each function declares, for the rewriter's hive.rpc_form module
+    generate_rpc_arguments(rpc_arguments_file)
