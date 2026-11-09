@@ -1,1 +1,5 @@
 FROM registry.gitlab.syncad.com/hive/common-ci-configuration/mirrors/openresty-openresty-alpine
+
+# The rewriter module every HAF app's postgrest-rewriter loads with
+# `require "hive.rpc_form"` (see the module's header for its use).
+COPY nginx/lualib/hive/ /usr/local/openresty/lualib/hive/

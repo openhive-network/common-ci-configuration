@@ -509,7 +509,43 @@ PostgREST API server for exposing PostgreSQL as REST API.
 
 OpenResty (nginx + Lua) for reverse proxy and API gateway.
 
-**Used by:** Frontend deployments and API proxying.
+**Used by:** Frontend deployments and API proxying; every HAF app's postgrest-rewriter
+builds from it (hivemind uses its own OpenResty image).
+
+It ships the Lua module `hive.rpc_form` (`nginx/lualib/hive/rpc_form.lua`), which
+forwards a REST GET or HEAD of a PostgREST function as a form-encoded POST. PostgREST
+reads a GET query value starting with an operator (`not.`, `eq.`, ...) as a filter,
+never as an argument; in a form body every field is an argument. The module moves to
+the body exactly the parameters the function declares in its OpenAPI spec, read from
+the `rpc_arguments.lua` map `haf-app-tools/python/process_openapi.py` writes beside
+`rewrite_rules.conf`, and leaves every other parameter (column filters, `select`,
+`order`, `limit`, `offset`, `and`, `or`) in the query string. A function absent from
+the map, or a call carrying none of its declared arguments, goes upstream unchanged.
+A rewriter uses it as follows (the module's header has the details):
+
+```nginx
+http {
+    init_by_lua_block {
+        rpc_form = require "hive.rpc_form"
+        rpc_arguments = dofile(ngx.config.prefix() .. "conf/rpc_arguments.lua")
+    }
+    server {
+        location / {
+            include rewrite_rules.conf;
+            rewrite_by_lua_block { rpc_form.forward(rpc_arguments) }
+            header_filter_by_lua_block { rpc_form.restore_head() }
+            proxy_pass http://app-postgrest:3000;
+        }
+    }
+}
+```
+
+PostgREST runs a POST to a VOLATILE function READ WRITE, so a function reached this
+way must be STABLE (or IMMUTABLE) to stay read-only.
+
+`nginx/tests/run.sh` tests the module (the `nginx_rewriter_test` job): it builds the
+image, runs `process_openapi.py` on a fixture API and starts PostgreSQL, PostgREST
+and a rewriter in front with docker compose, then runs `nginx/tests` against them.
 
 ## Utility Images
 
