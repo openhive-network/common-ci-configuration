@@ -39,7 +39,7 @@ Tags: `:develop` is the moving tag the default branch republishes; `:<PYTHON|NOD
 
 | Catalog | Packages |
 |---------|----------|
-| `hiveio-toolset` | `@hiveio/wax` and its `wax-signers-*` packages (one build), `@hiveio/beekeeper` (a CSP-safe 1.28.9-rc0 build with the large-buffer encrypt/decrypt fix, forced over the signers' own pin by the file's `overrides:`), `@hiveio/workerbee`, `@hiveio/hb-auth`, `@hiveio/healthchecker-component` |
+| `hiveio-toolset` | `@hiveio/wax` and its `wax-signers-*` packages (one build), `@hiveio/beekeeper` (a CSP-safe 1.28.9-rc0 build with the large-buffer encrypt/decrypt fix and per-session unlock, forced over the signers' own pin by the file's `overrides:`), `@hiveio/workerbee`, `@hiveio/hb-auth`, `@hiveio/healthchecker-component` |
 | `react-toolset` | `react`, `react-dom`, `@types/react`, `@types/react-dom` (19.x), `next` (16.x), `eslint-config-next` (next's version), `@tanstack/react-query` (5.x) |
 | `vue-toolset` | `vue` (3.5.x), `nuxt` (4.x), `pinia`, `vuetify`, `vue-tsc` |
 | `tailwind-toolset` | `tailwindcss`, `@tailwindcss/postcss`, `@tailwindcss/vite`, `@tailwindcss/cli` (4.x, one version) |
