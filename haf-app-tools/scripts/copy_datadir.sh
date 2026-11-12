@@ -6,10 +6,10 @@
 
 set -xeuo pipefail
 
-# Shared block_log location (used when blockchain not in cache).
-# SHARED_BLOCK_LOG_DIR is the former name, still honoured for consumers that set it.
+# Shared block_log location (used when blockchain not in cache): the first of
+# BLOCK_LOG_SOURCE_DIR, SHARED_BLOCK_LOG_DIR (former name) and the default that holds block_log* files.
 # Default is the local static copy on each builder (faster than NFS)
-BLOCK_LOG_SOURCE_DIR="${BLOCK_LOG_SOURCE_DIR:-${SHARED_BLOCK_LOG_DIR:-/blockchain/block_log_5m}}"
+DEFAULT_BLOCK_LOG_SOURCE_DIR="/blockchain/block_log_5m"
 
 # NFS cache configuration
 CACHE_NFS_PATH="${CACHE_NFS_PATH:-/nfs/ci-cache}"
@@ -106,6 +106,36 @@ validate_cache_integrity() {
     fi
 
     return 0
+}
+
+# Sets BLOCK_LOG_LINK_DIR to the first candidate directory holding block_log* files.
+# A set variable naming a directory without them (e.g. a project variable meaning something else)
+# must not shadow a working default. Sets BLOCK_LOG_CANDIDATES_TRIED for the caller's warning.
+# Returns 1 if no candidate holds a block_log.
+select_block_log_source_dir() {
+    local candidate dir block_file
+    BLOCK_LOG_LINK_DIR=""
+    BLOCK_LOG_CANDIDATES_TRIED=""
+    for candidate in "BLOCK_LOG_SOURCE_DIR=${BLOCK_LOG_SOURCE_DIR:-}" \
+                     "SHARED_BLOCK_LOG_DIR=${SHARED_BLOCK_LOG_DIR:-}" \
+                     "default=${DEFAULT_BLOCK_LOG_SOURCE_DIR}"; do
+        dir="${candidate#*=}"
+        [[ -n "$dir" ]] || continue
+        BLOCK_LOG_CANDIDATES_TRIED="${BLOCK_LOG_CANDIDATES_TRIED:+${BLOCK_LOG_CANDIDATES_TRIED}, }${candidate}"
+        if [[ ! -d "$dir" ]]; then
+            echo "${candidate} is not a directory, skipping"
+            continue
+        fi
+        for block_file in "$dir"/block_log*; do
+            if [[ -f "$block_file" ]]; then
+                echo "Using block_log source ${candidate}"
+                BLOCK_LOG_LINK_DIR="$dir"
+                return 0
+            fi
+        done
+        echo "${candidate} has no block_log* files, skipping"
+    done
+    return 1
 }
 
 # Fix pg_tblspc symlinks to point to the correct tablespace location
@@ -346,19 +376,19 @@ then
         if [[ -d "${DATA_SOURCE}/datadir/blockchain" ]] && ls "${DATA_SOURCE}/datadir/blockchain"/block_log* 1>/dev/null 2>&1; then
             sudo chmod -R a+w "${DATA_SOURCE}/datadir/blockchain"
             ls -al "${DATA_SOURCE}/datadir/blockchain"
-        elif [[ -d "${BLOCK_LOG_SOURCE_DIR}" ]]; then
+        elif select_block_log_source_dir; then
             # Blockchain not in cache or empty - create symlinks to shared block_log
             # Remove empty blockchain dir if it exists (leftover from Docker bind mounts)
             if [[ -d "${DATADIR}/blockchain" ]] && [[ -z "$(ls -A "${DATADIR}/blockchain" 2>/dev/null)" ]]; then
                 rmdir "${DATADIR}/blockchain" 2>/dev/null || true
             fi
-            echo "Blockchain not in cache, linking to shared block_log at ${BLOCK_LOG_SOURCE_DIR}"
+            echo "Blockchain not in cache, linking to shared block_log at ${BLOCK_LOG_LINK_DIR}"
             sudo -Enu hived mkdir -p "${DATADIR}/blockchain"
             # Fix blockchain directory ownership if copied by root (needed for non-empty dirs like rocksdb)
             if [[ -d "${DATADIR}/blockchain" ]]; then
                 sudo chown -R hived:users "${DATADIR}/blockchain" 2>/dev/null || sudo chmod -R a+w "${DATADIR}/blockchain" 2>/dev/null || true
             fi
-            for block_file in "${BLOCK_LOG_SOURCE_DIR}"/block_log* ; do
+            for block_file in "${BLOCK_LOG_LINK_DIR}"/block_log* ; do
                 if [[ -f "$block_file" ]]; then
                     local_name=$(basename "$block_file")
                     sudo -Enu hived ln -sf "$block_file" "${DATADIR}/blockchain/${local_name}"
@@ -367,7 +397,7 @@ then
             done
             ls -al "${DATADIR}/blockchain"
         else
-            echo "WARNING: No blockchain in cache and shared block_log not found at ${BLOCK_LOG_SOURCE_DIR}"
+            echo "WARNING: No blockchain in cache and no shared block_log* files in any of: ${BLOCK_LOG_CANDIDATES_TRIED}"
         fi
 
         if [[ -e "${DATA_SOURCE}/shm_dir" && "$(realpath "${DATA_SOURCE}/shm_dir")" != "$(realpath "${SHM_DIR}")" ]]

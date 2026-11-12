@@ -68,3 +68,13 @@ def test_get_falls_back_to_shared_block_log_dir(tmp_path: Path, canonical_value:
     target = _linked_block_log_target(tmp_path, **env)
 
     assert target == former / "block_log"
+
+
+def test_get_skips_block_log_source_dir_without_block_log(tmp_path: Path) -> None:
+    empty = tmp_path / "cache_blockchain"
+    empty.mkdir()
+    former = _block_log_dir(tmp_path, "former")
+
+    target = _linked_block_log_target(tmp_path, BLOCK_LOG_SOURCE_DIR=str(empty), SHARED_BLOCK_LOG_DIR=str(former))
+
+    assert target == former / "block_log"
