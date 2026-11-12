@@ -460,10 +460,12 @@ script:
 | Consumer | Reads |
 |----------|-------|
 | `templates/haf_data_preparation.gitlab-ci.yml` (passed to `build_data.sh` / `prepare_data_and_shm_dir.sh` as `--block-log-source-dir`) | `BLOCK_LOG_SOURCE_DIR` |
-| `haf-app-tools/scripts/copy_datadir.sh` (links block_log when the cache has none) | `BLOCK_LOG_SOURCE_DIR`, else `SHARED_BLOCK_LOG_DIR`, else `/blockchain/block_log_5m` |
-| `cache-manager.sh get` (links block_log into an extracted hive/haf cache with an empty `blockchain/`) | `BLOCK_LOG_SOURCE_DIR`, else `SHARED_BLOCK_LOG_DIR`, else `/blockchain/block_log_5m` |
+| `haf-app-tools/scripts/copy_datadir.sh` (links block_log when the cache has none) | the first of `BLOCK_LOG_SOURCE_DIR`, `SHARED_BLOCK_LOG_DIR`, `/blockchain/block_log_5m` that holds `block_log*` files |
+| `cache-manager.sh get` (links block_log into an extracted hive/haf cache with an empty `blockchain/`) | the first of `BLOCK_LOG_SOURCE_DIR`, `SHARED_BLOCK_LOG_DIR`, `/blockchain/block_log_5m` that holds `block_log*` files |
 
 `SHARED_BLOCK_LOG_DIR` is the former name used by the container scripts. It is still read as a fallback so projects that set it keep working, but new configuration should set `BLOCK_LOG_SOURCE_DIR`; when both are set, `BLOCK_LOG_SOURCE_DIR` wins.
+
+The two scripts that link block_log skip a variable whose directory holds no `block_log*` file and log that they skipped it, so a project variable of the same name meaning something else (hive sets `BLOCK_LOG_SOURCE_DIR: /cache/blockchain` for its mirrornet converter) does not shadow a working default.
 
 `BLOCK_LOG_SOURCE_DIR_5M` (and `BLOCK_LOG_SOURCE_DIR_MIRRORNET_5M`) are a different thing: size-specific project variables that `templates/haf_app_testing.gitlab-ci.yml` reads directly and that projects typically pass on as `BLOCK_LOG_SOURCE_DIR: $BLOCK_LOG_SOURCE_DIR_5M`. They are unchanged.
 
