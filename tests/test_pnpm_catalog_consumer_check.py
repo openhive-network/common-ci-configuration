@@ -398,6 +398,64 @@ def test_tsconfig_without_inputs_is_no_type_check(tmp_path: Path, pnpm_log: Path
         "hive/wax", ".", "installed; no type check found (tsconfig has no inputs)", True)
 
 
+def _undeclared_compiler_project(repo: Path) -> Path:
+    """A project with a tsconfig.json and no typescript dependency whose install resolves a tsc."""
+    project = _package(repo, '{"start": "tsx src/index.ts"}', tsconfig=True, typescript=False)
+    tsc = project / "node_modules" / ".bin" / "tsc"
+    tsc.parent.mkdir(parents=True)
+    tsc.write_text("#!/bin/sh\n")
+    tsc.chmod(0o755)
+    return project
+
+
+def test_resolvable_tsc_checks_a_project_declaring_no_compiler(tmp_path: Path, pnpm_log: Path) -> None:
+    # wax's examples/ts/memory-used: run through tsx, its types still checked by the tsc its install has.
+    repo = _undeclared_compiler_project(tmp_path / "memory-used")
+
+    assert check_module._check_directory("hive/wax", repo, ".") == check_module.Result("hive/wax", ".", "passed", True)
+    assert pnpm_log.read_text().splitlines()[2:] == ["memory-used: exec tsc --noEmit -p tsconfig.json"]
+
+
+def test_tsc_failure_of_a_project_declaring_no_compiler_is_advisory(
+        tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # beekeeper's compat-tests: playwright runs its .ts files; it has no @types/node, which only tsc needs.
+    repo = _undeclared_compiler_project(tmp_path / "compat-tests")
+    error = ("tests/run.ts(3,15): error TS2580: Cannot find name 'process'. Do you need to install type definitions for node? "
+             "Try `npm i --save-dev @types/node`.")
+    monkeypatch.setenv("PNPM_FAIL", "exec tsc --noEmit -p tsconfig.json")
+    monkeypatch.setenv("PNPM_FAIL_OUTPUT", error)
+
+    assert check_module._check_directory("hive/beekeeper", repo, ".") == check_module.Result(
+        "hive/beekeeper", ".", f"not checked: no declared compiler; tsc found {error}", True)
+
+
+def test_tsc_failure_of_a_project_declaring_no_compiler_does_not_hide_a_real_failure(
+        tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    _package(repo, '{"build": "pnpm -r build"}')
+    _undeclared_compiler_project(repo / "packages" / "compat-tests")
+    _package(repo / "packages" / "lib", '{"typecheck": "tsc"}')
+    monkeypatch.setenv("PNPM_FAIL", "exec tsc --noEmit -p tsconfig.json;run typecheck")
+    monkeypatch.setenv("PNPM_FAIL_OUTPUT", "src/a.ts(1,1): error TS2304: Cannot find name 'x'.")
+
+    assert check_module._check_directory("hive/app", repo, ".") == check_module.Result(
+        "hive/app", ".", "type check failed in packages/lib; first error (packages/lib): src/a.ts(1,1): error TS2304: Cannot find name 'x'.; "
+        "not checked: no declared compiler; tsc found src/a.ts(1,1): error TS2304: Cannot find name 'x'.", False)
+
+
+def test_project_declaring_no_compiler_without_a_resolvable_tsc_has_no_type_check(
+        tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _package(tmp_path / "compat-tests", '{"test": "playwright test"}', tsconfig=True, typescript=False)
+    tools = tmp_path / "tools"
+    (tools / "python3").symlink_to(sys.executable)
+    monkeypatch.setenv("PATH", str(tools))
+
+    assert check_module._check_directory("hive/beekeeper", repo, ".") == check_module.Result(
+        "hive/beekeeper", ".", "installed; no type check found", True)
+    assert pnpm_log.read_text().splitlines() == [
+        "compat-tests: list --recursive --depth -1 --parseable", "compat-tests: install --no-frozen-lockfile"]
+
+
 def _workspace_package(directory: Path, manifest: Dict[str, Any], tsconfig: bool = True) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "package.json").write_text(json.dumps({"name": directory.name, **manifest}))
