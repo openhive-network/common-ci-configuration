@@ -12,8 +12,15 @@ run `pnpm install --no-frozen-lockfile` and the type check: the directory's
 in each workspace project that script, or for a Nuxt project (a nuxt.config.* or
 a `nuxt` dependency) depending on `vue-tsc` `nuxi prepare` and then
 `nuxi typecheck` (a Nuxt project without vue-tsc has no type check), or for a
-project depending on `vue-tsc` `vue-tsc --noEmit -p tsconfig.json`, or
-`tsc --noEmit -p tsconfig.json`.
+project depending on `vue-tsc` `vue-tsc --noEmit -p tsconfig.json`, or for one
+depending on `typescript` (itself or through the directory's package.json)
+`tsc --noEmit -p tsconfig.json`; the tsconfig.json of a project declaring no
+compiler (its TypeScript runs through tsx, a test runner or a bundler) is no
+type check.
+A workspace project without such a script whose entry is its TypeScript sources
+(denser's packages) compiles only as part of the projects depending on it, under
+their compiler options: when one of those is type-checked it is reported as
+checked through them rather than type-checked alone.
 A type check failing only because tsc cannot find modules inside the package's own
 tree that its checkout lacks (its own build output, such as wax's wasm build) is
 reported as not checked, naming the missing paths, and one failing only on
@@ -23,7 +30,11 @@ A dependency on a package of the clone that ships its type declarations only
 once built (wax's examples and signers on `@hiveio/wax`, which needs the wasm
 toolchain) is pointed at the catalog entry pinning its published version
 before the install, which then also takes ccc's scoped registries
-(pnpm-config/.npmrc); a dependency no catalog pins is left as it is.
+(pnpm-config/.npmrc). A dependency on such a project of the workspace that no
+catalog pins (hive-io's @hiveio/hive-lib) is built with its own `build` script
+after the install, before the type check of the project depending on it; a
+dependent of one without a build script, or whose build fails or does not
+produce its entry, is reported as not checked, naming that package's build.
 
   python3 scripts/python/pnpm-catalog-consumer-check.py [--commit SHA] [--summary FILE]
 
@@ -67,6 +78,7 @@ _NO_INPUTS = "TS18003"
 _RELATIVE_IMPORT = re.compile(r"""(?:\bfrom|\bimport|\brequire\(|\bimport\()\s*["'](\.{1,2}/[^"']+)["']""")
 _SOURCE_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".d.ts")
 _SCRIPT_SUFFIXES = (".js", ".jsx", ".mjs", ".cjs")
+_BUILD_SCRIPT = "build"
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _MAX_ERROR_LENGTH = 300
 _CREDENTIAL_VARIABLES = frozenset((
@@ -77,11 +89,13 @@ _CREDENTIAL_VARIABLES = frozenset((
 class _PackageCheck(NamedTuple):
     """One package's type check: its exit status, the first error of a failure, and the paths
     of its own build output a failure needed (sorted, repo-relative; empty for any other
-    failure) or whether it only reported TS18003."""
+    failure) or whether it only reported TS18003; or, when it did not run, the builds of the
+    workspace packages it needs that are missing (`<package>'s build (<reason>)`)."""
     status: int
     first: Optional[str] = None
     missing_build: Tuple[str, ...] = ()
     no_inputs: bool = False
+    unbuilt: Tuple[str, ...] = ()
 
 
 class Result(NamedTuple):
@@ -126,19 +140,24 @@ def _prepare_command(project: Path) -> Optional[List[str]]:
     return list(NUXT_PREPARE_COMMAND) if type_check_command(project) == list(NUXT_TYPE_CHECK_COMMAND) else None
 
 
-def type_check_command(project: Path) -> Optional[List[str]]:
-    """The command type-checking the package at `project`: its first TYPE_CHECK_SCRIPTS script;
-    else for a Nuxt project `nuxi typecheck` when it depends on vue-tsc (nuxi's type checker),
-    None otherwise; else `vue-tsc --noEmit` (for a project depending on vue-tsc) or `tsc --noEmit`
-    on its tsconfig.json; else None."""
+def type_check_command(project: Path, workspace: Optional[Path] = None) -> Optional[List[str]]:
+    """The command type-checking the package at `project` (a project of the workspace at
+    `workspace`, if given): its first TYPE_CHECK_SCRIPTS script; else for a Nuxt project
+    `nuxi typecheck` when it depends on vue-tsc (nuxi's type checker), None otherwise; else on
+    its tsconfig.json `vue-tsc --noEmit` (for a project depending on vue-tsc) or `tsc --noEmit`
+    (for one whose package.json or the workspace's depends on typescript); else None."""
     script = _type_check_script(project)
     if script:
         return ["pnpm", "run", script]
     vue_tsc = _depends_on(_manifest(project), "vue-tsc")
     if _is_nuxt(project):
         return list(NUXT_TYPE_CHECK_COMMAND) if vue_tsc else None
-    if (project / "tsconfig.json").is_file():
-        return ["pnpm", "exec", "vue-tsc" if vue_tsc else "tsc", "--noEmit", "-p", "tsconfig.json"]
+    if not (project / "tsconfig.json").is_file():
+        return None
+    if vue_tsc:
+        return ["pnpm", "exec", "vue-tsc", "--noEmit", "-p", "tsconfig.json"]
+    if any(_depends_on(_manifest(package), "typescript") for package in (project, workspace or project)):
+        return ["pnpm", "exec", "tsc", "--noEmit", "-p", "tsconfig.json"]
     return None
 
 
@@ -162,12 +181,43 @@ def _local_package(project: Path, name: str, spec: Any, members: Mapping[str, Pa
     return None
 
 
+def _export_entry(exports: Any) -> Optional[str]:
+    """The path a package.json `exports` value gives its main entry point (`.`), type
+    declarations first; None when it gives none."""
+    if isinstance(exports, str):
+        return exports
+    if not isinstance(exports, dict):
+        return None
+    if "." in exports:
+        return _export_entry(exports["."])
+    conditions = (exports[key] for key in ("types", "import", "default", "require") if key in exports)
+    return next((entry for entry in map(_export_entry, conditions) if entry), None)
+
+
+def _entry(manifest: Dict[str, Any]) -> Optional[str]:
+    """The file a package's dependents take its types (else its code) from: its `types`,
+    `typings` or `main`, else its `exports` main entry; None without one."""
+    entry = manifest.get("types") or manifest.get("typings") or manifest.get("main") or _export_entry(manifest.get("exports"))
+    return entry if isinstance(entry, str) else None
+
+
+def _is_source(entry: str) -> bool:
+    return entry.endswith(_SOURCE_SUFFIXES) and not entry.endswith(".d.ts")
+
+
 def _needs_build(package: Path) -> bool:
-    """True when the package at `package` declares type declarations (else a main entry) its
-    checkout does not have, i.e. they only exist once it is built."""
-    manifest = _manifest(package)
-    entry = manifest.get("types") or manifest.get("typings") or manifest.get("main")
-    return isinstance(entry, str) and not (package / entry).is_file()
+    """True when the package at `package` declares an entry (_entry) its checkout does not
+    have that a build would produce (not a TypeScript source), i.e. it only exists once built."""
+    entry = _entry(_manifest(package))
+    return entry is not None and "*" not in entry and not _is_source(entry) and not (package / entry).is_file()
+
+
+def _is_source_package(package: Path) -> bool:
+    """True when the package at `package` has no type check script and its entry names one of
+    its own TypeScript sources (present or not: denser's smart-signer names a removed one),
+    which its dependents compile under their compiler options."""
+    entry = _entry(_manifest(package))
+    return _type_check_script(package) is None and entry is not None and _is_source(entry)
 
 
 def _override_package(selector: str) -> str:
@@ -185,12 +235,28 @@ def _local_dependencies(manifest: Dict[str, Any]) -> List[Tuple[Dict[str, str], 
     return entries + [(overrides, selector, _override_package(selector)) for selector in overrides]
 
 
+def _members(projects: List[Path]) -> Dict[str, Path]:
+    """The workspace `projects` by package name."""
+    names = ((_manifest(project).get("name"), project) for project in projects)
+    return {name: project for name, project in names if isinstance(name, str)}
+
+
+def _workspace_dependencies(project: Path, projects: List[Path]) -> List[Path]:
+    """The projects of `projects` (one workspace) `project` depends on, in declaration order."""
+    members = _members(projects)
+    found: List[Path] = []
+    for mapping, key, name in _local_dependencies(_manifest(project)):
+        package = _local_package(project, name, mapping[key], members)
+        if package in projects and package != project and package not in found:
+            found.append(package)
+    return found
+
+
 def _use_published_packages(projects: List[Path], catalogs: Catalogs) -> List[str]:
     """Point each dependency (or pnpm override) of `projects` on a package of the clone that needs
     a build (_needs_build) at the first catalog pinning that package, rewriting the projects'
     package.json; returns the names of the packages it repointed."""
-    names = ((_manifest(project).get("name"), project) for project in projects)
-    members: Dict[str, Path] = {name: project for name, project in names if isinstance(name, str)}
+    members = _members(projects)
     repointed = set()
     for project in projects:
         manifest = _manifest(project)
@@ -312,6 +378,42 @@ def _run(command: List[str], cwd: Path, environment: Mapping[str, str]) -> Tuple
     return process.returncode, "".join(output)
 
 
+def _unbuilt_dependencies(package: Path, projects: List[Path], environment: Mapping[str, str],
+                          tried: Dict[Path, Optional[str]]) -> Tuple[str, ...]:
+    """Build each project of the workspace `projects` that `package` depends on and that needs a
+    build (_needs_build), with its own `build` script (each project at most once: `tried` maps
+    one already tried to why it is not built, None when it is). Returns `<package>'s build
+    (<reason>)` for each one not built; empty when each one is."""
+    unbuilt = []
+    for dependency in _workspace_dependencies(package, projects):
+        if _needs_build(dependency) and dependency not in tried:
+            tried[dependency] = "dependency cycle"
+            tried[dependency] = _build(dependency, projects, environment, tried)
+        reason = tried.get(dependency)
+        if reason:
+            unbuilt.append(f"{_manifest(dependency).get('name') or dependency.name}'s build ({reason})")
+    return tuple(unbuilt)
+
+
+def _build(package: Path, projects: List[Path], environment: Mapping[str, str], tried: Dict[Path, Optional[str]]) -> Optional[str]:
+    """Build `package`, its own unbuilt workspace dependencies first; None when its entry exists
+    afterwards, else why not."""
+    if _BUILD_SCRIPT not in _manifest(package).get("scripts", {}):
+        return "no build script"
+    needed = _unbuilt_dependencies(package, projects, environment, tried)
+    if needed:
+        return f"needs {', '.join(needed)}"
+    command = ["pnpm", "run", _BUILD_SCRIPT]
+    print(f"-- {package.name}: {' '.join(command)}", flush=True)
+    status, output = _run(command, package, environment)
+    if status:
+        first = _first_error(output)
+        return f"{' '.join(command)} failed (exit {status})" + (f": {first}" if first else "")
+    if _needs_build(package):
+        return f"{' '.join(command)} did not produce {_entry(_manifest(package))}"
+    return None
+
+
 def _type_check(label: str, package: Path, repo: Path, command: List[str], environment: Mapping[str, str]) -> _PackageCheck:
     """Run _prepare_command(package), if any, then `command` in `package` (inside the clone at
     `repo`); the result of the one that ran last, a failure classified by _diagnosed (a failed
@@ -332,12 +434,16 @@ def _type_check(label: str, package: Path, repo: Path, command: List[str], envir
 
 def _type_check_outcome(checks: List[Tuple[str, _PackageCheck]]) -> Tuple[str, bool]:
     """The outcome of a directory whose packages' type checks (`where`, result) are `checks`, and
-    whether it passed: a package not checked for its own build output, or without inputs, fails nothing."""
+    whether it passed: a package not checked for its own build output or a workspace package's,
+    or without inputs, fails nothing."""
     missing_build = [path for _, check in checks for path in check.missing_build]
-    checked = [(where, check) for where, check in checks if not check.missing_build and not check.no_inputs]
+    unbuilt = sorted({build for _, check in checks for build in check.unbuilt})
+    checked = [(where, check) for where, check in checks if not check.missing_build and not check.no_inputs and not check.unbuilt]
     failed = [(where, check.first) for where, check in checked if check.status]
-    needs_build = f"not checked: needs its own build ({', '.join(missing_build)})"
-    unchecked = f"; {needs_build}" if missing_build else ""
+    own = [f"needs its own build ({', '.join(missing_build)})"] if missing_build else []
+    reasons = own + [f"needs {build}" for build in unbuilt]
+    needs_build = f"not checked: {'; '.join(reasons)}"
+    unchecked = f"; {needs_build}" if reasons else ""
     if failed:
         places = ", ".join(where for where, _ in failed)
         where, first = next(((where, first) for where, first in failed if first), failed[0])
@@ -345,7 +451,7 @@ def _type_check_outcome(checks: List[Tuple[str, _PackageCheck]]) -> Tuple[str, b
         return f"type check failed in {places}{detail}{unchecked}", False
     if checked:
         return f"passed{unchecked}", True
-    if missing_build:
+    if reasons:
         return needs_build, True
     if checks:  # each one without inputs
         return "installed; no type check found (tsconfig has no inputs)", True
@@ -370,15 +476,52 @@ def _check_directory(project: str, repo: Path, directory: str) -> Result:
     if status:
         first = _first_error(output)
         return Result(project, directory, f"install failed (exit {status})" + (f": {first}" if first else "") + note, False)
+    checks, through_dependents = _type_checks(project, repo, workspace, projects, environment)
+    outcome, passed = _type_check_outcome(checks)
+    if through_dependents:
+        sources = ", ".join(package.relative_to(repo).as_posix() for package in through_dependents)
+        outcome += f"; {sources} checked as TypeScript sources of their dependents"
+    return Result(project, directory, outcome + note, passed)
+
+
+def _type_checks(project: str, repo: Path, workspace: Path, projects: List[Path],
+                 environment: Mapping[str, str]) -> Tuple[List[Tuple[str, _PackageCheck]], List[Path]]:
+    """Type-check the installed workspace at `workspace` (its projects `projects`, in the clone of
+    `project` at `repo`): its root when it has a type check script, else each project with a type
+    check except the source packages checked through their dependents, after building the
+    workspace packages each one needs built. Returns each check (`where`, result) and those
+    source packages."""
+    packages = [workspace] if _type_check_script(workspace) else projects
+    commands = {package: type_check_command(package, workspace) for package in packages}
+    through_dependents = _checked_through_dependents(commands, projects)
+    tried: Dict[Path, Optional[str]] = {}
     checks: List[Tuple[str, _PackageCheck]] = []
-    for package in [workspace] if _type_check_script(workspace) else projects:
-        command = type_check_command(package)
-        if command is None:
+    for package, command in commands.items():
+        if command is None or package in through_dependents:
             continue
         where = package.relative_to(repo).as_posix() or "."
-        checks.append((where, _type_check(f"{project} {where}", package, repo, command, environment)))
-    outcome, passed = _type_check_outcome(checks)
-    return Result(project, directory, outcome + note, passed)
+        unbuilt = _unbuilt_dependencies(package, projects, environment, tried)
+        if unbuilt:
+            print(f"-- {project} {where}: not type-checked: needs {', '.join(unbuilt)}", flush=True)
+            checks.append((where, _PackageCheck(0, unbuilt=unbuilt)))
+        else:
+            checks.append((where, _type_check(f"{project} {where}", package, repo, command, environment)))
+    return checks, through_dependents
+
+
+def _checked_through_dependents(commands: Mapping[Path, Optional[List[str]]], projects: List[Path]) -> List[Path]:
+    """The source packages (_is_source_package) among `commands` (package: its type check
+    command) that a package with a type check, not itself a source package, depends on directly
+    or through other source packages; in `commands` order."""
+    sources = {package for package, command in commands.items() if command and _is_source_package(package)}
+    pending = [package for package, command in commands.items() if command and package not in sources]
+    reached: Set[Path] = set()
+    while pending:
+        for dependency in _workspace_dependencies(pending.pop(), projects):
+            if dependency in sources and dependency not in reached:
+                reached.add(dependency)
+                pending.append(dependency)
+    return [package for package in commands if package in reached]
 
 
 def _check(consumer: Consumer, server_url: str, ccc_commit: str, clone_environment: Mapping[str, str]) -> List[Result]:
