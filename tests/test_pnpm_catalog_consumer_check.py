@@ -1,8 +1,9 @@
 """scripts/python/pnpm-catalog-consumer-check.py: which type check a consumer gets, and how its result is reported.
 
 A stand-in pnpm logs every command (and, with PNPM_ENV_LOG, its environment),
-lists the fixture's workspace projects and fails the commands named in
-PNPM_FAIL (printing PNPM_FAIL_OUTPUT first), so nothing touches the network.
+lists the fixture's workspace projects, fails the commands named in
+PNPM_FAIL (printing PNPM_FAIL_OUTPUT first) and runs the package's `build`
+script with sh for `run build`, so nothing touches the network.
 """
 
 import importlib.util
@@ -12,7 +13,7 @@ import re
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pytest
 
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts" / "python"
 
 STUB_PNPM = """#!/usr/bin/env python3
-import json, os, sys
+import json, os, subprocess, sys
 from pathlib import Path
 command = " ".join(sys.argv[1:])
 with open(os.environ["PNPM_LOG"], "a", encoding="utf-8") as log:
@@ -35,6 +36,8 @@ if sys.argv[1:3] == ["list", "--recursive"]:
 if command in os.environ.get("PNPM_FAIL", "").split(";"):
     print(os.environ.get("PNPM_FAIL_OUTPUT", ""))
     sys.exit(1)
+if sys.argv[1:] == ["run", "build"]:
+    sys.exit(subprocess.run(["sh", "-c", json.loads(Path("package.json").read_text())["scripts"]["build"]]).returncode)
 """
 
 
@@ -50,9 +53,12 @@ sys.path.insert(0, str(SCRIPTS))
 check_module = _load("pnpm_catalog_consumer_check", SCRIPTS / "pnpm-catalog-consumer-check.py")
 
 
-def _package(directory: Path, scripts: str, tsconfig: bool = False) -> Path:
+def _package(directory: Path, scripts: str, tsconfig: bool = False, typescript: Optional[bool] = None) -> Path:
+    """A package named after `directory` with `scripts` (JSON); with `tsconfig` a tsconfig.json and,
+    unless `typescript` is False, a typescript dev dependency (typescript=True adds one without the tsconfig)."""
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "package.json").write_text(f'{{"name": "{directory.name}", "scripts": {scripts}}}')
+    compiler = ', "devDependencies": {"typescript": "catalog:typescript-toolset"}' if (tsconfig if typescript is None else typescript) else ""
+    (directory / "package.json").write_text(f'{{"name": "{directory.name}", "scripts": {scripts}{compiler}}}')
     if tsconfig:
         (directory / "tsconfig.json").write_text("{}")
     return directory
@@ -67,6 +73,17 @@ def _package(directory: Path, scripts: str, tsconfig: bool = False) -> Path:
 ])
 def test_type_check_prefers_a_script_then_the_tsconfig(tmp_path: Path, scripts: str, tsconfig: bool, expected: List[str]) -> None:
     assert check_module.type_check_command(_package(tmp_path / "app", scripts, tsconfig)) == expected
+
+
+def test_tsconfig_of_a_project_without_a_compiler_is_no_type_check(tmp_path: Path) -> None:
+    # beekeeper's compat-tests: a tsconfig.json for the editor, its .ts files run by playwright and vitest.
+    alone = _package(tmp_path / "compat-tests", '{"test": "playwright test"}', tsconfig=True, typescript=False)
+    workspace = _package(tmp_path / "repo", '{"build": "pnpm -r build"}', typescript=True)
+    member = _package(workspace / "packages" / "lib", '{"build": "rollup -c"}', tsconfig=True, typescript=False)
+
+    assert check_module.type_check_command(alone) is None
+    assert check_module.type_check_command(member) is None
+    assert check_module.type_check_command(member, workspace) == ["pnpm", "exec", "tsc", "--noEmit", "-p", "tsconfig.json"]
 
 
 def _vue_package(directory: Path, manifest: Dict[str, Any], tsconfig: bool = True, nuxt_config: bool = False) -> Path:
@@ -379,3 +396,85 @@ def test_tsconfig_without_inputs_is_no_type_check(tmp_path: Path, pnpm_log: Path
 
     assert check_module._check_directory("hive/wax", repo, ".") == check_module.Result(
         "hive/wax", ".", "installed; no type check found (tsconfig has no inputs)", True)
+
+
+def _workspace_package(directory: Path, manifest: Dict[str, Any], tsconfig: bool = True) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "package.json").write_text(json.dumps({"name": directory.name, **manifest}))
+    if tsconfig:
+        (directory / "tsconfig.json").write_text("{}")
+    return directory
+
+
+_TYPESCRIPT = {"typescript": "catalog:typescript-toolset"}
+
+
+def test_unbuilt_workspace_dependencies_are_built_before_the_dependent_is_checked(tmp_path: Path, pnpm_log: Path) -> None:
+    # hive-io: apps/web imports @hiveio/hive-lib, which no catalog pins and whose types exist once `tsc` built it.
+    repo = tmp_path / "repo"
+    _catalog_workspace(_package(repo, '{"build": "pnpm -r build"}'))
+    _workspace_package(repo / "packages" / "core", {
+        "types": "./dist/index.d.ts", "scripts": {"build": "mkdir -p dist && touch dist/index.d.ts"}}, tsconfig=False)
+    _workspace_package(repo / "packages" / "lib", {
+        "exports": {".": {"types": "./dist/index.d.ts", "import": "./dist/index.js"}},
+        "scripts": {"build": "test -f ../core/dist/index.d.ts && mkdir -p dist && touch dist/index.d.ts"},
+        "dependencies": {"core": "workspace:*"}}, tsconfig=False)
+    _workspace_package(repo / "packages" / "web", {"dependencies": {"lib": "workspace:*", "core": "workspace:^"},
+                                                   "devDependencies": _TYPESCRIPT})
+
+    assert check_module._check_directory("hive/hive-io", repo, ".") == check_module.Result("hive/hive-io", ".", "passed", True)
+    assert pnpm_log.read_text().splitlines() == [
+        "repo: list --recursive --depth -1 --parseable",
+        "repo: install --no-frozen-lockfile",
+        "core: run build",
+        "lib: run build",
+        "web: exec tsc --noEmit -p tsconfig.json",
+    ]
+    assert json.loads((repo / "packages" / "web" / "package.json").read_text())["dependencies"] == {
+        "lib": "workspace:*", "core": "workspace:^"}
+
+
+@pytest.mark.parametrize("scripts, fail, reason", [
+    ({"type-check": "tsc --noEmit"}, "", "no build script"),
+    ({"build": "tsc"}, "run build", "pnpm run build failed (exit 1): src/index.ts(1,1): error TS2304: Cannot find name 'x'."),
+    ({"build": "true"}, "", "pnpm run build did not produce ./dist/index.d.ts"),
+])
+def test_dependent_of_a_workspace_package_that_cannot_be_built_is_not_checked(
+        tmp_path: Path, pnpm_log: Path, monkeypatch: pytest.MonkeyPatch, scripts: Dict[str, str], fail: str, reason: str) -> None:
+    repo = tmp_path / "repo"
+    _package(repo, '{"build": "pnpm -r build"}')
+    _workspace_package(repo / "packages" / "hive-lib", {"name": "@hiveio/hive-lib", "types": "./dist/index.d.ts", "scripts": scripts},
+                       tsconfig=False)
+    _workspace_package(repo / "packages" / "web", {"dependencies": {"@hiveio/hive-lib": "workspace:*"}, "devDependencies": _TYPESCRIPT})
+    _package(repo / "packages" / "other", '{"typecheck": "tsc"}')
+    monkeypatch.setenv("PNPM_FAIL", fail)
+    monkeypatch.setenv("PNPM_FAIL_OUTPUT", "src/index.ts(1,1): error TS2304: Cannot find name 'x'.")
+
+    assert check_module._check_directory("hive/hive-io", repo, ".") == check_module.Result(
+        "hive/hive-io", ".", f"passed; not checked: needs @hiveio/hive-lib's build ({reason})", True)
+    assert "web: exec tsc --noEmit -p tsconfig.json" not in pnpm_log.read_text().splitlines()
+    assert "other: run typecheck" in pnpm_log.read_text().splitlines()
+
+
+def test_source_packages_are_checked_through_their_dependents(tmp_path: Path, pnpm_log: Path) -> None:
+    # denser: packages whose entry is their TypeScript sources compile only under the apps' compiler options.
+    repo = tmp_path / "repo"
+    _package(repo, '{"build": "turbo build"}')
+    # signer's entry names a source file its checkout lacks (denser's smart-signer): no build makes one.
+    for name, entry, dependencies, present in (("ui", "components/index.tsx", {}, True),
+                                               ("signer", "lib/index.ts", {"ui": "workspace:*"}, False),
+                                               ("lonely", "src/index.ts", {}, True)):
+        package = _workspace_package(repo / "packages" / name, {"main": f"./{entry}", "types": f"./{entry}",
+                                                                "dependencies": dependencies, "devDependencies": _TYPESCRIPT})
+        if present:
+            (package / entry).parent.mkdir(parents=True)
+            (package / entry).write_text("export {};\n")
+    _workspace_package(repo / "packages" / "web", {"dependencies": {"signer": "workspace:*"}, "devDependencies": _TYPESCRIPT})
+    _workspace_package(repo / "packages" / "checked", {"main": "./index.ts", "scripts": {"typecheck": "tsc"},
+                                                       "dependencies": {"ui": "workspace:*"}})
+    (repo / "packages" / "checked" / "index.ts").write_text("export {};\n")
+
+    assert check_module._check_directory("hive/denser", repo, ".") == check_module.Result(
+        "hive/denser", ".", "passed; packages/signer, packages/ui checked as TypeScript sources of their dependents", True)
+    assert pnpm_log.read_text().splitlines()[2:] == [
+        "checked: run typecheck", "lonely: exec tsc --noEmit -p tsconfig.json", "web: exec tsc --noEmit -p tsconfig.json"]
