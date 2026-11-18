@@ -14,9 +14,12 @@ a `nuxt` dependency) depending on `vue-tsc` `nuxi prepare` and then
 `nuxi typecheck` (a Nuxt project without vue-tsc has no type check), or for a
 project depending on `vue-tsc` `vue-tsc --noEmit -p tsconfig.json`, or for one
 depending on `typescript` (itself or through the directory's package.json)
-`tsc --noEmit -p tsconfig.json`; the tsconfig.json of a project declaring no
-compiler (its TypeScript runs through tsx, a test runner or a bundler) is no
-type check.
+`tsc --noEmit -p tsconfig.json`. A project with a tsconfig.json declaring no
+compiler (its TypeScript runs through tsx, a test runner or a bundler) gets the
+same tsc check only when a tsc resolves in its install (its own or the
+directory's node_modules/.bin, else PATH), and only advisorily: it is reported
+as passed when tsc passes, otherwise as `not checked: no declared compiler; tsc
+found <first error>`, never failing the consumer.
 A workspace project without such a script whose entry is its TypeScript sources
 (denser's packages) compiles only as part of the projects depending on it, under
 their compiler options: when one of those is type-checked it is reported as
@@ -49,6 +52,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -64,6 +68,7 @@ INSTALL_COMMAND = ("pnpm", "install", "--no-frozen-lockfile")
 TYPE_CHECK_SCRIPTS = ("typecheck", "type-check", "tsc")
 NUXT_PREPARE_COMMAND = ("pnpm", "exec", "nuxi", "prepare")
 NUXT_TYPE_CHECK_COMMAND = ("pnpm", "exec", "nuxi", "typecheck")
+_TSC_COMMAND = ("pnpm", "exec", "tsc", "--noEmit", "-p", "tsconfig.json")
 _NUXT_CONFIGS = ("nuxt.config.ts", "nuxt.config.js", "nuxt.config.mjs", "nuxt.config.mts", "nuxt.config.cjs", "nuxt.config.cts")
 _NPMRC = ROOT / "pnpm-config" / ".npmrc"
 _SCOPED_REGISTRY = re.compile(r"@[^\s=]+:registry=\S+")
@@ -90,12 +95,14 @@ class _PackageCheck(NamedTuple):
     """One package's type check: its exit status, the first error of a failure, and the paths
     of its own build output a failure needed (sorted, repo-relative; empty for any other
     failure) or whether it only reported TS18003; or, when it did not run, the builds of the
-    workspace packages it needs that are missing (`<package>'s build (<reason>)`)."""
+    workspace packages it needs that are missing (`<package>'s build (<reason>)`). `advisory`
+    marks a tsc check of a package declaring no compiler, whose failure fails nothing."""
     status: int
     first: Optional[str] = None
     missing_build: Tuple[str, ...] = ()
     no_inputs: bool = False
     unbuilt: Tuple[str, ...] = ()
+    advisory: bool = False
 
 
 class Result(NamedTuple):
@@ -157,8 +164,19 @@ def type_check_command(project: Path, workspace: Optional[Path] = None) -> Optio
     if vue_tsc:
         return ["pnpm", "exec", "vue-tsc", "--noEmit", "-p", "tsconfig.json"]
     if any(_depends_on(_manifest(package), "typescript") for package in (project, workspace or project)):
-        return ["pnpm", "exec", "tsc", "--noEmit", "-p", "tsconfig.json"]
+        return list(_TSC_COMMAND)
     return None
+
+
+def _undeclared_tsc_command(project: Path, workspace: Path, environment: Mapping[str, str]) -> Optional[List[str]]:
+    """`tsc --noEmit` on the tsconfig.json of a project of the installed workspace at `workspace`
+    that type_check_command gives no type check, when it is not a Nuxt project and a tsc resolves
+    where `pnpm exec` looks (the project's and the workspace's node_modules/.bin, then PATH in
+    `environment`); else None."""
+    if _is_nuxt(project) or not (project / "tsconfig.json").is_file():
+        return None
+    path = [str(package / "node_modules" / ".bin") for package in (project, workspace)] + [environment.get("PATH", "")]
+    return list(_TSC_COMMAND) if shutil.which("tsc", path=os.pathsep.join(path)) else None
 
 
 def _listed_projects(directory: Path, environment: Mapping[str, str]) -> List[Path]:
@@ -435,13 +453,18 @@ def _type_check(label: str, package: Path, repo: Path, command: List[str], envir
 def _type_check_outcome(checks: List[Tuple[str, _PackageCheck]]) -> Tuple[str, bool]:
     """The outcome of a directory whose packages' type checks (`where`, result) are `checks`, and
     whether it passed: a package not checked for its own build output or a workspace package's,
-    or without inputs, fails nothing."""
+    or without inputs, or an advisory check that failed, fails nothing."""
     missing_build = [path for _, check in checks for path in check.missing_build]
     unbuilt = sorted({build for _, check in checks for build in check.unbuilt})
-    checked = [(where, check) for where, check in checks if not check.missing_build and not check.no_inputs and not check.unbuilt]
+    ran = [(where, check) for where, check in checks if not check.missing_build and not check.no_inputs and not check.unbuilt]
+    advisory = [check for _, check in ran if check.advisory and check.status]
+    checked = [(where, check) for where, check in ran if not (check.advisory and check.status)]
     failed = [(where, check.first) for where, check in checked if check.status]
     own = [f"needs its own build ({', '.join(missing_build)})"] if missing_build else []
     reasons = own + [f"needs {build}" for build in unbuilt]
+    if advisory:
+        first = next((check.first for check in advisory if check.first), None)
+        reasons.append(f"no declared compiler; tsc found {first}" if first else f"no declared compiler; tsc failed (exit {advisory[0].status})")
     needs_build = f"not checked: {'; '.join(reasons)}"
     unchecked = f"; {needs_build}" if reasons else ""
     if failed:
@@ -492,7 +515,8 @@ def _type_checks(project: str, repo: Path, workspace: Path, projects: List[Path]
     workspace packages each one needs built. Returns each check (`where`, result) and those
     source packages."""
     packages = [workspace] if _type_check_script(workspace) else projects
-    commands = {package: type_check_command(package, workspace) for package in packages}
+    declared = {package: type_check_command(package, workspace) for package in packages}
+    commands = {package: command or _undeclared_tsc_command(package, workspace, environment) for package, command in declared.items()}
     through_dependents = _checked_through_dependents(commands, projects)
     tried: Dict[Path, Optional[str]] = {}
     checks: List[Tuple[str, _PackageCheck]] = []
@@ -505,7 +529,8 @@ def _type_checks(project: str, repo: Path, workspace: Path, projects: List[Path]
             print(f"-- {project} {where}: not type-checked: needs {', '.join(unbuilt)}", flush=True)
             checks.append((where, _PackageCheck(0, unbuilt=unbuilt)))
         else:
-            checks.append((where, _type_check(f"{project} {where}", package, repo, command, environment)))
+            check = _type_check(f"{project} {where}", package, repo, command, environment)
+            checks.append((where, check._replace(advisory=declared[package] is None)))
     return checks, through_dependents
 
 
