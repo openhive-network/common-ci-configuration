@@ -14,6 +14,7 @@ These tools were previously located in the `haf` repository and required apps to
 | `create_haf_app_role.sh` | Creates HAF application PostgreSQL roles with proper group membership |
 | `copy_datadir.sh` | Copies HAF data directories with NFS cache fallback and symlink fixing |
 | `haf_app_driver.py` | Generic block-processing driver for registered HAF applications (replaces eternal `CALL main()`, haf#341); shipped in the `psql` image as `/usr/local/bin/haf_app_driver.py`. A range processor that cannot handle its range yet raises `RAISE EXCEPTION '...' USING ERRCODE = '55R23'`: the driver rolls the iteration back and asks again later on the same connection (see the script's docstring) |
+| `install_with_app_lock.py` | Runs an app's installer under HAF's exclusive install lock (`hive.try_acquire_app_install_lock`); shipped in the `psql` image as `/usr/local/bin/install_with_app_lock.py`. When a block-processor or the app's PostgREST holds the lock it skips a rerun of the installed version and fails an upgrade, see [Install lock and upgrades](#install-lock-and-upgrades) |
 
 ### Python (`python/`)
 
@@ -61,6 +62,48 @@ variables:
 # Process OpenAPI
 pip install -r /tmp/haf-app-tools/requirements.txt
 python3 /tmp/haf-app-tools/process_openapi.py output_dir/ endpoints/*.sql
+```
+
+## Install lock and upgrades
+
+An app's `install_app.sh` re-executes itself under the wrapper:
+
+```bash
+install_with_app_lock.py [--version=VERSION] [--version-query=SQL] APP_NAME DSN CMD [ARG ...]
+```
+
+The wrapper runs `CMD` when it gets the app's exclusive install lock. While a holder of the
+app's shared lock is active (its block-processor, or its PostgREST on a HAF API node) it does not
+run `CMD`, because the install would drop and recreate functions that holder is using. Whether
+that skip succeeds depends on the version the app gives the wrapper:
+
+| Option | Environment fallback | Meaning |
+|--------|----------------------|---------|
+| `--version=VERSION` | `HAF_APP_INSTALL_VERSION` | The version `CMD` installs, e.g. the git hash the app writes into `set_version_in_sql.pgsql` |
+| `--version-query=SQL` | `HAF_APP_INSTALLED_VERSION_QUERY` | A schema-qualified query whose first column of its first row is the version the database holds, e.g. `SELECT git_hash FROM btracker_app.version` |
+
+Options go before `APP_NAME`; everything from `CMD` on is passed to `CMD` unchanged.
+
+| Lock | Installed version (from `SQL`) | Result |
+|------|--------------------------------|--------|
+| free | - | `CMD` runs; the wrapper exits with its status |
+| held | equal to `VERSION` | skip logged, exit 0 (a rerun of the same version) |
+| held | different, NULL, no row, or the query's function/table/schema does not exist (app not installed) | exit 1, naming the holder, both versions and the recovery: stop `<app>-postgrest` and any other holder, rerun the install, start them again |
+| held | the query fails otherwise (e.g. permissions) | warning that the version cannot be determined, skip logged, exit 0 |
+| held | `VERSION` or `SQL` not given | skip logged, exit 0; a warning at start says upgrade detection is off for the app |
+| no `hive.try_acquire_app_install_lock` (HAF predates the helpers) | - | warning, `CMD` runs without the lock |
+
+The apps that record their git hash at install (`generate_version_sql.sh` writes
+`TRUNCATE TABLE version; INSERT INTO version(git_hash) ...` into `set_version_in_sql.pgsql`, in
+balance_tracker, reputation_tracker and HAfAH as `hafah_backend.version`) need no schema change:
+their `install_app.sh` passes the hash it installs and a query of that table, for example
+balance_tracker:
+
+```bash
+VERSION=$(grep -o "VALUES ('[0-9a-f]*')" "$SCRIPTPATH/set_version_in_sql.pgsql" | grep -o "[0-9a-f]\{40\}")
+exec python3 /usr/local/bin/install_with_app_lock.py \
+  --version="$VERSION" --version-query="SELECT git_hash FROM ${BTRACKER_SCHEMA}.version" \
+  "$APP_LOCK_NAME" "$POSTGRES_ACCESS" "$0" "${ORIGINAL_ARGS[@]}"
 ```
 
 ## Migration from haf Submodule
