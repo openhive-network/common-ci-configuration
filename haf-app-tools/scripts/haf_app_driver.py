@@ -42,6 +42,7 @@ anything else ends the driver.
 """
 
 import argparse
+import collections
 import datetime
 import os
 import select
@@ -62,7 +63,7 @@ STILL_WAITING_LOG_INTERVAL = 600.0  # seconds between "still waiting" lines duri
 LOG_FILE = None  # opened by main() when --log-file is given
 
 
-def emit(line):
+def emit(line) -> None:
     """Write one line to stdout and, when configured, the log file (appended,
     line-buffered; logrotate's copytruncate works with O_APPEND writers)."""
     if not line.endswith("\n"):
@@ -74,7 +75,7 @@ def emit(line):
         LOG_FILE.flush()
 
 
-def log(msg):
+def log(msg) -> None:
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     emit(f"{ts} {msg}")
 
@@ -98,14 +99,14 @@ class Stop(Exception):
 class RetryLater(Exception):
     """The process procedure raised RETRY_LATER_SQLSTATE for blocks; the range was rolled back."""
 
-    def __init__(self, blocks, message):
+    def __init__(self, blocks, message) -> None:
         super().__init__(message)
         self.blocks = blocks
         self.message = message
 
 
 class Driver:
-    def __init__(self, args):
+    def __init__(self, args) -> None:
         self.args = args
         self.app = args.app
         self.conn = None
@@ -132,7 +133,7 @@ class Driver:
         self.retry_wait = None       # seconds before the next retry of that wait
 
     # -- signals -----------------------------------------------------------
-    def request_stop(self, signum, frame):
+    def request_stop(self, signum, frame) -> None:
         if not self.stop_requested:
             log(f"signal {signal.Signals(signum).name} received, stopping after the current iteration")
         self.stop_requested = True
@@ -144,6 +145,9 @@ class Driver:
     # -- connection --------------------------------------------------------
     def connect(self):
         self.conn = psycopg2.connect(self.args.postgres_url)
+        # psycopg2's default notices list keeps only the last 50; it appends to
+        # any other object without truncating, so one long call loses none.
+        self.conn.notices = collections.deque()
         self.conn.autocommit = True
         cur = self.conn.cursor()
         for channel in NOTIFY_CHANNELS:
@@ -187,11 +191,16 @@ class Driver:
             log("warning: hive.app_perform_maintenance is not available; shadow tables will not be vacuumed")
         self.was_paused = paused
 
-    def drain_notices(self):
+    def drain_notices(self) -> None:
         """Server-side RAISE INFO/NOTICE/WARNING from the application. Multi-line
         messages are kept together; empty trailing lines are dropped; messages
-        below --server-messages are discarded."""
-        if not self.conn.notices:
+        below --server-messages are discarded.
+
+        Runs only after a statement returns: psycopg2 has no notice callback,
+        so emitting them while it runs would need psycopg3's
+        add_notice_handler. The timestamp is therefore drain time, not the
+        time the server raised the notice."""
+        if self.conn is None or not self.conn.notices:
             return
         for n in self.conn.notices:
             lines = [l.rstrip() for l in n.rstrip("\n").split("\n")]
@@ -205,7 +214,7 @@ class Driver:
             emit(f"{ts} {lines[0]}")
             for extra in lines[1:]:
                 emit(f"    {extra}")
-        del self.conn.notices[:]
+        self.conn.notices.clear()
 
     # -- one iteration -----------------------------------------------------
     def iterate(self):
@@ -263,7 +272,7 @@ class Driver:
                 self.drain_notices()
         return blocks
 
-    def report(self, blocks, elapsed):
+    def report(self, blocks, elapsed) -> None:
         first, last = blocks
         count = last - first + 1
         if count > 1:
@@ -281,7 +290,7 @@ class Driver:
         if time.monotonic() - self.live_window_start >= self.args.live_log_interval:
             self.flush_live_summary()
 
-    def flush_live_summary(self):
+    def flush_live_summary(self) -> None:
         if self.live_blocks:
             log(
                 f"live: {self.live_blocks} block(s) {self.live_first}..{self.live_last} processed, "
@@ -314,7 +323,7 @@ class Driver:
             self.was_gated = gated
         return current
 
-    def wait_for_event(self):
+    def wait_for_event(self) -> None:
         # NOTIFY wakes us for new blocks; only dependency progress and resumes are
         # silent, so poll tightly just while gated or paused
         timeout = self.args.poll_interval if (self.was_gated or self.was_paused) else self.args.safety_interval
@@ -326,7 +335,7 @@ class Driver:
             del self.conn.notifies[:]
 
     # -- main loop ---------------------------------------------------------
-    def run(self):
+    def run(self) -> int:
         signal.signal(signal.SIGTERM, self.request_stop)
         signal.signal(signal.SIGINT, self.request_stop)
         if self.args.startup_marker:
@@ -378,7 +387,7 @@ class Driver:
         self.flush_live_summary()
         log("stopped")
 
-    def retry_later(self, e):
+    def retry_later(self, e) -> None:
         """The iteration was rolled back (RETRY_LATER_SQLSTATE). Log when a wait starts and every
         STILL_WAITING_LOG_INTERVAL while it lasts, then sleep before asking again on the same
         connection: --poll-interval at first, doubling up to --retry-delay (or up to
@@ -400,10 +409,10 @@ class Driver:
         # a rolled-back try is not an iteration for the batch and live-summary lines
         self.iterations = 0
 
-    def sleep(self, seconds):
+    def sleep(self, seconds) -> None:
         select.select([self.wake_r], [], [], seconds)
 
-    def close(self):
+    def close(self) -> None:
         if self.conn is not None:
             try:
                 self.conn.close()
