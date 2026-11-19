@@ -11,7 +11,7 @@ import sys
 import types
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import pytest
 
@@ -36,11 +36,11 @@ PSYCOPG2_LIST_LIMIT = 50
 
 
 class FakeCursor:
-    def __init__(self, conn: "FakeConn") -> None:
+    def __init__(self: Self, conn: "FakeConn") -> None:
         self.conn = conn
         self.result: tuple[Any, ...] | None = None
 
-    def execute(self, sql: str, params: object = None) -> None:
+    def execute(self: Self, sql: str, params: object = None) -> None:
         if sql.startswith("SELECT contexts"):
             self.result = (["app"], "app.process", False)
         elif sql.startswith("SELECT to_regprocedure"):
@@ -50,7 +50,7 @@ class FakeCursor:
                 self.conn.notice(notice)
             self.result = (100,)
 
-    def fetchone(self) -> tuple[Any, ...] | None:
+    def fetchone(self: Self) -> tuple[Any, ...] | None:
         return self.result
 
 
@@ -58,17 +58,17 @@ class FakeConn:
     """Collects notices as psycopg2 2.7+ does: appended to whatever conn.notices is, and a
     list (the default) trimmed to its last 50 entries."""
 
-    def __init__(self, raised: list[str]) -> None:
+    def __init__(self: Self, raised: list[str]) -> None:
         self.raised = raised
         self.notices: Any = []
         self.autocommit = False
 
-    def notice(self, text: str) -> None:
+    def notice(self: Self, text: str) -> None:
         self.notices.append(text)
         if isinstance(self.notices, list) and len(self.notices) > PSYCOPG2_LIST_LIMIT:
             del self.notices[:-PSYCOPG2_LIST_LIMIT]
 
-    def cursor(self) -> FakeCursor:
+    def cursor(self: Self) -> FakeCursor:
         return FakeCursor(self)
 
 
