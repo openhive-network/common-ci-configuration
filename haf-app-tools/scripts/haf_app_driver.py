@@ -42,6 +42,7 @@ anything else ends the driver.
 """
 
 import argparse
+import collections
 import datetime
 import os
 import select
@@ -144,6 +145,9 @@ class Driver:
     # -- connection --------------------------------------------------------
     def connect(self):
         self.conn = psycopg2.connect(self.args.postgres_url)
+        # psycopg2's default notices list keeps only the last 50; it appends to
+        # any other object without truncating, so one long call loses none.
+        self.conn.notices = collections.deque()
         self.conn.autocommit = True
         cur = self.conn.cursor()
         for channel in NOTIFY_CHANNELS:
@@ -190,8 +194,13 @@ class Driver:
     def drain_notices(self):
         """Server-side RAISE INFO/NOTICE/WARNING from the application. Multi-line
         messages are kept together; empty trailing lines are dropped; messages
-        below --server-messages are discarded."""
-        if not self.conn.notices:
+        below --server-messages are discarded.
+
+        Runs only after a statement returns: psycopg2 has no notice callback,
+        so emitting them while it runs would need psycopg3's
+        add_notice_handler. The timestamp is therefore drain time, not the
+        time the server raised the notice."""
+        if self.conn is None or not self.conn.notices:
             return
         for n in self.conn.notices:
             lines = [l.rstrip() for l in n.rstrip("\n").split("\n")]
@@ -205,7 +214,7 @@ class Driver:
             emit(f"{ts} {lines[0]}")
             for extra in lines[1:]:
                 emit(f"    {extra}")
-        del self.conn.notices[:]
+        self.conn.notices.clear()
 
     # -- one iteration -----------------------------------------------------
     def iterate(self):
