@@ -42,6 +42,7 @@ for _name, _module in _saved.items():
 APP = "balance_tracker"
 DSN = "postgresql://haf_admin@haf/haf_block_log"
 HOLDER = "NOTICE:  install lock for balance_tracker held by pid 4242 (balance_tracker-postgrest)"
+PROCESSOR_HOLDER = "NOTICE:  install lock for balance_tracker held by pid 5151 (balance_tracker-block-processing)"
 VERSION_QUERY = "SELECT git_hash FROM btracker_app.version"
 OLD = "1111111111111111111111111111111111111111"
 NEW = "2222222222222222222222222222222222222222"
@@ -51,8 +52,10 @@ class FakeDatabase:
     """The server side: whether the lock is free and what the version query sees."""
 
     def __init__(self: Self, *, lock_free: bool, installed: str | None = None,
-                 version_error: type[Exception] | None = None, lock_helpers: bool = True) -> None:
+                 version_error: type[Exception] | None = None, lock_helpers: bool = True,
+                 holder: str | None = HOLDER) -> None:
         self.lock_free = lock_free
+        self.holder = holder
         self.installed = installed
         self.version_error = version_error
         self.lock_helpers = lock_helpers
@@ -79,8 +82,8 @@ class FakeCursor:
         if sql.startswith("SELECT hive.try_acquire_app_install_lock"):
             if not db.lock_helpers:
                 raise _pg_errors.UndefinedFunction("function hive.try_acquire_app_install_lock(text) does not exist")
-            if not db.lock_free:
-                self.conn.notices.append(HOLDER + "\n")
+            if not db.lock_free and db.holder is not None:
+                self.conn.notices.append(db.holder + "\n")
             self.result = (db.lock_free,)
         elif sql == VERSION_QUERY:
             if db.version_error is not None:
@@ -150,7 +153,40 @@ def test_held_lock_other_version_fails_with_recovery(monkeypatch: pytest.MonkeyP
     [error] = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
     assert f"Cannot install {APP} version {NEW}: the installed version is {OLD}" in error
     assert HOLDER in error
-    assert f"stop {APP}-postgrest and any other holder of the lock, rerun the install" in error
+    assert f"To upgrade: stop the lock's holder(s) ({HOLDER}), rerun the install" in error
+
+
+def test_held_lock_by_processor_names_processor_not_postgrest(monkeypatch: pytest.MonkeyPatch,
+                                                              tmp_path: Path,
+                                                              caplog: pytest.LogCaptureFixture) -> None:
+    db = FakeDatabase(lock_free=False, installed=OLD, holder=PROCESSOR_HOLDER)
+
+    status, ran = run_wrapper(monkeypatch, tmp_path, db, versioned(NEW))
+
+    assert (status, ran) == (1, False)
+    [error] = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert f"To upgrade: stop the lock's holder(s) ({PROCESSOR_HOLDER}), rerun the install" in error
+    assert "-postgrest" not in error
+
+
+def test_held_lock_without_holder_names_no_service(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                                   caplog: pytest.LogCaptureFixture) -> None:
+    db = FakeDatabase(lock_free=False, installed=OLD, holder=None)
+
+    status, ran = run_wrapper(monkeypatch, tmp_path, db, versioned(NEW))
+
+    assert (status, ran) == (1, False)
+    [error] = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert "held by another session (no holder reported)" in error
+    assert f"To upgrade: stop every service that holds the {APP} lock, rerun the install" in error
+    assert "-postgrest" not in error
+    assert "block-processing" not in error
+
+
+def test_held_lock_by_processor_same_version_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db = FakeDatabase(lock_free=False, installed=OLD, holder=PROCESSOR_HOLDER)
+
+    assert run_wrapper(monkeypatch, tmp_path, db, versioned(OLD)) == (0, False)
 
 
 @pytest.mark.parametrize("db", [
