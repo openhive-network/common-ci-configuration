@@ -128,12 +128,16 @@ def _skip_or_fail(conn: "psycopg2.extensions.connection", app_name: str, setting
                      "by an active block-processor.", app_name, version)
             return 0
 
+    if holder:
+        to_stop = f"the lock's holder(s) ({'; '.join(holder)})"
+    else:
+        to_stop = f"every service that holds the {app_name} lock"
     log.error(
         "Cannot install %s version %s: the installed version is %s, and the install lock is held by "
         "%s. Skipping would leave the old version serving under the new image. To upgrade: stop "
-        "%s-postgrest and any other holder of the lock, rerun the install, then start them again.",
+        "%s, rerun the install, then start them again.",
         app_name, version, installed, "; ".join(holder) or "another session (no holder reported)",
-        app_name,
+        to_stop,
     )
     return _EXIT_UPGRADE_BLOCKED
 
