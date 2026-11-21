@@ -38,11 +38,19 @@ variables:
 # and the refreshed lockfile is kept as an artifact. Any other failure stays fatal.
 # With CCC_SUBMODULE_DIR set, ccc's catalogs are merged into the job's copy of
 # pnpm-workspace.yaml first, so a monorepo takes a catalog bump the same way.
+# Both files live at the workspace root, which, as pnpm finds it, is the nearest
+# directory upward holding pnpm-workspace.yaml (SOURCE_DIR may be a sub-package);
+# without one it is SOURCE_DIR.
 .pnpm_install_with_catalog_fallback:
   script:
     - |
+      pnpm_workspace_root="${PWD}"
+      while [ ! -f "${pnpm_workspace_root}/pnpm-workspace.yaml" ] && [ "${pnpm_workspace_root}" != "/" ]; do
+        pnpm_workspace_root="$(dirname "${pnpm_workspace_root}")"
+      done
+      [ -f "${pnpm_workspace_root}/pnpm-workspace.yaml" ] || pnpm_workspace_root="${PWD}"
       if [ -n "${CCC_SUBMODULE_DIR:-}" ]; then
-        python3 "${CCC_SUBMODULE_DIR}/scripts/python/pnpm-catalog-sync.py" pnpm-workspace.yaml || exit $?
+        python3 "${CCC_SUBMODULE_DIR}/scripts/python/pnpm-catalog-sync.py" "${pnpm_workspace_root}/pnpm-workspace.yaml" || exit $?
       fi
       pnpm_install_log="$(mktemp)"
       # pnpm's status goes through a file: without pipefail the pipeline reports tee's
@@ -54,7 +62,11 @@ variables:
         fi
         echo "The ccc catalog changed since pnpm-lock.yaml was written (ERR_PNPM_LOCKFILE_CONFIG_MISMATCH): falling back to pnpm --recursive install --no-frozen-lockfile"
         pnpm --recursive install --no-frozen-lockfile || exit $?
-        cp pnpm-lock.yaml "${CI_PROJECT_DIR}/pnpm-lock.catalog-refreshed.yaml" || exit $?
+        if [ ! -f "${pnpm_workspace_root}/pnpm-lock.yaml" ]; then
+          echo "No pnpm-lock.yaml in ${pnpm_workspace_root} after the unfrozen install (pnpm-workspace.yaml searched from ${PWD} up to /)" >&2
+          exit 1
+        fi
+        cp "${pnpm_workspace_root}/pnpm-lock.yaml" "${CI_PROJECT_DIR}/pnpm-lock.catalog-refreshed.yaml" || exit $?
         echo "Refreshed lockfile kept as the pnpm-lock.catalog-refreshed.yaml artifact"
       fi
 
