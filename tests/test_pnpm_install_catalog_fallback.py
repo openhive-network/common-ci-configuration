@@ -1,7 +1,8 @@
 """The `.npm_based_job_base` install: frozen, unfrozen only on a ccc catalog change.
 
 The template's install script is run as GitLab's bash shell runs it, against a
-fake `pnpm` that fails the frozen install the way pnpm does.
+fake `pnpm` that fails the frozen install the way pnpm does and, like pnpm, writes
+the lockfile at the workspace root (nearest pnpm-workspace.yaml upward, else cwd).
 """
 
 import os
@@ -30,7 +31,11 @@ case "$*" in
         echo ' ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with "frozen-lockfile" because pnpm-lock.yaml is not up to date with package.json' >&2
         exit 1 ;;
     esac ;;
-  *--no-frozen-lockfile*) echo "refreshed" > pnpm-lock.yaml ;;
+  *--no-frozen-lockfile*)
+    root="$PWD"
+    while [ ! -f "$root/pnpm-workspace.yaml" ] && [ "$root" != / ]; do root="$(dirname "$root")"; done
+    [ -f "$root/pnpm-workspace.yaml" ] || root="$PWD"
+    if [ -n "$DROP_LOCKFILE" ]; then rm -f "$root/pnpm-lock.yaml"; else echo "refreshed" > "$root/pnpm-lock.yaml"; fi ;;
 esac
 """
 
@@ -87,7 +92,11 @@ def _extends_npm_base(jobs: Dict[str, Any], name: str) -> bool:
 
 
 def _run_install(
-    tmp_path: Path, frozen_result: str, shell_opts: str, extra_env: Optional[Dict[str, str]] = None
+    tmp_path: Path,
+    frozen_result: str,
+    shell_opts: str,
+    extra_env: Optional[Dict[str, str]] = None,
+    source_dir: str = ".",
 ) -> "subprocess.CompletedProcess[str]":
     jobs = _jobs()
     script = "\n".join(_commands(jobs, _Reference([".pnpm_install_with_catalog_fallback", "script"])))
@@ -99,6 +108,8 @@ def _run_install(
     project = tmp_path / "project"
     project.mkdir(exist_ok=True)
     (project / "pnpm-lock.yaml").write_text("committed\n")
+    cwd = project / source_dir
+    cwd.mkdir(parents=True, exist_ok=True)
     env = {
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -110,7 +121,7 @@ def _run_install(
     }
     return subprocess.run(
         ["bash", "-c", f"{shell_opts}\n{script}"],
-        cwd=project, env=env, capture_output=True, text=True, check=False,
+        cwd=cwd, env=env, capture_output=True, text=True, check=False,
     )
 
 
@@ -202,3 +213,51 @@ def test_monorepo_with_unmergeable_workspace_fails_before_installing(tmp_path: P
     assert proc.returncode == 2
     assert "named like ccc catalogs" in proc.stderr
     assert not (tmp_path / "pnpm.calls").exists()
+
+
+def _workspace(tmp_path: Path, workspace: str = "packages:\n  - packages/*\n") -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "pnpm-workspace.yaml").write_text(workspace)
+
+
+@SHELL_OPTS
+def test_sub_package_job_keeps_the_workspace_root_lockfile(tmp_path: Path, shell_opts: str) -> None:
+    _workspace(tmp_path)
+
+    proc = _run_install(tmp_path, "mismatch", shell_opts, source_dir="packages/pkg")
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "Refreshed lockfile kept as the pnpm-lock.catalog-refreshed.yaml artifact" in proc.stdout
+    assert (tmp_path / "project" / REFRESHED_LOCKFILE).read_text() == "refreshed\n"
+    assert not (tmp_path / "project" / "packages" / "pkg" / "pnpm-lock.yaml").exists()
+
+
+@SHELL_OPTS
+def test_sub_package_job_of_monorepo_merges_into_the_workspace_root(tmp_path: Path, shell_opts: str) -> None:
+    env = _monorepo(tmp_path, "19.3.1", "packages:\n  - packages/*\n")
+    env["CCC_SUBMODULE_DIR"] = "../../ccc"
+
+    proc = _run_install(tmp_path, "mismatch", shell_opts, env, source_dir="packages/pkg")
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    workspace = yaml.safe_load((tmp_path / "project" / "pnpm-workspace.yaml").read_text())
+    assert workspace["catalogs"] == {"react-toolset": {"react": "19.3.1"}}
+    assert not (tmp_path / "project" / "packages" / "pkg" / "pnpm-workspace.yaml").exists()
+    assert (tmp_path / "project" / REFRESHED_LOCKFILE).read_text() == "refreshed\n"
+
+
+@SHELL_OPTS
+def test_missing_refreshed_lockfile_fails_naming_the_search(tmp_path: Path, shell_opts: str) -> None:
+    _workspace(tmp_path)
+    project = tmp_path / "project"
+
+    proc = _run_install(
+        tmp_path, "mismatch", shell_opts, {"DROP_LOCKFILE": "1"}, source_dir="packages/pkg"
+    )
+
+    assert proc.returncode == 1
+    assert f"No pnpm-lock.yaml in {project} after the unfrozen install" in proc.stderr
+    assert f"searched from {project / 'packages' / 'pkg'} up to /" in proc.stderr
+    assert "cannot stat" not in proc.stderr
+    assert not (project / REFRESHED_LOCKFILE).exists()
