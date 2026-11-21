@@ -70,7 +70,11 @@ Retrieves a cache entry. Search order:
 
 On NFS cache hit, the tar is also copied to local cache for future use on the same builder.
 
-**Locking:** Uses shared lock (`flock -s`) during extraction so multiple jobs can read simultaneously.
+**Locking:** Extraction holds an exclusive lock on `<local-dest>.lock` from the check for an existing extraction through the tar, the post-extraction fixes and the `.extraction_complete` marker. A second job extracting the same cache on the builder waits for it (up to `CACHE_EXTRACT_LOCK_TIMEOUT`, default 3600 s, sized for a full multi-GB HAF extraction) and then reuses the result ("Cache already extracted by another job"). If the wait times out, `get` re-checks for the completion marker before giving up.
+
+**Exit status:** `0` the cache is ready at `<local-dest>`; `2` another job's extraction into `<local-dest>` was still running when the wait timed out. That is not a miss: the caller must not rebuild (replay) into `<local-dest>`, since that deletes the other job's tree. Any other non-zero status is a miss or a failure.
+
+**Stale and failed extractions:** a `<local-dest>` with a `datadir/` but no completion marker (an interrupted extraction or a replay, possibly with subdirectories owned by another uid) is removed before extracting. When tar fails, `get` logs the job uid and the owner and mode of the first path tar reported (or its nearest inspectable ancestor), and removes the partial tree under the lock.
 
 ### put
 
@@ -93,6 +97,7 @@ This "local-first" approach ensures the builder always has a local cache after P
 - Skips if cache already exists on NFS (but ensures local copy exists)
 - Uses atomic rename (`.tmp` → `.tar`) to prevent partial writes
 - Excludes `datadir/blockchain` from hive/haf caches (jobs use local block_log mount)
+- Excludes per-run state from every cache: `replay_running` (extracted with its original mtime it would look like a stale replay lock to `build_data.sh`), `consumers/` and `.extraction_complete`. `get` also removes a `replay_running` that older tars still carry.
 
 ### cleanup
 
@@ -315,7 +320,8 @@ All WAL files are kept in the cache. Previously there was an attempt to exclude 
 | `CACHE_LOCAL_PATH` | `/cache` | Local cache directory |
 | `CACHE_MAX_SIZE_GB` | `2000` | Max total NFS cache size |
 | `CACHE_MAX_AGE_DAYS` | `30` | Max cache age for eviction |
-| `CACHE_LOCK_TIMEOUT` | `120` | Lock timeout in seconds |
+| `CACHE_LOCK_TIMEOUT` | `120` | Lock timeout in seconds for NFS and tar writes |
+| `CACHE_EXTRACT_LOCK_TIMEOUT` | `3600` | Seconds `get` waits for another job's extraction into the same destination |
 | `CACHE_STALE_LOCK_MINUTES` | `10` | Break locks older than this |
 | `CACHE_QUIET` | `false` | Suppress verbose output |
 
