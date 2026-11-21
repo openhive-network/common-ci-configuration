@@ -167,7 +167,9 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf, sccache (`SCCACHE_VERSION`)
 
-**Current version:** `5.0.2-15` (sccache 0.19.0; `5.0.2-14` and older ship
+**Current version:** `5.0.2-16` (preloads healthchecker-component
+2.0.3-stable.261120204600, whose `ApiSetsComponent` takes `labels` and
+`setTitles` props; `5.0.2-15` has sccache 0.19.0; `5.0.2-14` and older ship
 sccache 0.8.1; `5.0.2-14` preloads healthchecker-component
 2.0.2-stable.261101230602, with API sets and a tailwindcss 4 peer; `5.0.2-13`'s
 `npm_build_package.sh` also builds the workspace root of a single-package project; `5.0.2-12` preloads TypeScript
