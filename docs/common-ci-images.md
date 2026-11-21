@@ -185,7 +185,7 @@ Playwright in their store; `5.0.2-5` and older also install TypeScript, rollup,
 typedoc and protobuf tooling globally, at versions of their own rather than the
 catalog's; `5.0.2-4`: Node 24, Playwright 1.59; `5.0.2-3` has Node 22)
 
-**Used by the templates:** `5.0.2-15` (`EMSCRIPTEN_IMAGE_TAG` in
+**Used by the templates:** `5.0.2-17` (`EMSCRIPTEN_IMAGE_TAG` in
 `templates/npm_projects.gitlab-ci.yml`; it moves only after the tag is
 published, see "Moving templates to a new image tag")
 
