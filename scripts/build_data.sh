@@ -161,6 +161,14 @@ WAIT_INTERVAL=60
 WAITED=0
 LOCK_FILE="$DATA_CACHE/replay_running"
 
+# cache-manager get holds an exclusive lock on DATA_CACHE.lock while it extracts into
+# DATA_CACHE; the tree (and any replay_running in it) is that job's, not a stale replay's
+EXTRACT_LOCK="${DATA_CACHE%/}.lock"
+if [[ -f "$EXTRACT_LOCK" ]] && ! flock -s -w "$MAX_WAIT_SECONDS" "$EXTRACT_LOCK" true; then
+  echo "ERROR: cache-manager is still extracting into $DATA_CACHE after ${MAX_WAIT_SECONDS}s; not replaying over it"
+  exit 1
+fi
+
 # Register interest in this cache directory
 # This prevents other jobs from cleaning it up while we're waiting or using it
 mkdir -p "$DATA_CACHE/consumers"

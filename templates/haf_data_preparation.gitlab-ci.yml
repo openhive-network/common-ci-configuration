@@ -187,9 +187,15 @@
 
       # 2. If no local cache, try to get from NFS via cache-manager
       if [[ "$LOCAL_CACHE_HIT" != "true" ]] && [[ -x "$CACHE_MANAGER" ]]; then
-        if "$CACHE_MANAGER" get "${HAF_CACHE_TYPE}" "$CACHE_KEY" "${DATA_CACHE_DIR}"; then
+        GET_STATUS=0
+        "$CACHE_MANAGER" get "${HAF_CACHE_TYPE}" "$CACHE_KEY" "${DATA_CACHE_DIR}" || GET_STATUS=$?
+        if [[ $GET_STATUS -eq 0 ]]; then
           echo "NFS cache hit for HAF commit $CACHE_KEY"
           NFS_CACHE_HIT=true
+        elif [[ $GET_STATUS -eq 2 ]]; then
+          # Another job is still extracting the cache into DATA_CACHE_DIR: a replay there would delete its tree
+          echo "ERROR: another job is still extracting the HAF cache into ${DATA_CACHE_DIR}; not replaying over it. Retry the job once it finishes."
+          exit 1
         fi
       fi
 
@@ -433,9 +439,15 @@
 
       # 2. If no local cache, try to get from NFS via cache-manager
       if [[ "$LOCAL_CACHE_HIT" != "true" ]] && [[ -x "$CACHE_MANAGER" ]]; then
-        if "$CACHE_MANAGER" get hive "$CACHE_KEY" "${DATA_CACHE_DIR}"; then
+        GET_STATUS=0
+        "$CACHE_MANAGER" get hive "$CACHE_KEY" "${DATA_CACHE_DIR}" || GET_STATUS=$?
+        if [[ $GET_STATUS -eq 0 ]]; then
           echo "NFS cache hit for HIVE commit $CACHE_KEY"
           NFS_CACHE_HIT=true
+        elif [[ $GET_STATUS -eq 2 ]]; then
+          # Another job is still extracting the cache into DATA_CACHE_DIR: a replay there would delete its tree
+          echo "ERROR: another job is still extracting the HIVE cache into ${DATA_CACHE_DIR}; not replaying over it. Retry the job once it finishes."
+          exit 1
         fi
       fi
 
