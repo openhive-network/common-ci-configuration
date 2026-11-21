@@ -27,13 +27,19 @@
 #   CACHE_MAX_SIZE_GB     - Max total NFS cache size (default: 4000)
 #   CACHE_LOCAL_MAX_GB    - Max local cache size (default: 3000)
 #   CACHE_MAX_AGE_DAYS    - Max cache age (default: 30)
-#   CACHE_LOCK_TIMEOUT    - Lock timeout in seconds (default: 3600)
+#   CACHE_LOCK_TIMEOUT    - Lock timeout in seconds for NFS/tar writes (default: 120)
+#   CACHE_EXTRACT_LOCK_TIMEOUT - Seconds get waits for another job's extraction into the
+#                           same destination (default: 3600)
 #   CACHE_QUIET           - Suppress verbose output (default: false)
 #   SHARED_BLOCK_LOG_LOCAL - Local block_log path (default: /blockchain/block_log_5m)
 #   SHARED_BLOCK_LOG_NFS   - NFS block_log path (default: /nfs/ci-cache/hive/blockchain/block_log_5m)
 #   BLOCK_LOG_SOURCE_DIR   - block_log linked into hive/haf caches extracted with an empty blockchain dir
 #                            (the first of it, SHARED_BLOCK_LOG_DIR and /blockchain/block_log_5m
 #                            that holds block_log* files)
+#
+# Exit status of get: 0 cache ready at <local-dest>, 2 another job's extraction into
+# <local-dest> was still running after CACHE_EXTRACT_LOCK_TIMEOUT (not a miss: do not
+# rebuild into <local-dest>), any other non-zero value a miss or failure.
 
 set -euo pipefail
 
@@ -68,6 +74,8 @@ CACHE_MAX_SIZE_GB="${CACHE_MAX_SIZE_GB:-4000}"
 CACHE_LOCAL_MAX_GB="${CACHE_LOCAL_MAX_GB:-3000}"
 CACHE_MAX_AGE_DAYS="${CACHE_MAX_AGE_DAYS:-30}"
 CACHE_LOCK_TIMEOUT="${CACHE_LOCK_TIMEOUT:-120}"  # 2 minutes (NFS writes take ~10s, 12x margin)
+# A multi-GB HAF tar takes minutes to extract; a waiter must outlast a whole extraction
+CACHE_EXTRACT_LOCK_TIMEOUT="${CACHE_EXTRACT_LOCK_TIMEOUT:-3600}"
 CACHE_STALE_LOCK_MINUTES="${CACHE_STALE_LOCK_MINUTES:-10}"  # Break locks older than this (writes take ~10s)
 CACHE_QUIET="${CACHE_QUIET:-false}"
 
@@ -78,6 +86,14 @@ SHARED_BLOCK_LOG_NFS="${SHARED_BLOCK_LOG_NFS:-/nfs/ci-cache/hive/blockchain/bloc
 # Completion marker - written after successful extraction to indicate cache is valid
 # If this file is missing, the extraction was interrupted and the cache is incomplete
 CACHE_COMPLETION_MARKER=".extraction_complete"
+
+EXIT_EXTRACTION_IN_PROGRESS=2
+_LOCK_WAIT_TIMED_OUT=75
+
+# Per-run state of a cache directory that must not travel inside a cache tar:
+# a replay_running extracted with its original mtime looks like a stale replay lock to
+# build_data.sh, and the marker must only ever be written by the extraction itself.
+_TAR_STATE_EXCLUDES="--exclude=./replay_running --exclude=./consumers --exclude=./${CACHE_COMPLETION_MARKER}"
 
 # Logging
 _log() {
@@ -728,6 +744,147 @@ _block_log_source_dir() {
     return 1
 }
 
+# Seconds elapsed since a `date +%s.%N` timestamp (awk: bc is missing from some job images)
+_seconds_since() {
+    awk -v start="$1" -v now="$(date +%s.%N)" 'BEGIN { printf "%.1f", now - start }'
+}
+
+# Remove a directory tree that may hold files of other uids (postgres 105)
+_remove_tree() {
+    local dir="$1"
+    sudo rm -rf "$dir" 2>/dev/null || rm -rf "$dir" 2>/dev/null || true
+    [[ ! -e "$dir" ]]
+}
+
+# Log the owner and mode of the first path tar reported, or of its nearest ancestor this
+# job can inspect when the path itself is unreachable (e.g. under a 0700 directory)
+_log_tar_failure() {
+    local dest_dir="$1"
+    local tar_errors="$2"
+    local member path
+    member=$(sed -n 's|^tar: \(\./[^:]*\): .*|\1|p' "$tar_errors" | head -n 1)
+    _error "tar reported $(wc -l < "$tar_errors") error lines (job uid $(id -u)); first lines:"
+    head -n 20 "$tar_errors" >&2
+    [[ -n "$member" ]] || return 0
+    path="${dest_dir}/${member#./}"
+    while [[ "$path" != "$dest_dir" ]] && ! sudo -n test -e "$path" 2>/dev/null && [[ ! -e "$path" ]]; do
+        path=$(dirname "$path")
+    done
+    _error "First failing path: ${member}; ${path} is $(sudo -n stat -c 'uid %u gid %g mode %a %F' "$path" 2>/dev/null \
+        || stat -c 'uid %u gid %g mode %a %F' "$path" 2>/dev/null || echo 'not inspectable')"
+}
+
+# Make an extracted hive/haf tree usable at its new location: link the shared block_log
+# into an empty blockchain dir, make pg_tblspc links relative, give pgdata back to postgres
+_fix_extracted_tree() {
+    local cache_type="$1"
+    local dest_dir="$2"
+    local block_log_source_dir="$3"
+
+    case "$cache_type" in
+        hive|haf*)
+            local blockchain_dir="${dest_dir}/datadir/blockchain" block_file
+            if [[ -n "$block_log_source_dir" ]] && [[ -d "$blockchain_dir" ]] && [[ -z "$(ls -A "$blockchain_dir" 2>/dev/null)" ]]; then
+                for block_file in "$block_log_source_dir"/block_log*; do
+                    if [[ -f "$block_file" ]]; then
+                        ln -sf "$block_file" "$blockchain_dir/$(basename "$block_file")" 2>/dev/null || true
+                    fi
+                done
+                _log "Linked shared block_log files"
+            fi
+            ;;
+    esac
+
+    [[ "$cache_type" == haf* ]] || return 0
+    local haf_store="${dest_dir}/datadir/haf_db_store" link dir
+    if [[ -d "${haf_store}/pgdata/pg_tblspc" ]]; then
+        for link in "${haf_store}/pgdata/pg_tblspc"/*; do
+            [[ -L "$link" ]] || continue
+            case "$(readlink "$link")" in
+                /*tablespace*)
+                    _log "Fixing pg_tblspc symlink: $(basename "$link")"
+                    sudo rm -f "$link" 2>/dev/null || rm -f "$link"
+                    sudo ln -s '../../tablespace' "$link" 2>/dev/null || ln -s '../../tablespace' "$link"
+                    ;;
+            esac
+        done
+    fi
+    for dir in "${haf_store}/pgdata" "${haf_store}/tablespace"; do
+        [[ -d "$dir" ]] || continue
+        sudo chmod 700 "$dir" 2>/dev/null || chmod 700 "$dir" 2>/dev/null || true
+        sudo chown -R 105:105 "$dir" 2>/dev/null || true
+    done
+}
+
+# Extract LOCAL_TAR_FILE into dest_dir. The caller must hold the destination lock.
+# Returns 0 when dest_dir holds a complete extraction (ours or an earlier job's), 1 otherwise;
+# a failed extraction is removed so the next job does not inherit a partial tree.
+_extract_locked() {
+    local cache_type="$1"
+    local dest_dir="$2"
+    local block_log_source_dir="$3"
+    local wait_start="$4"
+
+    _log "Exclusive lock acquired in $(_seconds_since "$wait_start")s"
+
+    if [[ -d "${dest_dir}/datadir" ]] && _is_extraction_complete "$dest_dir"; then
+        _log "Cache already extracted by another job (verified complete), skipping extraction"
+        return 0
+    fi
+
+    # A datadir without marker is an interrupted extraction or a replay; its subdirectories
+    # may belong to another uid even when the top level is writable, so it is removed whole
+    if [[ -d "$dest_dir" ]]; then
+        local needs_cleanup=false
+        if ! touch "${dest_dir}/.write_test" 2>/dev/null; then
+            _log "Stale extraction with permission issues, cleaning up"
+            needs_cleanup=true
+        else
+            rm -f "${dest_dir}/.write_test"
+        fi
+        if [[ -d "${dest_dir}/datadir" ]]; then
+            _log "Incomplete extraction detected (missing completion marker), cleaning up"
+            needs_cleanup=true
+        fi
+        if [[ "$needs_cleanup" == true ]] && ! _remove_tree "$dest_dir"; then
+            _error "Failed to clean up stale extraction at ${dest_dir} (files owned by another uid, e.g. postgres 105, and no sudo)"
+            return 1
+        fi
+    fi
+    if ! mkdir -p "$dest_dir"; then
+        _error "mkdir -p ${dest_dir} failed"
+        return 1
+    fi
+
+    local tar_size tar_errors extract_start
+    tar_size=$(stat -c %s "$LOCAL_TAR_FILE" 2>/dev/null || echo 0)
+    _log "Extracting ($(awk -v b="$tar_size" 'BEGIN { printf "%.2f", b / 1073741824 }')GB) to: $dest_dir"
+    tar_errors=$(mktemp)
+    extract_start=$(date +%s.%N)
+    if ! tar xf "$LOCAL_TAR_FILE" -C "$dest_dir" 2>"$tar_errors"; then
+        _error "tar extraction of $LOCAL_TAR_FILE failed"
+        _log_tar_failure "$dest_dir" "$tar_errors"
+        rm -f "$tar_errors"
+        if _remove_tree "$dest_dir"; then
+            _log "Removed partial extraction: $dest_dir"
+        else
+            _error "Could not remove partial extraction: $dest_dir"
+        fi
+        return 1
+    fi
+    cat "$tar_errors" >&2
+    rm -f "$tar_errors"
+    _log "Extraction completed in $(_seconds_since "$extract_start")s"
+
+    # Tars stored before replay_running was excluded still carry it
+    rm -f "${dest_dir}/replay_running"
+    _fix_extracted_tree "$cache_type" "$dest_dir" "$block_log_source_dir"
+
+    # Must be the LAST step - if we get here, the cache is valid
+    _write_completion_marker "$dest_dir"
+    _log "Wrote completion marker"
+}
+
 cmd_get() {
     local cache_type="$1"
     local cache_key="$2"
@@ -843,10 +1000,9 @@ cmd_get() {
     fi
 
     # 2. Extract from LOCAL tar with exclusive locking on destination
-    # Use exclusive lock on destination directory to prevent race conditions where multiple
-    # jobs on the same builder try to extract to the same location simultaneously.
-    # This was causing "Cannot open: File exists" errors when concurrent extractions collided.
-
+    # Extraction, post-extraction fixes and the completion marker all happen under one hold
+    # of the destination lock: a waiter that acquired it in between would otherwise see a
+    # datadir without marker and wipe the tree the first job is about to finish.
     local dest_lock="${local_dest}.lock"
     _touch_lock "$dest_lock"
 
@@ -854,179 +1010,32 @@ cmd_get() {
     # Note: _check_stale_lock returns 1 if not stale, which would trigger errexit
     _check_stale_lock "$dest_lock" || true
 
-    local get_start_time=$(date +%s.%N)
-    if _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$dest_lock" -c "
-        lock_acquired=\$(date +%s.%N)
-        echo \"[cache-manager] Exclusive lock acquired in \$(echo \"\$lock_acquired - $get_start_time\" | bc 2>/dev/null || echo '?')s\" >&2
-
-        # Re-check inside lock: another job may have finished extraction while we waited
-        # Must have BOTH datadir AND completion marker to be considered valid
-        if [ -d '${local_dest}/datadir' ] && [ -f '${local_dest}/${CACHE_COMPLETION_MARKER}' ]; then
-            echo '[cache-manager] Cache already extracted by another job (verified complete), skipping extraction' >&2
-            exit 0
-        fi
-
-        # Clean up incomplete/stale extraction if present
-        # Cases: permission issues, missing completion marker, or interrupted extraction
-        if [ -d '${local_dest}' ]; then
-            needs_cleanup=false
-
-            # Check for permission issues (can't write)
-            if ! touch '${local_dest}/.write_test' 2>/dev/null; then
-                echo '[cache-manager] Stale extraction with permission issues, cleaning up' >&2
-                needs_cleanup=true
-            else
-                rm -f '${local_dest}/.write_test'
-            fi
-
-            # Check for incomplete extraction (datadir exists but no completion marker)
-            if [ -d '${local_dest}/datadir' ] && [ ! -f '${local_dest}/${CACHE_COMPLETION_MARKER}' ]; then
-                echo '[cache-manager] Incomplete extraction detected (missing completion marker), cleaning up' >&2
-                needs_cleanup=true
-            fi
-
-            if [ \"\$needs_cleanup\" = true ]; then
-                sudo rm -rf '${local_dest}' 2>/dev/null || rm -rf '${local_dest}' 2>/dev/null || true
-                if [ -d '${local_dest}' ]; then
-                    echo '[cache-manager] ERROR: Failed to clean up stale extraction at ${local_dest}' >&2
-                    echo '[cache-manager] This usually means files are owned by a different user (uid 105)' >&2
-                    exit 1
-                fi
-            fi
-        fi
-        if ! mkdir -p '${local_dest}'; then
-            echo '[cache-manager] ERROR: mkdir -p ${local_dest} failed' >&2
-            exit 1
-        fi
-        if [ ! -d '${local_dest}' ]; then
-            echo '[cache-manager] ERROR: ${local_dest} is missing after mkdir -p (concurrent removal?)' >&2
-            exit 1
-        fi
-
-        tar_size=\$(stat -c %s '$LOCAL_TAR_FILE' 2>/dev/null || echo 0)
-        tar_size_gb=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / 1024\" | bc 2>/dev/null || echo '?')
-        echo \"[cache-manager] Extracting (\${tar_size_gb}GB) to: $local_dest\" >&2
-
-        extract_start=\$(date +%s.%N)
-        if ! tar xf '$LOCAL_TAR_FILE' -C '$local_dest'; then
-            # Tar failed (e.g. symlink already exists from a previous valid extraction)
-            # If a usable cache is already present, use it instead of failing
-            if [ -d '${local_dest}/datadir' ] && [ -f '${local_dest}/${CACHE_COMPLETION_MARKER}' ]; then
-                echo '[cache-manager] tar extraction failed but existing valid cache found, reusing it' >&2
-                exit 0
-            fi
-            echo '[cache-manager] ERROR: tar extraction failed and no existing valid cache' >&2
-            exit 1
-        fi
-        extract_end=\$(date +%s.%N)
-        extract_duration=\$(echo \"\$extract_end - \$extract_start\" | bc 2>/dev/null || echo '?')
-        throughput=\$(echo \"scale=2; \$tar_size / 1024 / 1024 / \$extract_duration\" | bc 2>/dev/null || echo '?')
-        echo \"[cache-manager] Extraction completed in \${extract_duration}s (\${throughput} MB/s)\" >&2
-    "; then
-        _log "Cache ready"
-    else
-        _error "Failed to acquire lock or extract tar archive"
-        # NOTE: We deliberately do NOT rm -rf "$local_dest" here. That would run
-        # outside the flock and can race with the next acquirer's mkdir/tar — see
-        # HAF pipeline 171604 job 3156584, where this cleanup landed mid-tar in
-        # the next job and removed its CWD. The in-lock cleanup at lines 821-846
-        # already handles "datadir exists without completion marker → wipe and
-        # retry" the next time anyone tries to extract this cache.
-        return 1
-    fi
-
-    # Post-extraction fixes - run inside exclusive lock to prevent race conditions
-    # where symlink modifications interfere with concurrent cp operations.
-    # See: https://gitlab.syncad.com/hive/HAfAH/-/pipelines/150169 for the failure mode.
-    #
-    # Skip if cache was already complete (extracted by another job) - no fixes needed
-    # and we may not have write permission to the directory created by another user/container
-    if [[ -f "${local_dest}/${CACHE_COMPLETION_MARKER}" ]]; then
-        _log "Cache extraction complete and verified"
-        _update_lru "$cache_type" "$cache_key"
-        return 0
-    fi
-
     local block_log_source_dir=""
     case "$cache_type" in
         hive|haf*) block_log_source_dir=$(_block_log_source_dir) || true ;;
     esac
 
-    if _flock_with_timeout "$CACHE_LOCK_TIMEOUT" -x "$dest_lock" -c "
-        # Link shared block_log for both hive and haf* caches (block_log files excluded from tar)
-        case '$cache_type' in
-            hive|haf*)
-                # Create block_log symlinks if blockchain dir exists but is empty
-                blockchain_dir='${local_dest}/datadir/blockchain'
-                if [ -n '${block_log_source_dir}' ] && [ -d \"\$blockchain_dir\" ] && [ -z \"\$(ls -A \"\$blockchain_dir\" 2>/dev/null)\" ]; then
-                    for block_file in '${block_log_source_dir}'/block_log* ; do
-                        if [ -f \"\$block_file\" ]; then
-                            ln -sf \"\$block_file\" \"\$blockchain_dir/\$(basename \"\$block_file\")\" 2>/dev/null || true
-                        fi
-                    done
-                    echo '[cache-manager] Linked shared block_log files' >&2
-                fi
-                ;;
-        esac
+    local wait_start extract_status=0
+    wait_start=$(date +%s.%N)
+    (
+        flock -x -w "$CACHE_EXTRACT_LOCK_TIMEOUT" 9 || exit "$_LOCK_WAIT_TIMED_OUT"
+        _extract_locked "$cache_type" "$local_dest" "$block_log_source_dir" "$wait_start"
+    ) 9>>"$dest_lock" || extract_status=$?
 
-        # Fix PostgreSQL permissions and symlinks for HAF caches
-        case '$cache_type' in
-            haf*)
-                pgdata_path='${local_dest}/datadir/haf_db_store/pgdata'
-                tablespace_path='${local_dest}/datadir/haf_db_store/tablespace'
-                pg_tblspc='${local_dest}/datadir/haf_db_store/pgdata/pg_tblspc'
-
-                # Fix pg_tblspc symlinks to use relative paths
-                if [ -d \"\$pg_tblspc\" ]; then
-                    for link in \"\$pg_tblspc\"/*; do
-                        if [ -L \"\$link\" ]; then
-                            target=\$(readlink \"\$link\")
-                            # Only fix if absolute path (relative paths are already correct)
-                            case \"\$target\" in
-                                /*tablespace*)
-                                    echo \"[cache-manager] Fixing pg_tblspc symlink: \$(basename \"\$link\")\" >&2
-                                    sudo rm -f \"\$link\" 2>/dev/null || rm -f \"\$link\"
-                                    sudo ln -s '../../tablespace' \"\$link\" 2>/dev/null || ln -s '../../tablespace' \"\$link\"
-                                    ;;
-                            esac
-                        fi
-                    done
-                fi
-
-                # Restore pgdata permissions
-                if [ -d \"\$pgdata_path\" ]; then
-                    sudo chmod 700 \"\$pgdata_path\" 2>/dev/null || chmod 700 \"\$pgdata_path\" 2>/dev/null || true
-                    sudo chown -R 105:105 \"\$pgdata_path\" 2>/dev/null || true
-                fi
-                if [ -d \"\$tablespace_path\" ]; then
-                    sudo chmod 700 \"\$tablespace_path\" 2>/dev/null || chmod 700 \"\$tablespace_path\" 2>/dev/null || true
-                    sudo chown -R 105:105 \"\$tablespace_path\" 2>/dev/null || true
-                fi
-                ;;
-        esac
-
-        # Write completion marker to indicate extraction is fully complete
-        # This must be the LAST step - if we get here, the cache is valid
-        cat > '${local_dest}/${CACHE_COMPLETION_MARKER}' 2>/dev/null <<MARKER || true
-timestamp=\$(date -Iseconds)
-hostname=\$(hostname)
-job_id=${CI_JOB_ID:-unknown}
-pipeline_id=${CI_PIPELINE_ID:-unknown}
-MARKER
-        chmod 644 '${local_dest}/${CACHE_COMPLETION_MARKER}' 2>/dev/null || true
-        echo '[cache-manager] Wrote completion marker' >&2
-    "; then
-        _log "Cache extraction complete and verified"
-    else
-        _error "Failed to apply post-extraction fixes"
-        # Clean up incomplete extraction since it's not marked as complete
-        if [[ -d "$local_dest" ]]; then
-            _log "Cleaning up incomplete extraction: $local_dest"
-            sudo rm -rf "$local_dest" 2>/dev/null || rm -rf "$local_dest" 2>/dev/null || true
+    if [[ $extract_status -eq $_LOCK_WAIT_TIMED_OUT ]]; then
+        if [[ -d "${local_dest}/datadir" ]] && _is_extraction_complete "$local_dest"; then
+            _log "Lock wait timed out, but another job's extraction into $local_dest has completed"
+            extract_status=0
+        else
+            _error "Timed out after ${CACHE_EXTRACT_LOCK_TIMEOUT}s waiting for the extraction lock on $local_dest; another job's extraction is still in progress (not a cache miss)"
+            return "$EXIT_EXTRACTION_IN_PROGRESS"
         fi
+    elif [[ $extract_status -ne 0 ]]; then
+        _error "Failed to extract tar archive into $local_dest"
         return 1
     fi
 
+    _log "Cache extraction complete and verified"
     _update_lru "$cache_type" "$cache_key"
     return 0
 }
@@ -1162,9 +1171,9 @@ cmd_put() {
         fi
 
         # Build exclusions - exclude block_log files but preserve RocksDB directories
-        local tar_excludes=""
+        local tar_excludes="$_TAR_STATE_EXCLUDES"
         if [[ "$cache_type" == "hive" ]] || [[ "$cache_type" == haf* ]]; then
-            tar_excludes=$(_build_blockchain_tar_excludes "$local_source")
+            tar_excludes+=" $(_build_blockchain_tar_excludes "$local_source")"
         fi
 
         # Create tar archive (local I/O on NFS host, still fast)
@@ -1216,9 +1225,9 @@ cmd_put() {
     fi
 
     # Build exclusions - exclude block_log files but preserve RocksDB directories
-    local tar_excludes=""
+    local tar_excludes="$_TAR_STATE_EXCLUDES"
     if [[ "$cache_type" == "hive" ]] || [[ "$cache_type" == haf* ]]; then
-        tar_excludes=$(_build_blockchain_tar_excludes "$local_source")
+        tar_excludes+=" $(_build_blockchain_tar_excludes "$local_source")"
     fi
 
     # Step 1: Create local tar with exclusive lock to prevent race conditions
