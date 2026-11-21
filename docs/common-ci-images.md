@@ -43,7 +43,7 @@ superseded `pypa_2_28-4`, `pypa_2_28-pg18-3` and `pypa_2_28-pg18-arm-1`)
 
 **Used by:** hive and wax build/test pipelines, and all Python jobs via
 `templates/python_projects.gitlab-ci.yml` (`PYTHON_IMAGE`, tag `PYTHON_IMAGE_TAG`:
-`:pypa_2_28-pg18-6`; it moves only after the tag is published, see "Moving
+`:pypa_2_28-pg18-7`; it moves only after the tag is published, see "Moving
 templates to a new image tag"). `.configuration_template` builds its venv with
 `python${PYTHON_VERSION}` and fails, naming the version and the job image, when
 that interpreter is missing or reports another version, so a job that overrides
@@ -167,9 +167,11 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf, sccache (`SCCACHE_VERSION`)
 
-**Current version:** `5.0.2-16` (preloads next and eslint-config-next 16.4.5,
-which fix GHSA-mfr8-8qww-v76h and GHSA-vc7v-qv4w-wrv8; `5.0.2-15` has sccache
-0.19.0; `5.0.2-14` and older ship
+**Current version:** `5.0.2-17` (preloads healthchecker-component
+2.0.3-stable.261120204600, whose `ApiSetsComponent` takes `labels` and
+`setTitles` props, and next and eslint-config-next 16.4.5; `5.0.2-16` preloads
+next and eslint-config-next 16.4.5, which fix GHSA-mfr8-8qww-v76h and
+GHSA-vc7v-qv4w-wrv8; `5.0.2-15` has sccache 0.19.0; `5.0.2-14` and older ship
 sccache 0.8.1; `5.0.2-14` preloads healthchecker-component
 2.0.2-stable.261101230602, with API sets and a tailwindcss 4 peer; `5.0.2-13`'s
 `npm_build_package.sh` also builds the workspace root of a single-package project; `5.0.2-12` preloads TypeScript
