@@ -167,7 +167,10 @@ WebAssembly build environment with Emscripten toolchain and pre-compiled depende
 - Pre-compiled WASM libraries: Boost, OpenSSL, secp256k1
 - Build tools: ninja, autoconf, libtool, protobuf, sccache (`SCCACHE_VERSION`)
 
-**Current version:** `5.0.2-17` (preloads healthchecker-component
+**Current version:** `5.0.2-18` (preloads hb-auth
+1.28.4-rc0-stable.261123185133, whose `Client` has `checkCredential`,
+`signWithCheck` and `getRequireActiveCheck`/`setRequireActiveCheck`;
+`5.0.2-17` preloads healthchecker-component
 2.0.3-stable.261120204600, whose `ApiSetsComponent` takes `labels` and
 `setTitles` props, and next and eslint-config-next 16.4.5; `5.0.2-16` preloads
 next and eslint-config-next 16.4.5, which fix GHSA-mfr8-8qww-v76h and
