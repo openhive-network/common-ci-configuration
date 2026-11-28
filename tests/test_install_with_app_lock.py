@@ -45,6 +45,8 @@ HOLDER = "NOTICE:  Skipping install: lock on balance_tracker held by balance_tra
 PROCESSOR_HOLDER = ("NOTICE:  Skipping install: lock on balance_tracker held by "
                     "balance_tracker_block_processing (pid=7253), balance_tracker_block_processing (pid=833), "
                     "balance_tracker_block_processing (pid=840)")
+INSTALLER_HOLDER = ("NOTICE:  Skipping install: another installer of balance_tracker is running: "
+                    "balance_tracker-install (pid=5150), balance_tracker-install (pid=5151)")
 VERSION_QUERY = "SELECT git_hash FROM btracker_app.version"
 OLD = "1111111111111111111111111111111111111111"
 NEW = "2222222222222222222222222222222222222222"
@@ -179,6 +181,30 @@ def test_held_lock_by_processor_names_each_holder_once(monkeypatch: pytest.Monke
     assert "To upgrade: stop the lock's holder(s) (balance_tracker_block_processing), rerun the install" in error
     assert error.count("balance_tracker_block_processing") == 2
     assert "-postgrest" not in error
+
+
+def test_held_lock_by_installer_waits_for_it(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                             caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO)
+    db = FakeDatabase(lock_free=False, installed=OLD, holder=INSTALLER_HOLDER)
+
+    status, ran = run_wrapper(monkeypatch, tmp_path, db, versioned(NEW))
+
+    assert (status, ran) == (1, False)
+    assert INSTALLER_HOLDER in [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    error = error_line(caplog)
+    assert "is held by balance_tracker-install (pid=5150, 5151). " in error
+    assert error.endswith(f"To upgrade: another installer of {APP} is running (balance_tracker-install); "
+                          "wait for it to finish, then rerun this install.")
+    assert error.count("balance_tracker-install") == 2
+    assert "stop" not in error
+    assert "start them again" not in error
+
+
+def test_held_lock_by_installer_same_version_skips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db = FakeDatabase(lock_free=False, installed=OLD, holder=INSTALLER_HOLDER)
+
+    assert run_wrapper(monkeypatch, tmp_path, db, versioned(OLD)) == (0, False)
 
 
 def test_held_lock_by_several_apps_groups_pids_by_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,

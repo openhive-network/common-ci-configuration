@@ -13,7 +13,7 @@ Tries to acquire the EXCLUSIVE advisory install lock for APP_NAME using DSN
   The lock is released when this process exits (cleanly, on signal, or on
   crash) because the psycopg connection is dropped.
 - If the lock is held by another session (a block-processor or the app's
-  PostgREST holding the shared lock), this prints the holder description
+  PostgREST holding the shared lock, or another installer of the app), this prints the holder description
   (forwarded from PG NOTICE) and does not run CMD. Whether that skip is an
   exit 0 or a failure depends on the app's version information:
 
@@ -75,25 +75,33 @@ def forward_notices(conn: "psycopg2.extensions.connection") -> list[str]:
     return forwarded
 
 
-def _describe_holders(notices: list[str]) -> tuple[str, str]:
-    """Return (holders with their pids, holders to stop) as named by the lock function's NOTICEs.
+def _describe_holders(notices: list[str]) -> tuple[str, str, str]:
+    """Return (holders with their pids, holders to stop, installers to wait for) from the lock function's NOTICEs.
 
-    A NOTICE in the form "... held by NAME (pid=N), NAME (pid=M), ..." yields each NAME once with
-    all of its pids; any other NOTICE is used whole, without its severity prefix. Both are empty
-    when there is no NOTICE.
+    A NOTICE in the form "... held by NAME (pid=N), NAME (pid=M), ..." names holders to stop, and one
+    in the form "... is running: NAME (pid=N), ..." names concurrent installers to wait for; each
+    NAME appears once with all of its pids. Any other NOTICE is used whole, without its severity
+    prefix, as a holder to stop. All are empty when there is no NOTICE.
     """
     pids: dict[str, list[str]] = {}
+    to_stop: list[str] = []
+    to_wait: list[str] = []
     other: list[str] = []
     for notice in notices:
         text = _SEVERITY_PREFIX.sub("", notice.strip())
-        _, held_by, holders = text.partition("held by ")
-        entries = _HOLDER_ENTRY.findall(holders) if held_by else []
+        for marker, names in (("held by ", to_stop), ("is running: ", to_wait)):
+            _, found, holders = text.partition(marker)
+            if found:
+                break
+        entries = _HOLDER_ENTRY.findall(holders) if found else []
         if not entries:
-            other.append(holders.strip().rstrip(" .") if held_by else text)
+            other.append(holders.strip().rstrip(" .") if found else text)
         for name, pid in entries:
+            if name not in pids:
+                names.append(name)
             pids.setdefault(name, []).append(pid)
     named = [f"{name} (pid={', '.join(name_pids)})" for name, name_pids in pids.items()]
-    return "; ".join(named + other), "; ".join(list(pids) + other)
+    return "; ".join(named + other), "; ".join(to_stop + other), "; ".join(to_wait)
 
 
 def _parse_args(argv: list[str]) -> tuple[dict[str, str | None], str, str, list[str]] | None:
@@ -152,17 +160,22 @@ def _skip_or_fail(conn: "psycopg2.extensions.connection", app_name: str, setting
                      "by an active block-processor.", app_name, version)
             return 0
 
-    held_by, holders_to_stop = _describe_holders(holder)
+    held_by, holders_to_stop, installers = _describe_holders(holder)
+    recovery = []
+    if installers:
+        recovery.append(f"another installer of {app_name} is running ({installers}); wait for it to finish")
     if holders_to_stop:
-        to_stop = f"the lock's holder(s) ({holders_to_stop})"
+        recovery.append(f"stop the lock's holder(s) ({holders_to_stop}), rerun the install, then start them again")
+    elif installers:
+        recovery.append("then rerun this install")
     else:
-        to_stop = f"every service that holds the {app_name} lock"
+        recovery.append(f"stop every service that holds the {app_name} lock, rerun the install, "
+                        "then start them again")
     log.error(
         "Cannot install %s version %s: the installed version is %s, and the install lock is held by "
-        "%s. Skipping would leave the old version serving under the new image. To upgrade: stop "
-        "%s, rerun the install, then start them again.",
+        "%s. Skipping would leave the old version serving under the new image. To upgrade: %s.",
         app_name, version, installed, held_by or "another session (no holder reported)",
-        to_stop,
+        ", ".join(recovery),
     )
     return _EXIT_UPGRADE_BLOCKED
 
