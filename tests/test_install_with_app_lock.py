@@ -41,8 +41,10 @@ for _name, _module in _saved.items():
 
 APP = "balance_tracker"
 DSN = "postgresql://haf_admin@haf/haf_block_log"
-HOLDER = "NOTICE:  install lock for balance_tracker held by pid 4242 (balance_tracker-postgrest)"
-PROCESSOR_HOLDER = "NOTICE:  install lock for balance_tracker held by pid 5151 (balance_tracker-block-processing)"
+HOLDER = "NOTICE:  Skipping install: lock on balance_tracker held by balance_tracker-postgrest (pid=4242)"
+PROCESSOR_HOLDER = ("NOTICE:  Skipping install: lock on balance_tracker held by "
+                    "balance_tracker_block_processing (pid=7253), balance_tracker_block_processing (pid=833), "
+                    "balance_tracker_block_processing (pid=840)")
 VERSION_QUERY = "SELECT git_hash FROM btracker_app.version"
 OLD = "1111111111111111111111111111111111111111"
 NEW = "2222222222222222222222222222222222222222"
@@ -143,30 +145,68 @@ def test_held_lock_same_version_skips(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
+def error_line(caplog: pytest.LogCaptureFixture) -> str:
+    [error] = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert "NOTICE:" not in error
+    assert "Skipping install:" not in error
+    return error
+
+
 def test_held_lock_other_version_fails_with_recovery(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
                                                      caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO)
     db = FakeDatabase(lock_free=False, installed=OLD)
 
     status, ran = run_wrapper(monkeypatch, tmp_path, db, versioned(NEW))
 
     assert (status, ran) == (1, False)
-    [error] = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
-    assert f"Cannot install {APP} version {NEW}: the installed version is {OLD}" in error
-    assert HOLDER in error
-    assert f"To upgrade: stop the lock's holder(s) ({HOLDER}), rerun the install" in error
+    assert HOLDER in [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    error = error_line(caplog)
+    assert (f"Cannot install {APP} version {NEW}: the installed version is {OLD}, and the install lock "
+            "is held by balance_tracker-postgrest (pid=4242). ") in error
+    assert "To upgrade: stop the lock's holder(s) (balance_tracker-postgrest), rerun the install" in error
 
 
-def test_held_lock_by_processor_names_processor_not_postgrest(monkeypatch: pytest.MonkeyPatch,
-                                                              tmp_path: Path,
-                                                              caplog: pytest.LogCaptureFixture) -> None:
-    db = FakeDatabase(lock_free=False, installed=OLD, holder=PROCESSOR_HOLDER)
+def test_held_lock_by_processor_names_each_holder_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                                       caplog: pytest.LogCaptureFixture) -> None:
+    db = FakeDatabase(lock_free=False, installed=OLD, holder=PROCESSOR_HOLDER + " .")
 
     status, ran = run_wrapper(monkeypatch, tmp_path, db, versioned(NEW))
 
     assert (status, ran) == (1, False)
-    [error] = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
-    assert f"To upgrade: stop the lock's holder(s) ({PROCESSOR_HOLDER}), rerun the install" in error
+    error = error_line(caplog)
+    assert "is held by balance_tracker_block_processing (pid=7253, 833, 840). " in error
+    assert "To upgrade: stop the lock's holder(s) (balance_tracker_block_processing), rerun the install" in error
+    assert error.count("balance_tracker_block_processing") == 2
     assert "-postgrest" not in error
+
+
+def test_held_lock_by_several_apps_groups_pids_by_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                                      caplog: pytest.LogCaptureFixture) -> None:
+    holder = ("NOTICE:  Skipping install: lock on balance_tracker held by balance_tracker_block_processing "
+              "(pid=7253), balance_tracker-postgrest (pid=4242), balance_tracker_block_processing (pid=833)")
+    db = FakeDatabase(lock_free=False, installed=OLD, holder=holder)
+
+    status, ran = run_wrapper(monkeypatch, tmp_path, db, versioned(NEW))
+
+    assert (status, ran) == (1, False)
+    error = error_line(caplog)
+    assert ("is held by balance_tracker_block_processing (pid=7253, 833); "
+            "balance_tracker-postgrest (pid=4242). ") in error
+    assert ("stop the lock's holder(s) (balance_tracker_block_processing; balance_tracker-postgrest), "
+            "rerun the install") in error
+
+
+def test_held_lock_by_unparsed_holder_uses_notice_text(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                                       caplog: pytest.LogCaptureFixture) -> None:
+    db = FakeDatabase(lock_free=False, installed=OLD, holder="NOTICE:  install lock busy")
+
+    status, ran = run_wrapper(monkeypatch, tmp_path, db, versioned(NEW))
+
+    assert (status, ran) == (1, False)
+    error = error_line(caplog)
+    assert "the install lock is held by install lock busy. " in error
+    assert "stop the lock's holder(s) (install lock busy), rerun the install" in error
 
 
 def test_held_lock_without_holder_names_no_service(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,

@@ -34,6 +34,7 @@ Tries to acquire the EXCLUSIVE advisory install lock for APP_NAME using DSN
 """
 import logging
 import os
+import re
 import subprocess
 import sys
 
@@ -51,6 +52,8 @@ _OPTIONS = {
 }
 _USAGE = "usage: %s [--version=VERSION] [--version-query=SQL] APP_NAME DSN CMD [ARG ...]"
 _EXIT_UPGRADE_BLOCKED = 1
+_SEVERITY_PREFIX = re.compile(r"^[A-Z]+:\s+")
+_HOLDER_ENTRY = re.compile(r"\s*([^,()]+?)\s*\(pid=(\d+)\)")
 
 
 class _NotInstalled(Exception):
@@ -70,6 +73,27 @@ def forward_notices(conn: "psycopg2.extensions.connection") -> list[str]:
             log.info("%s", notice)
             forwarded.append(notice)
     return forwarded
+
+
+def _describe_holders(notices: list[str]) -> tuple[str, str]:
+    """Return (holders with their pids, holders to stop) as named by the lock function's NOTICEs.
+
+    A NOTICE in the form "... held by NAME (pid=N), NAME (pid=M), ..." yields each NAME once with
+    all of its pids; any other NOTICE is used whole, without its severity prefix. Both are empty
+    when there is no NOTICE.
+    """
+    pids: dict[str, list[str]] = {}
+    other: list[str] = []
+    for notice in notices:
+        text = _SEVERITY_PREFIX.sub("", notice.strip())
+        _, held_by, holders = text.partition("held by ")
+        entries = _HOLDER_ENTRY.findall(holders) if held_by else []
+        if not entries:
+            other.append(holders.strip().rstrip(" .") if held_by else text)
+        for name, pid in entries:
+            pids.setdefault(name, []).append(pid)
+    named = [f"{name} (pid={', '.join(name_pids)})" for name, name_pids in pids.items()]
+    return "; ".join(named + other), "; ".join(list(pids) + other)
 
 
 def _parse_args(argv: list[str]) -> tuple[dict[str, str | None], str, str, list[str]] | None:
@@ -128,15 +152,16 @@ def _skip_or_fail(conn: "psycopg2.extensions.connection", app_name: str, setting
                      "by an active block-processor.", app_name, version)
             return 0
 
-    if holder:
-        to_stop = f"the lock's holder(s) ({'; '.join(holder)})"
+    held_by, holders_to_stop = _describe_holders(holder)
+    if holders_to_stop:
+        to_stop = f"the lock's holder(s) ({holders_to_stop})"
     else:
         to_stop = f"every service that holds the {app_name} lock"
     log.error(
         "Cannot install %s version %s: the installed version is %s, and the install lock is held by "
         "%s. Skipping would leave the old version serving under the new image. To upgrade: stop "
         "%s, rerun the install, then start them again.",
-        app_name, version, installed, "; ".join(holder) or "another session (no holder reported)",
+        app_name, version, installed, held_by or "another session (no holder reported)",
         to_stop,
     )
     return _EXIT_UPGRADE_BLOCKED
